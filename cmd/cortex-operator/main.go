@@ -20,9 +20,10 @@ import (
 
 func main() {
 	// CLI flags.
-	kubeApiURL := flag.String("kubernetes-api-url", "", "The Kubernetes server API url. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	kubeConfigFile := flag.String("kubernetes-config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	kubeNamespace := flag.String("kubernetes-namespace", "", "The Kubernetes namespace for which this operator is running.")
+	kubeApiURL := flag.String("kubernetes.api-url", "", "The Kubernetes server API url. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
+	kubeConfigFile := flag.String("kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
+	kubeNamespace := flag.String("kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
+	logLevel := flag.String("log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
 	flag.Parse()
 
 	// Validate CLI flags.
@@ -35,7 +36,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := log.NewLogfmtLogger(os.Stdout)
+	logger, err := initLogger(*logLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error())
+		os.Exit(1)
+	}
 
 	if err := runOperator(*kubeApiURL, *kubeConfigFile, *kubeNamespace, logger); err != nil {
 		level.Error(logger).Log("msg", err.Error())
@@ -77,4 +82,27 @@ func buildKubeConfig(apiURL, cfgFile string) (*rest.Config, error) {
 	}
 
 	return rest.InClusterConfig()
+}
+
+func initLogger(minLevel string) (log.Logger, error) {
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	var options []level.Option
+
+	switch minLevel {
+	case "debug":
+		options = append(options, level.AllowDebug())
+	case "info":
+		options = append(options, level.AllowInfo())
+	case "warn":
+		options = append(options, level.AllowWarn())
+	case "error":
+		options = append(options, level.AllowError())
+	default:
+		return nil, fmt.Errorf("unknown log level: %s", minLevel)
+	}
+
+	logger = level.NewFilter(logger, options...)
+	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
+
+	return logger, nil
 }
