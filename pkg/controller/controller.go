@@ -164,7 +164,7 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 
 	// Ensure there are not 2+ StatefulSets with not-Ready pods. If there are, we shouldn't proceed
 	// rolling out pods and we should wait until these pods are Ready. Reason is that if there are
-	// unavailable ingesters in multiple StatefulSets this could lead to an outage, so we want pods to
+	// unavailable pods in multiple StatefulSets this could lead to an outage, so we want pods to
 	// get back to Ready first before proceeding.
 	if len(notReadySets) > 1 {
 		return fmt.Errorf("%d StatefulSets have some not-Ready pods, skipping reconcile", len(notReadySets))
@@ -313,13 +313,13 @@ func (c *RolloutController) podsToUpdate(sts *v1.StatefulSet) ([]*corev1.Pod, er
 		updateRev = sts.Status.UpdateRevision
 	)
 
+	// Do NOT introduce a short circuit if "currRev == updateRev". Reason is that if a change
+	// is rolled back in the StatefulSet to the previous version, the updateRev == currRev but
+	// its pods may still run the previous updateRev. We need to check pods to be 100% sure.
 	if currRev == "" {
 		return nil, errors.New("currentRevision is empty")
 	} else if updateRev == "" {
 		return nil, errors.New("updateRevision is empty")
-	} else if currRev == updateRev {
-		// No pods to update because current and update revision are the same
-		return nil, nil
 	}
 
 	// Get any pods whose revision doesn't match the StatefulSet's updateRevision
