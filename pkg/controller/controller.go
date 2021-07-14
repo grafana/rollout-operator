@@ -93,11 +93,11 @@ func (c *RolloutController) Init() error {
 	go c.informerFactory.Start(c.stopCh)
 
 	// Wait until all informers caches have been synched.
-	level.Info(c.logger).Log("msg", "informer cache is synching")
+	level.Info(c.logger).Log("msg", "informers cache is synching")
 	if ok := cache.WaitForCacheSync(c.stopCh, c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced); !ok {
-		return errors.New("informer cache has successfully synced")
+		return errors.New("informers cache failed to sync")
 	}
-	level.Info(c.logger).Log("msg", "informer caches has synced")
+	level.Info(c.logger).Log("msg", "informers cache has synced")
 
 	return nil
 }
@@ -141,10 +141,9 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 
 	// Find all StatefulSets with the rollout group label. These are the StatefulSets managed
 	// by this operator.
-	sel := labels.NewSelector()
-	sel = sel.Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil))
+	sel := labels.NewSelector().Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil))
 
-	sets, err := c.listStatefulSets(c.namespace, sel)
+	sets, err := c.listStatefulSets(sel)
 	if err != nil {
 		return err
 	}
@@ -153,7 +152,7 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	groups := groupStatefulSetsByLabel(sets, RolloutGroupLabel)
 	var reconcileErrs error
 	for _, groupSets := range groups {
-		if err := c.reconcileStatefulSet(ctx, groupSets); err != nil {
+		if err := c.reconcileStatefulSetsGroup(ctx, groupSets); err != nil {
 			reconcileErrs = multierror.Append(reconcileErrs, err)
 		}
 	}
@@ -166,7 +165,7 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	return nil
 }
 
-func (c *RolloutController) reconcileStatefulSet(ctx context.Context, sets []*v1.StatefulSet) error {
+func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, sets []*v1.StatefulSet) error {
 	// Sort StatefulSets to provide a deterministic behaviour.
 	sortStatefulSets(sets)
 
@@ -217,10 +216,10 @@ func (c *RolloutController) reconcileStatefulSet(ctx context.Context, sets []*v1
 	return nil
 }
 
-func (c *RolloutController) listStatefulSets(namespace string, sel labels.Selector) ([]*v1.StatefulSet, error) {
-	sets, err := c.statefulSetLister.StatefulSets(namespace).List(sel)
+func (c *RolloutController) listStatefulSets(sel labels.Selector) ([]*v1.StatefulSet, error) {
+	sets, err := c.statefulSetLister.StatefulSets(c.namespace).List(sel)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to list StatefulSet")
+		return nil, errors.Wrap(err, "failed to list StatefulSets")
 	} else if len(sets) == 0 {
 		return nil, nil
 	}
@@ -235,10 +234,10 @@ func (c *RolloutController) listStatefulSets(namespace string, sel labels.Select
 	return deepCopy, nil
 }
 
-func (c *RolloutController) listPods(namespace string, sel labels.Selector) ([]*corev1.Pod, error) {
-	pods, err := c.podLister.Pods(namespace).List(sel)
+func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error) {
+	pods, err := c.podLister.Pods(c.namespace).List(sel)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to list Pod")
+		return nil, errors.Wrap(err, "failed to list Pods")
 	} else if len(pods) == 0 {
 		return nil, nil
 	}
@@ -267,8 +266,8 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 		// Compute the number of pods we should update, honoring the configured maxUnavailable.
 		numPods := max(0, min(
-			maxUnavailable-numNotReady, // No more than the configured maxUnavailable (including any not-Ready pod).
-			len(podsToUpdate),          // No more than the total number of pods that needs to be updated.
+			maxUnavailable-numNotReady, // No more than the configured maxUnavailable (including not-Ready pods).
+			len(podsToUpdate),          // No more than the total number of pods that need to be updated.
 		))
 
 		if numPods == 0 {
@@ -317,13 +316,14 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 	// When the StatefulSet update strategy is RollingUpdate this is done automatically by the controller,
 	// when when it's OnDelete (our case) then it's our responsibility to update it once done.
 	if sts.Status.CurrentRevision != sts.Status.UpdateRevision {
+		oldRev := sts.Status.CurrentRevision
 		sts.Status.CurrentRevision = sts.Status.UpdateRevision
 
-		level.Debug(c.logger).Log("msg", "updating StatefulSet current revision", "old_current_revision", sts.Status.CurrentRevision, "new_current_revision", sts.Status.UpdateRevision)
+		level.Debug(c.logger).Log("msg", "updating StatefulSet current revision", "old_current_revision", oldRev, "new_current_revision", sts.Status.UpdateRevision)
 		if sts, err = c.kubeClient.AppsV1().StatefulSets(sts.Namespace).UpdateStatus(ctx, sts, metav1.UpdateOptions{}); err != nil {
 			return false, errors.Wrapf(err, "failed to update StatefulSet %s", sts.Name)
 		}
-		level.Info(c.logger).Log("msg", "updated StatefulSet current revision", "old_current_revision", sts.Status.CurrentRevision, "new_current_revision", sts.Status.UpdateRevision)
+		level.Info(c.logger).Log("msg", "updated StatefulSet current revision", "old_current_revision", oldRev, "new_current_revision", sts.Status.UpdateRevision)
 	}
 
 	return false, nil
@@ -351,7 +351,7 @@ func (c *RolloutController) podsToUpdate(sts *v1.StatefulSet) ([]*corev1.Pod, er
 		mustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
 
-	pods, err := c.listPods(sts.Namespace, podsSelector)
+	pods, err := c.listPods(podsSelector)
 	if err != nil {
 		return nil, err
 	}

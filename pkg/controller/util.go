@@ -40,7 +40,7 @@ func moveStatefulSetToFront(sets []*v1.StatefulSet, toMove *v1.StatefulSet) []*v
 	return out
 }
 
-// groupStatefulSetsByLabel returns a map containing the input StatefulSets groups by
+// groupStatefulSetsByLabel returns a map containing the input StatefulSets grouped by
 // the input label's value.
 func groupStatefulSetsByLabel(sets []*v1.StatefulSet, label string) map[string][]*v1.StatefulSet {
 	groups := make(map[string][]*v1.StatefulSet)

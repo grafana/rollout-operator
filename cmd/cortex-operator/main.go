@@ -20,7 +20,7 @@ import (
 
 func main() {
 	// CLI flags.
-	kubeApiURL := flag.String("kubernetes.api-url", "", "The Kubernetes server API url. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
+	kubeAPIURL := flag.String("kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	kubeConfigFile := flag.String("kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	kubeNamespace := flag.String("kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	logLevel := flag.String("log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
@@ -31,7 +31,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "The Kubernetes namespace has not been specified.\n")
 		os.Exit(1)
 	}
-	if (*kubeApiURL == "") != (*kubeConfigFile == "") {
+	if (*kubeAPIURL == "") != (*kubeConfigFile == "") {
 		fmt.Fprintf(os.Stderr, "Either configure both Kubernetes API URL and config file or none of them.\n")
 		os.Exit(1)
 	}
@@ -42,19 +42,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := runOperator(*kubeApiURL, *kubeConfigFile, *kubeNamespace, logger); err != nil {
+	if err := runOperator(*kubeAPIURL, *kubeConfigFile, *kubeNamespace, logger); err != nil {
 		level.Error(logger).Log("msg", err.Error())
 		os.Exit(1)
 	}
 }
 
-func runOperator(kubeApiURL, kubeConfigFile, kubeNamespace string, logger log.Logger) error {
-	cfg, err := buildKubeConfig(kubeApiURL, kubeConfigFile)
+func runOperator(kubeAPIURL, kubeConfigFile, kubeNamespace string, logger log.Logger) error {
+	cfg, err := buildKubeConfig(kubeAPIURL, kubeConfigFile)
 	if err != nil {
 		return errors.Wrap(err, "failed to build Kubernetes config")
 	}
 
-	kubeClient, err := buildKubeClient(cfg)
+	kubeClient, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return errors.Wrap(err, "failed to build Kubernetes client")
 	}
@@ -66,10 +66,6 @@ func runOperator(kubeApiURL, kubeConfigFile, kubeNamespace string, logger log.Lo
 	c.Run()
 
 	return nil
-}
-
-func buildKubeClient(cfg *rest.Config) (*kubernetes.Clientset, error) {
-	return kubernetes.NewForConfig(cfg)
 }
 
 func buildKubeConfig(apiURL, cfgFile string) (*rest.Config, error) {

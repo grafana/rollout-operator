@@ -19,7 +19,6 @@ const (
 func getMaxUnavailableForStatefulSet(sts *v1.StatefulSet, logger log.Logger) int {
 	annotations := sts.GetAnnotations()
 	rawValue, ok := annotations[RolloutMaxUnavailableAnnotation]
-
 	if !ok {
 		// No parallel rollout by default.
 		return 1
