@@ -64,6 +64,32 @@ func TestMoveStatefulSetToFront(t *testing.T) {
 	assert.Equal(t, expected, actual)
 }
 
+func TestGroupStatefulSetsByLabel(t *testing.T) {
+	input := []*v1.StatefulSet{
+		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{RolloutGroupLabel: "ingester"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{RolloutGroupLabel: "ingester"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{RolloutGroupLabel: "compactor"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{RolloutGroupLabel: "compactor"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "store-gateway"}},
+	}
+
+	expected := map[string][]*v1.StatefulSet{
+		"ingester": {
+			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{RolloutGroupLabel: "ingester"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{RolloutGroupLabel: "ingester"}}},
+		},
+		"compactor": {
+			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{RolloutGroupLabel: "compactor"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{RolloutGroupLabel: "compactor"}}},
+		},
+		"": {
+			{ObjectMeta: metav1.ObjectMeta{Name: "store-gateway"}},
+		},
+	}
+
+	assert.Equal(t, expected, groupStatefulSetsByLabel(input, RolloutGroupLabel))
+}
+
 func TestMax(t *testing.T) {
 	assert.Equal(t, 1, max(1))
 	assert.Equal(t, 3, max(0, 3, 2))

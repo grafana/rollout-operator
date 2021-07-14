@@ -40,6 +40,19 @@ func moveStatefulSetToFront(sets []*v1.StatefulSet, toMove *v1.StatefulSet) []*v
 	return out
 }
 
+// groupStatefulSetsByLabel returns a map containing the input StatefulSets groups by
+// the input label's value.
+func groupStatefulSetsByLabel(sets []*v1.StatefulSet, label string) map[string][]*v1.StatefulSet {
+	groups := make(map[string][]*v1.StatefulSet)
+
+	for _, sts := range sets {
+		value := sts.GetLabels()[label]
+		groups[value] = append(groups[value], sts)
+	}
+
+	return groups
+}
+
 // mustNewLabelsRequirement wraps labels.NewRequirement() and panics on error.
 // This utility function can be safely used whenever the input is deterministic
 // (eg. based on hard-coded config).

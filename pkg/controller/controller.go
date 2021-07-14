@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/apps/v1"
@@ -138,11 +139,34 @@ func (c *RolloutController) enqueueReconcile() {
 func (c *RolloutController) reconcile(ctx context.Context) error {
 	level.Info(c.logger).Log("msg", "reconcile started")
 
-	sets, err := c.listStatefulSets(c.namespace, labels.Set{RolloutGroupLabel: "ingester"})
+	// Find all StatefulSets with the rollout group label. These are the StatefulSets managed
+	// by this operator.
+	sel := labels.NewSelector()
+	sel = sel.Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil))
+
+	sets, err := c.listStatefulSets(c.namespace, sel)
 	if err != nil {
 		return err
 	}
 
+	// Group statefulsets by the rollout group label. Each group will be reconciled independently.
+	groups := groupStatefulSetsByLabel(sets, RolloutGroupLabel)
+	var reconcileErrs error
+	for _, groupSets := range groups {
+		if err := c.reconcileStatefulSet(ctx, groupSets); err != nil {
+			reconcileErrs = multierror.Append(reconcileErrs, err)
+		}
+	}
+
+	if reconcileErrs != nil {
+		return reconcileErrs
+	}
+
+	level.Info(c.logger).Log("msg", "reconcile done")
+	return nil
+}
+
+func (c *RolloutController) reconcileStatefulSet(ctx context.Context, sets []*v1.StatefulSet) error {
 	// Sort StatefulSets to provide a deterministic behaviour.
 	sortStatefulSets(sets)
 
@@ -190,13 +214,11 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 		}
 	}
 
-	// If we reach this point it means there's no more work to do. We can make it clear in logs.
-	level.Info(c.logger).Log("msg", "reconcile completed, no more work to do")
 	return nil
 }
 
-func (c *RolloutController) listStatefulSets(namespace string, lbls labels.Set) ([]*v1.StatefulSet, error) {
-	sets, err := c.statefulSetLister.StatefulSets(namespace).List(lbls.AsSelector())
+func (c *RolloutController) listStatefulSets(namespace string, sel labels.Selector) ([]*v1.StatefulSet, error) {
+	sets, err := c.statefulSetLister.StatefulSets(namespace).List(sel)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list StatefulSet")
 	} else if len(sets) == 0 {
