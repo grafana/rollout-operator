@@ -240,7 +240,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 		if numPods == 0 {
 			level.Info(c.logger).Log(
-				"msg", "statefulset has some pods to be updated but maxUnavailable pods has been reached",
+				"msg", "StatefulSet has some pods to be updated but maxUnavailable pods has been reached",
 				"statefulset", sts.Name,
 				"pods_to_update", len(podsToUpdate),
 				"replicas", sts.Status.Replicas,
