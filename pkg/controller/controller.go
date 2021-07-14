@@ -24,8 +24,7 @@ import (
 const (
 	// How frequently informers should resync. This is also the frequency at which
 	// the operator reconciles even if no changes are made to the watched resources.
-	// TODO increase it (but such low value is useful while testing)
-	informerSyncInterval = 10 * time.Second
+	informerSyncInterval = 5 * time.Minute
 )
 
 type RolloutController struct {
@@ -62,7 +61,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, log
 		stopCh:               make(chan struct{}),
 	}
 
-	// We enqueue a reconcile each time any of the observed StatefulSets change. The UpdateFunc
+	// We enqueue a reconcile request each time any of the observed StatefulSets change. The UpdateFunc
 	// is also called every sync period even if no changed occurred.
 	c.statefulSetsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -72,6 +71,14 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, log
 			c.enqueueReconcile()
 		},
 		DeleteFunc: func(obj interface{}) {
+			c.enqueueReconcile()
+		},
+	})
+
+	// We enqueue a reconcile request each time any of the observed Pods are updated. Reason is that we may
+	// need to proceed with the rollout whenever the state of Pods change (eg. they become Ready).
+	c.podsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
 			c.enqueueReconcile()
 		},
 	})
@@ -101,7 +108,7 @@ func (c *RolloutController) Run() {
 	for {
 		if c.shouldReconcile.CAS(true, false) {
 			if err := c.reconcile(ctx); err != nil {
-				level.Warn(c.logger).Log("msg", "an error while reconciling", "err", err)
+				level.Warn(c.logger).Log("msg", "reconcile failed", "err", err)
 
 				// We should try to reconcile again.
 				c.shouldReconcile.Store(true)
@@ -129,6 +136,8 @@ func (c *RolloutController) enqueueReconcile() {
 }
 
 func (c *RolloutController) reconcile(ctx context.Context) error {
+	level.Info(c.logger).Log("msg", "reconcile started")
+
 	sets, err := c.listStatefulSets(c.namespace, labels.Set{RolloutGroupLabel: "ingester"})
 	if err != nil {
 		return err
@@ -177,10 +186,12 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 		if ongoing {
 			// Do not continue with other StatefulSets because this StatefulSet
 			// update is still ongoing.
-			break
+			return nil
 		}
 	}
 
+	// If we reach this point it means there's no more work to do. We can make it clear in logs.
+	level.Info(c.logger).Log("msg", "reconcile completed, no more work to do")
 	return nil
 }
 
