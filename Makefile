@@ -21,3 +21,6 @@ publish-image: build-image
 
 test:
 	go test ./...
+
+lint:
+	golangci-lint run
