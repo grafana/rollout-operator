@@ -9,6 +9,8 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -43,9 +45,15 @@ type RolloutController struct {
 
 	// Used to signal when the controller should stop.
 	stopCh chan struct{}
+
+	// Metrics.
+	groupReconcileTotal       *prometheus.CounterVec
+	groupReconcileFailed      *prometheus.CounterVec
+	groupReconcileDuration    *prometheus.HistogramVec
+	groupReconcileLastSuccess *prometheus.GaugeVec
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, namespace string, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, informers.WithNamespace(namespace))
 	statefulSetsInformer := informerFactory.Apps().V1().StatefulSets()
 	podsInformer := informerFactory.Core().V1().Pods()
@@ -60,6 +68,23 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, log
 		podsInformer:         podsInformer.Informer(),
 		logger:               logger,
 		stopCh:               make(chan struct{}),
+		groupReconcileTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "rollout_operator_group_reconciles_total",
+			Help: "Total number of reconciles started for a specific rollout group.",
+		}, []string{"rollout_group"}),
+		groupReconcileFailed: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "rollout_operator_group_reconciles_failed_total",
+			Help: "Total number of reconciles failed for a specific rollout group.",
+		}, []string{"rollout_group"}),
+		groupReconcileDuration: promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "rollout_operator_group_reconcile_duration_seconds",
+			Help:    "Total time spent running a reconcile for a specific rollout group.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"rollout_group"}),
+		groupReconcileLastSuccess: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
+			Name: "rollout_operator_last_successful_group_reconcile_timestamp_seconds",
+			Help: "Timestamp of the last successful reconcile for a specific rollout group.",
+		}, []string{"rollout_group"}),
 	}
 
 	// We enqueue a reconcile request each time any of the observed StatefulSets change. The UpdateFunc
@@ -151,8 +176,8 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	// Group statefulsets by the rollout group label. Each group will be reconciled independently.
 	groups := groupStatefulSetsByLabel(sets, RolloutGroupLabel)
 	var reconcileErrs error
-	for _, groupSets := range groups {
-		if err := c.reconcileStatefulSetsGroup(ctx, groupSets); err != nil {
+	for groupName, groupSets := range groups {
+		if err := c.reconcileStatefulSetsGroup(ctx, groupName, groupSets); err != nil {
 			reconcileErrs = multierror.Append(reconcileErrs, err)
 		}
 	}
@@ -165,7 +190,23 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	return nil
 }
 
-func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, sets []*v1.StatefulSet) error {
+func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, groupName string, sets []*v1.StatefulSet) (returnErr error) {
+	// Track metrics about the reconcile operation. We always get the failed counter and
+	// last successful gauge so that they get created the first time with the default zero
+	// value the first time.
+	c.groupReconcileTotal.WithLabelValues(groupName).Inc()
+	durationTimer := prometheus.NewTimer(c.groupReconcileDuration.WithLabelValues(groupName))
+	failed := c.groupReconcileFailed.WithLabelValues(groupName)
+	lastSuccess := c.groupReconcileLastSuccess.WithLabelValues(groupName)
+	defer func() {
+		durationTimer.ObserveDuration()
+		if returnErr != nil {
+			failed.Inc()
+		} else {
+			lastSuccess.SetToCurrentTime()
+		}
+	}()
+
 	// Sort StatefulSets to provide a deterministic behaviour.
 	sortStatefulSets(sets)
 

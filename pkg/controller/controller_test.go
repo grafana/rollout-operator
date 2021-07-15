@@ -2,11 +2,15 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-kit/kit/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/apps/v1"
@@ -209,7 +213,8 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			})
 
 			// Create the controller and start informers.
-			c := NewRolloutController(kubeClient, testNamespace, log.NewNopLogger())
+			reg := prometheus.NewPedanticRegistry()
+			c := NewRolloutController(kubeClient, testNamespace, reg, log.NewNopLogger())
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -232,6 +237,24 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				assert.Equal(t, testLastRevisionHash, sts.Status.CurrentRevision)
 				assert.Equal(t, testLastRevisionHash, sts.Status.UpdateRevision)
 			}
+
+			// Assert on metrics.
+			expectedFailures := 0
+			if testData.expectedErr != "" {
+				expectedFailures = 1
+			}
+
+			assert.NoError(t, testutil.GatherAndCompare(reg, strings.NewReader(fmt.Sprintf(`
+				# HELP rollout_operator_group_reconciles_total Total number of reconciles started for a specific rollout group.
+				# TYPE rollout_operator_group_reconciles_total counter
+				rollout_operator_group_reconciles_total{rollout_group="ingester"} 1
+
+				# HELP rollout_operator_group_reconciles_failed_total Total number of reconciles failed for a specific rollout group.
+				# TYPE rollout_operator_group_reconciles_failed_total counter
+				rollout_operator_group_reconciles_failed_total{rollout_group="ingester"} %d
+			`, expectedFailures)),
+				"rollout_operator_group_reconciles_total",
+				"rollout_operator_group_reconciles_failed_total"))
 		})
 	}
 }

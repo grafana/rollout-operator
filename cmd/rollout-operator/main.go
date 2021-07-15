@@ -8,11 +8,13 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/grafana/rollout-operator/pkg/controller"
+	"github.com/grafana/rollout-operator/pkg/util"
 
 	// Required to get the GCP auth provider working.
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -20,6 +22,7 @@ import (
 
 func main() {
 	// CLI flags.
+	instrumentationPort := flag.Int("instrumentation.server.port", 8001, "Port to use for hosting instrumentation endpoints.")
 	kubeAPIURL := flag.String("kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	kubeConfigFile := flag.String("kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	kubeNamespace := flag.String("kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
@@ -28,27 +31,29 @@ func main() {
 
 	// Validate CLI flags.
 	if *kubeNamespace == "" {
-		fmt.Fprintf(os.Stderr, "The Kubernetes namespace has not been specified.\n")
-		os.Exit(1)
+		fatal(errors.New("The Kubernetes namespace has not been specified."))
 	}
 	if (*kubeAPIURL == "") != (*kubeConfigFile == "") {
-		fmt.Fprintf(os.Stderr, "Either configure both Kubernetes API URL and config file or none of them.\n")
-		os.Exit(1)
+		fatal(errors.New("Either configure both Kubernetes API URL and config file or none of them."))
 	}
 
 	logger, err := initLogger(*logLevel)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
-		os.Exit(1)
+		fatal(err)
 	}
 
-	if err := runOperator(*kubeAPIURL, *kubeConfigFile, *kubeNamespace, logger); err != nil {
-		level.Error(logger).Log("msg", err.Error())
-		os.Exit(1)
+	reg := prometheus.NewRegistry()
+	instr := util.NewInstrumentationServer(*instrumentationPort, reg, logger)
+	if err := instr.Start(); err != nil {
+		fatal(err)
+	}
+
+	if err := runOperator(*kubeAPIURL, *kubeConfigFile, *kubeNamespace, reg, logger); err != nil {
+		fatal(err)
 	}
 }
 
-func runOperator(kubeAPIURL, kubeConfigFile, kubeNamespace string, logger log.Logger) error {
+func runOperator(kubeAPIURL, kubeConfigFile, kubeNamespace string, reg prometheus.Registerer, logger log.Logger) error {
 	cfg, err := buildKubeConfig(kubeAPIURL, kubeConfigFile)
 	if err != nil {
 		return errors.Wrap(err, "failed to build Kubernetes config")
@@ -59,7 +64,7 @@ func runOperator(kubeAPIURL, kubeConfigFile, kubeNamespace string, logger log.Lo
 		return errors.Wrap(err, "failed to build Kubernetes client")
 	}
 
-	c := controller.NewRolloutController(kubeClient, kubeNamespace, logger)
+	c := controller.NewRolloutController(kubeClient, kubeNamespace, reg, logger)
 	if err := c.Init(); err != nil {
 		return errors.Wrap(err, "error while initialising the controller")
 	}
@@ -101,4 +106,9 @@ func initLogger(minLevel string) (log.Logger, error) {
 	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
 
 	return logger, nil
+}
+
+func fatal(err error) {
+	fmt.Fprintf(os.Stderr, fmt.Sprintf("%s\n", err.Error()))
+	os.Exit(1)
 }
