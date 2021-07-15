@@ -290,7 +290,7 @@ func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error)
 func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.StatefulSet) (bool, error) {
 	level.Debug(c.logger).Log("msg", "reconciling StatefulSet", "statefulset", sts.Name)
 
-	podsToUpdate, err := c.podsToUpdate(sts)
+	podsToUpdate, err := c.podsNotMatchingUpdateRevision(sts)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get pods to update")
 	}
@@ -364,7 +364,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 	return false, nil
 }
 
-func (c *RolloutController) podsToUpdate(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
+func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
 	var (
 		currRev   = sts.Status.CurrentRevision
 		updateRev = sts.Status.UpdateRevision
