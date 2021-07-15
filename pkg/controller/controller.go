@@ -269,22 +269,15 @@ func (c *RolloutController) listStatefulSets(sel labels.Selector) ([]*v1.Statefu
 	return deepCopy, nil
 }
 
+// listPods returns pods matching the provided labels selector. Please remember to call
+// DeepCopy() on the returned pods before doing any change.
 func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error) {
 	pods, err := c.podLister.Pods(c.namespace).List(sel)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list Pods")
-	} else if len(pods) == 0 {
-		return nil, nil
 	}
 
-	// In case we modify the Pod we need to make a deep copy first otherwise it
-	// will conflict with the cache. To keep code easier (and safer), we always make a copy.
-	deepCopy := make([]*corev1.Pod, 0, len(pods))
-	for _, pod := range pods {
-		deepCopy = append(deepCopy, pod.DeepCopy())
-	}
-
-	return deepCopy, nil
+	return pods, nil
 }
 
 func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.StatefulSet) (bool, error) {
