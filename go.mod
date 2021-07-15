@@ -1,4 +1,4 @@
-module github.com/grafana/cortex-operator
+module github.com/grafana/rollout-operator
 
 go 1.16
 
