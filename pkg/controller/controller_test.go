@@ -179,6 +179,25 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
 			},
 		},
+		"should ignore any StatefulSet without the rollout group label": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("compactor", func(sts *v1.StatefulSet) {
+					delete(sts.Labels, RolloutGroupLabel)
+				}),
+				mockStatefulSet("ingester-zone-a"),
+				mockStatefulSet("ingester-zone-b"),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("compactor-0", testPrevRevisionHash),
+				mockStatefulSetPod("compactor-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testLastRevisionHash),
+			},
+		},
 	}
 
 	for testName, testData := range tests {

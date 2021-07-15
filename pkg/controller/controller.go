@@ -33,9 +33,10 @@ const (
 type RolloutController struct {
 	kubeClient           kubernetes.Interface
 	namespace            string
-	informerFactory      informers.SharedInformerFactory
+	statefulSetsFactory  informers.SharedInformerFactory
 	statefulSetLister    listersv1.StatefulSetLister
 	statefulSetsInformer cache.SharedIndexInformer
+	podsFactory          informers.SharedInformerFactory
 	podLister            corelisters.PodLister
 	podsInformer         cache.SharedIndexInformer
 	logger               log.Logger
@@ -54,16 +55,27 @@ type RolloutController struct {
 }
 
 func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg prometheus.Registerer, logger log.Logger) *RolloutController {
-	informerFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, informers.WithNamespace(namespace))
-	statefulSetsInformer := informerFactory.Apps().V1().StatefulSets()
-	podsInformer := informerFactory.Core().V1().Pods()
+	namespaceOpt := informers.WithNamespace(namespace)
+
+	// Initialise the StatefulSet informer to restrict the returned StatefulSets only to the ones
+	// having the rollout group label. Only these StatefulSets are managed by this operator.
+	statefulSetsSel := labels.NewSelector().Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil)).String()
+	statefulSetsSelOpt := informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+		options.LabelSelector = statefulSetsSel
+	})
+
+	statefulSetsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt, statefulSetsSelOpt)
+	statefulSetsInformer := statefulSetsFactory.Apps().V1().StatefulSets()
+	podsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt)
+	podsInformer := podsFactory.Core().V1().Pods()
 
 	c := &RolloutController{
 		kubeClient:           kubeClient,
 		namespace:            namespace,
-		informerFactory:      informerFactory,
+		statefulSetsFactory:  statefulSetsFactory,
 		statefulSetLister:    statefulSetsInformer.Lister(),
 		statefulSetsInformer: statefulSetsInformer.Informer(),
+		podsFactory:          podsFactory,
 		podLister:            podsInformer.Lister(),
 		podsInformer:         podsInformer.Informer(),
 		logger:               logger,
@@ -112,7 +124,8 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg
 // Init the controller.
 func (c *RolloutController) Init() error {
 	// Start informers.
-	go c.informerFactory.Start(c.stopCh)
+	go c.statefulSetsFactory.Start(c.stopCh)
+	go c.podsFactory.Start(c.stopCh)
 
 	// Wait until all informers caches have been synched.
 	level.Info(c.logger).Log("msg", "informers cache is synching")
@@ -161,11 +174,7 @@ func (c *RolloutController) enqueueReconcile() {
 func (c *RolloutController) reconcile(ctx context.Context) error {
 	level.Info(c.logger).Log("msg", "reconcile started")
 
-	// Find all StatefulSets with the rollout group label. These are the StatefulSets managed
-	// by this operator.
-	sel := labels.NewSelector().Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil))
-
-	sets, err := c.listStatefulSets(sel)
+	sets, err := c.listStatefulSetsWithRolloutGroup()
 	if err != nil {
 		return err
 	}
@@ -254,8 +263,10 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	return nil
 }
 
-func (c *RolloutController) listStatefulSets(sel labels.Selector) ([]*v1.StatefulSet, error) {
-	sets, err := c.statefulSetLister.StatefulSets(c.namespace).List(sel)
+func (c *RolloutController) listStatefulSetsWithRolloutGroup() ([]*v1.StatefulSet, error) {
+	// List "all" StatefulSets matching the label matcher configured in the informer (so only
+	// the StatefulSets having a rollout group label).
+	sets, err := c.statefulSetLister.StatefulSets(c.namespace).List(labels.Everything())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list StatefulSets")
 	} else if len(sets) == 0 {
