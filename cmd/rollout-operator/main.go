@@ -72,7 +72,7 @@ func main() {
 		fatal(errors.Wrap(err, "failed to build Kubernetes client"))
 	}
 
-	// Init and controller.
+	// Init the controller.
 	c := controller.NewRolloutController(kubeClient, *kubeNamespace, reg, logger)
 	if err := c.Init(); err != nil {
 		fatal(errors.Wrap(err, "error while initialising the controller"))
