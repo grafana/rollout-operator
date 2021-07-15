@@ -47,7 +47,7 @@ func main() {
 	ready := atomic.NewBool(false)
 
 	// Expose HTTP endpoints.
-	srv := NewServer(*serverPort, logger)
+	srv := newServer(*serverPort, logger)
 	srv.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	srv.Handle("/ready", http.HandlerFunc(func(res http.ResponseWriter, _ *http.Request) {
 		if ready.Load() {

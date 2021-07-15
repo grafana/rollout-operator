@@ -10,18 +10,17 @@ import (
 	"github.com/go-kit/kit/log/level"
 )
 
-type Server struct {
+type server struct {
 	srv    *http.Server
 	mux    *http.ServeMux
 	port   int
 	logger log.Logger
 }
 
-// NewServer returns an instrumentation server
-func NewServer(port int, logger log.Logger) *Server {
+func newServer(port int, logger log.Logger) *server {
 	mux := http.NewServeMux()
 
-	return &Server{
+	return &server{
 		port: port,
 		mux:  mux,
 		srv: &http.Server{
@@ -34,7 +33,7 @@ func NewServer(port int, logger log.Logger) *Server {
 	}
 }
 
-func (s *Server) Start() error {
+func (s *server) Start() error {
 	// Setup listeners first, so we can fail early if the port is in use.
 	httpListener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
@@ -50,6 +49,6 @@ func (s *Server) Start() error {
 	return nil
 }
 
-func (s *Server) Handle(pattern string, handler http.Handler) {
+func (s *server) Handle(pattern string, handler http.Handler) {
 	s.mux.Handle(pattern, handler)
 }
