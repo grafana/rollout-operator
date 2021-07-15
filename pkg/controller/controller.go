@@ -87,16 +87,10 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg
 		}, []string{"rollout_group"}),
 	}
 
-	// We enqueue a reconcile request each time any of the observed StatefulSets change. The UpdateFunc
+	// We enqueue a reconcile request each time any of the observed StatefulSets are updated. The UpdateFunc
 	// is also called every sync period even if no changed occurred.
 	c.statefulSetsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			c.enqueueReconcile()
-		},
 		UpdateFunc: func(old, new interface{}) {
-			c.enqueueReconcile()
-		},
-		DeleteFunc: func(obj interface{}) {
 			c.enqueueReconcile()
 		},
 	})
