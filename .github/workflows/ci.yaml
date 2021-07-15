@@ -1,0 +1,16 @@
+name: ci
+on:
+  - push
+  - pull_request
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: '^1.16.5'
+      # Ensure the operator compiles.
+      - run: go build ./cmd/rollout-operator
+      # Ensure the operator unit tests run.
+      - run: go test ./...
