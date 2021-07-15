@@ -57,7 +57,7 @@ type RolloutController struct {
 func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
-	// Initialise the StatefulSet informer to restrict the returned StatefulSets only to the ones
+	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
 	// having the rollout group label. Only these StatefulSets are managed by this operator.
 	statefulSetsSel := labels.NewSelector().Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil)).String()
 	statefulSetsSelOpt := informers.WithTweakListOptions(func(options *metav1.ListOptions) {
