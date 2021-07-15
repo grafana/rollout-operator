@@ -3,6 +3,9 @@ GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 GIT_REVISION := $(shell git rev-parse --short HEAD)
 IMAGE_TAG := $(GIT_BRANCH)-$(GIT_REVISION)
 
+rollout-operator:
+	go build ./cmd/rollout-operator
+
 .PHONY: build-linux-amd64
 build-linux-amd64:
 	GOOS=linux GOARCH=amd64 go build ./cmd/rollout-operator
@@ -15,3 +18,6 @@ build-image: build-linux-amd64
 publish-image: build-image
 	docker tag rollout-operator:$(IMAGE_TAG) us.gcr.io/kubernetes-dev/rollout-operator:$(IMAGE_TAG)
 	docker push us.gcr.io/kubernetes-dev/rollout-operator:$(IMAGE_TAG)
+
+test:
+	go test ./...
