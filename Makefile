@@ -19,8 +19,10 @@ publish-image: build-image
 	docker tag rollout-operator:$(IMAGE_TAG) us.gcr.io/kubernetes-dev/rollout-operator:$(IMAGE_TAG)
 	docker push us.gcr.io/kubernetes-dev/rollout-operator:$(IMAGE_TAG)
 
+.PHONY: test
 test:
 	go test ./...
 
+.PHONY: lint
 lint:
 	golangci-lint run
