@@ -4,7 +4,7 @@ This operator coordinates the rollout of pods between different StatefulSets wit
 
 ## How it works
 
-The operator coordinate the rollout of pods belonging to `StatefulSets` with the `rollout-group` label and update strategy set to `OnDelete`. The label value should identify the group of StatefulSets to which the StatefulSet belongs to.
+The operator coordinates the rollout of pods belonging to `StatefulSets` with the `rollout-group` label and updates strategy set to `OnDelete`. The label value should identify the group of StatefulSets to which the StatefulSet belongs to.
 
 For example, given the following StatefulSets in a namespace:
 - `ingester-zone-a` with `rollout-group: ingester`
