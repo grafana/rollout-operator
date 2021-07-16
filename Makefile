@@ -1,7 +1,7 @@
-# Auto-generate the image tag based on the git branch and revision.
+# Generate the default image tag based on the git branch and revision.
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 GIT_REVISION := $(shell git rev-parse --short HEAD)
-IMAGE_TAG := $(GIT_BRANCH)-$(GIT_REVISION)
+IMAGE_TAG ?= $(GIT_BRANCH)-$(GIT_REVISION)
 
 rollout-operator:
 	go build ./cmd/rollout-operator
