@@ -45,12 +45,19 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedErr: "ingester-zone-a has RollingUpdate update strategy",
 		},
-		"should return error if multiple StatefulSets have not-Ready pods": {
+		"should do nothing if multiple StatefulSets have not-Ready pods": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2)),
 				mockStatefulSet("ingester-zone-b", withPrevRevision(), withReplicas(3, 1)),
 			},
-			expectedErr: "2 StatefulSets have some not-Ready pods",
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
 		},
 		"should do nothing if all pods are updated": {
 			statefulSets: []runtime.Object{

@@ -237,7 +237,9 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// unavailable pods in multiple StatefulSets this could lead to an outage, so we want pods to
 	// get back to Ready first before proceeding.
 	if len(notReadySets) > 1 {
-		return fmt.Errorf("%d StatefulSets have some not-Ready pods, skipping reconcile", len(notReadySets))
+		// Do not return error because it's not an actionable error with regards to the operator behaviour.
+		level.Warn(c.logger).Log("msg", "%d StatefulSets have some not-Ready pods, skipping reconcile", len(notReadySets))
+		return nil
 	}
 
 	// If there's a StatefulSet with not-Ready pods we also want that one to be the first one to reconcile.
