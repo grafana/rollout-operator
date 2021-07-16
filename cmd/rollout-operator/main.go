@@ -109,6 +109,6 @@ func initLogger(minLevel string) (log.Logger, error) {
 }
 
 func fatal(err error) {
-	fmt.Fprintf(os.Stderr, fmt.Sprintf("%s\n", err.Error()))
+	fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 	os.Exit(1)
 }
