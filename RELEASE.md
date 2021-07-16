@@ -8,7 +8,7 @@
     $ git tag -s "${tag}" -m "${tag}"
     $ git push origin "${tag}"
     ```
-1. Publish the update Docker image
+1. Publish the updated Docker image
     ```bash
     $ IMAGE_TAG="${tag}" make publish-image
     ```
