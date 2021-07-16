@@ -33,9 +33,10 @@ const (
 type RolloutController struct {
 	kubeClient           kubernetes.Interface
 	namespace            string
-	informerFactory      informers.SharedInformerFactory
+	statefulSetsFactory  informers.SharedInformerFactory
 	statefulSetLister    listersv1.StatefulSetLister
 	statefulSetsInformer cache.SharedIndexInformer
+	podsFactory          informers.SharedInformerFactory
 	podLister            corelisters.PodLister
 	podsInformer         cache.SharedIndexInformer
 	logger               log.Logger
@@ -54,16 +55,27 @@ type RolloutController struct {
 }
 
 func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg prometheus.Registerer, logger log.Logger) *RolloutController {
-	informerFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, informers.WithNamespace(namespace))
-	statefulSetsInformer := informerFactory.Apps().V1().StatefulSets()
-	podsInformer := informerFactory.Core().V1().Pods()
+	namespaceOpt := informers.WithNamespace(namespace)
+
+	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
+	// having the rollout group label. Only these StatefulSets are managed by this operator.
+	statefulSetsSel := labels.NewSelector().Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil)).String()
+	statefulSetsSelOpt := informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+		options.LabelSelector = statefulSetsSel
+	})
+
+	statefulSetsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt, statefulSetsSelOpt)
+	statefulSetsInformer := statefulSetsFactory.Apps().V1().StatefulSets()
+	podsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt)
+	podsInformer := podsFactory.Core().V1().Pods()
 
 	c := &RolloutController{
 		kubeClient:           kubeClient,
 		namespace:            namespace,
-		informerFactory:      informerFactory,
+		statefulSetsFactory:  statefulSetsFactory,
 		statefulSetLister:    statefulSetsInformer.Lister(),
 		statefulSetsInformer: statefulSetsInformer.Informer(),
+		podsFactory:          podsFactory,
 		podLister:            podsInformer.Lister(),
 		podsInformer:         podsInformer.Informer(),
 		logger:               logger,
@@ -87,16 +99,13 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg
 		}, []string{"rollout_group"}),
 	}
 
-	// We enqueue a reconcile request each time any of the observed StatefulSets change. The UpdateFunc
+	// We enqueue a reconcile request each time any of the observed StatefulSets are updated. The UpdateFunc
 	// is also called every sync period even if no changed occurred.
 	c.statefulSetsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			c.enqueueReconcile()
 		},
 		UpdateFunc: func(old, new interface{}) {
-			c.enqueueReconcile()
-		},
-		DeleteFunc: func(obj interface{}) {
 			c.enqueueReconcile()
 		},
 	})
@@ -115,7 +124,8 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg
 // Init the controller.
 func (c *RolloutController) Init() error {
 	// Start informers.
-	go c.informerFactory.Start(c.stopCh)
+	go c.statefulSetsFactory.Start(c.stopCh)
+	go c.podsFactory.Start(c.stopCh)
 
 	// Wait until all informers caches have been synched.
 	level.Info(c.logger).Log("msg", "informers cache is synching")
@@ -164,11 +174,7 @@ func (c *RolloutController) enqueueReconcile() {
 func (c *RolloutController) reconcile(ctx context.Context) error {
 	level.Info(c.logger).Log("msg", "reconcile started")
 
-	// Find all StatefulSets with the rollout group label. These are the StatefulSets managed
-	// by this operator.
-	sel := labels.NewSelector().Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil))
-
-	sets, err := c.listStatefulSets(sel)
+	sets, err := c.listStatefulSetsWithRolloutGroup()
 	if err != nil {
 		return err
 	}
@@ -257,8 +263,10 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	return nil
 }
 
-func (c *RolloutController) listStatefulSets(sel labels.Selector) ([]*v1.StatefulSet, error) {
-	sets, err := c.statefulSetLister.StatefulSets(c.namespace).List(sel)
+func (c *RolloutController) listStatefulSetsWithRolloutGroup() ([]*v1.StatefulSet, error) {
+	// List "all" StatefulSets matching the label matcher configured in the informer (so only
+	// the StatefulSets having a rollout group label).
+	sets, err := c.statefulSetLister.StatefulSets(c.namespace).List(labels.Everything())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list StatefulSets")
 	} else if len(sets) == 0 {
@@ -275,28 +283,21 @@ func (c *RolloutController) listStatefulSets(sel labels.Selector) ([]*v1.Statefu
 	return deepCopy, nil
 }
 
+// listPods returns pods matching the provided labels selector. Please remember to call
+// DeepCopy() on the returned pods before doing any change.
 func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error) {
 	pods, err := c.podLister.Pods(c.namespace).List(sel)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list Pods")
-	} else if len(pods) == 0 {
-		return nil, nil
 	}
 
-	// In case we modify the Pod we need to make a deep copy first otherwise it
-	// will conflict with the cache. To keep code easier (and safer), we always make a copy.
-	deepCopy := make([]*corev1.Pod, 0, len(pods))
-	for _, pod := range pods {
-		deepCopy = append(deepCopy, pod.DeepCopy())
-	}
-
-	return deepCopy, nil
+	return pods, nil
 }
 
 func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.StatefulSet) (bool, error) {
 	level.Debug(c.logger).Log("msg", "reconciling StatefulSet", "statefulset", sts.Name)
 
-	podsToUpdate, err := c.podsToUpdate(sts)
+	podsToUpdate, err := c.podsNotMatchingUpdateRevision(sts)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get pods to update")
 	}
@@ -370,7 +371,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 	return false, nil
 }
 
-func (c *RolloutController) podsToUpdate(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
+func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
 	var (
 		currRev   = sts.Status.CurrentRevision
 		updateRev = sts.Status.UpdateRevision
