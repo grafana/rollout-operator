@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -17,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 )
@@ -282,6 +284,83 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				"rollout_operator_group_reconciles_total",
 				"rollout_operator_group_reconciles_failed_total"))
 		})
+	}
+}
+
+func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutGroups(t *testing.T) {
+	ingesters := []runtime.Object{
+		mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[RolloutGroupLabel] = "ingester" }),
+		mockStatefulSet("ingester-zone-b", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[RolloutGroupLabel] = "ingester" }),
+		mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+		mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+		mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash),
+		mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash),
+	}
+
+	storeGateways := []runtime.Object{
+		mockStatefulSet("store-gateway-zone-a", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[RolloutGroupLabel] = "store-gateway" }),
+		mockStatefulSet("store-gateway-zone-b", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[RolloutGroupLabel] = "store-gateway" }),
+		mockStatefulSetPod("store-gateway-zone-a-0", testLastRevisionHash),
+		mockStatefulSetPod("store-gateway-zone-a-1", testLastRevisionHash),
+		mockStatefulSetPod("store-gateway-zone-b-0", testLastRevisionHash),
+		mockStatefulSetPod("store-gateway-zone-b-1", testLastRevisionHash),
+	}
+
+	kubeClient := fake.NewSimpleClientset(append(append([]runtime.Object{}, ingesters...), storeGateways...)...)
+
+	// Create the controller and start informers.
+	reg := prometheus.NewPedanticRegistry()
+	c := NewRolloutController(kubeClient, testNamespace, reg, log.NewNopLogger())
+	require.NoError(t, c.Init())
+	defer c.Stop()
+
+	// Run a reconcile. We expect it to do nothing.
+	{
+		require.NoError(t, c.reconcile(context.Background()))
+		assert.NoError(t, testutil.GatherAndCompare(reg, strings.NewReader(`
+		# HELP rollout_operator_group_reconciles_total Total number of reconciles started for a specific rollout group.
+		# TYPE rollout_operator_group_reconciles_total counter
+		rollout_operator_group_reconciles_total{rollout_group="ingester"} 1
+		rollout_operator_group_reconciles_total{rollout_group="store-gateway"} 1
+
+		# HELP rollout_operator_group_reconciles_failed_total Total number of reconciles failed for a specific rollout group.
+		# TYPE rollout_operator_group_reconciles_failed_total counter
+		rollout_operator_group_reconciles_failed_total{rollout_group="ingester"} 0
+		rollout_operator_group_reconciles_failed_total{rollout_group="store-gateway"} 0
+	`), "rollout_operator_group_reconciles_total", "rollout_operator_group_reconciles_failed_total"))
+	}
+
+	// Delete store-gateways and reconcile again. We expect store-gateways metrics to be removed too.
+	{
+		sets, err := c.listStatefulSetsWithRolloutGroup()
+		require.NoError(t, err)
+		require.Equal(t, 4, len(sets)) // Pre-condition check.
+
+		// Delete store-gateway StatefulSets from mocked tracker.
+		for _, sts := range sets {
+			if strings.Contains(sts.Name, "store-gateway") {
+				resource := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+				require.NoError(t, kubeClient.Tracker().Delete(resource, sts.Namespace, sts.Name))
+			}
+		}
+
+		// Since the listeners are updated asynchronously, we have to wait until they're updated.
+		require.Eventually(t, func() bool {
+			sets, err := c.listStatefulSetsWithRolloutGroup()
+			return err == nil && len(sets) == 2
+		}, 5*time.Second, 100*time.Millisecond)
+
+		require.NoError(t, c.reconcile(context.Background()))
+
+		assert.NoError(t, testutil.GatherAndCompare(reg, strings.NewReader(`
+		# HELP rollout_operator_group_reconciles_total Total number of reconciles started for a specific rollout group.
+		# TYPE rollout_operator_group_reconciles_total counter
+		rollout_operator_group_reconciles_total{rollout_group="ingester"} 2
+
+		# HELP rollout_operator_group_reconciles_failed_total Total number of reconciles failed for a specific rollout group.
+		# TYPE rollout_operator_group_reconciles_failed_total counter
+		rollout_operator_group_reconciles_failed_total{rollout_group="ingester"} 0
+	`), "rollout_operator_group_reconciles_total", "rollout_operator_group_reconciles_failed_total"))
 	}
 }
 
