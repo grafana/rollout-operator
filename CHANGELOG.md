@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.1.1
+
 * [BUGFIX] Fix metrics deletion on decommissioned rollout group. #11
 
 ## v0.1.0
