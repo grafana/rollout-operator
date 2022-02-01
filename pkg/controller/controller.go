@@ -52,6 +52,10 @@ type RolloutController struct {
 	groupReconcileFailed      *prometheus.CounterVec
 	groupReconcileDuration    *prometheus.HistogramVec
 	groupReconcileLastSuccess *prometheus.GaugeVec
+
+	// Keep track of discovered rollout groups. We use this information to delete metrics
+	// related to rollout groups that have been decommissioned.
+	discoveredGroups map[string]struct{}
 }
 
 func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg prometheus.Registerer, logger log.Logger) *RolloutController {
@@ -80,6 +84,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg
 		podsInformer:         podsInformer.Informer(),
 		logger:               logger,
 		stopCh:               make(chan struct{}),
+		discoveredGroups:     map[string]struct{}{},
 		groupReconcileTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_group_reconciles_total",
 			Help: "Total number of reconciles started for a specific rollout group.",
@@ -191,6 +196,8 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	if reconcileErrs != nil {
 		return reconcileErrs
 	}
+
+	c.deleteMetricsForDecommissionedGroups(groups)
 
 	level.Info(c.logger).Log("msg", "reconcile done")
 	return nil
@@ -404,4 +411,24 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 	sortPods(pods)
 
 	return pods, nil
+}
+
+func (c *RolloutController) deleteMetricsForDecommissionedGroups(groups map[string][]*v1.StatefulSet) {
+	// Delete metrics for decommissioned groups.
+	for name := range c.discoveredGroups {
+		if _, ok := groups[name]; ok {
+			continue
+		}
+
+		c.groupReconcileTotal.DeleteLabelValues(name)
+		c.groupReconcileFailed.DeleteLabelValues(name)
+		c.groupReconcileDuration.DeleteLabelValues(name)
+		c.groupReconcileLastSuccess.DeleteLabelValues(name)
+		delete(c.discoveredGroups, name)
+	}
+
+	// Update the discovered groups.
+	for name := range groups {
+		c.discoveredGroups[name] = struct{}{}
+	}
 }
