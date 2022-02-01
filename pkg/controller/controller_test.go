@@ -318,23 +318,23 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 	{
 		require.NoError(t, c.reconcile(context.Background()))
 		assert.NoError(t, testutil.GatherAndCompare(reg, strings.NewReader(`
-		# HELP rollout_operator_group_reconciles_total Total number of reconciles started for a specific rollout group.
-		# TYPE rollout_operator_group_reconciles_total counter
-		rollout_operator_group_reconciles_total{rollout_group="ingester"} 1
-		rollout_operator_group_reconciles_total{rollout_group="store-gateway"} 1
+			# HELP rollout_operator_group_reconciles_total Total number of reconciles started for a specific rollout group.
+			# TYPE rollout_operator_group_reconciles_total counter
+			rollout_operator_group_reconciles_total{rollout_group="ingester"} 1
+			rollout_operator_group_reconciles_total{rollout_group="store-gateway"} 1
 
-		# HELP rollout_operator_group_reconciles_failed_total Total number of reconciles failed for a specific rollout group.
-		# TYPE rollout_operator_group_reconciles_failed_total counter
-		rollout_operator_group_reconciles_failed_total{rollout_group="ingester"} 0
-		rollout_operator_group_reconciles_failed_total{rollout_group="store-gateway"} 0
-	`), "rollout_operator_group_reconciles_total", "rollout_operator_group_reconciles_failed_total"))
+			# HELP rollout_operator_group_reconciles_failed_total Total number of reconciles failed for a specific rollout group.
+			# TYPE rollout_operator_group_reconciles_failed_total counter
+			rollout_operator_group_reconciles_failed_total{rollout_group="ingester"} 0
+			rollout_operator_group_reconciles_failed_total{rollout_group="store-gateway"} 0
+		`), "rollout_operator_group_reconciles_total", "rollout_operator_group_reconciles_failed_total"))
 	}
 
 	// Delete store-gateways and reconcile again. We expect store-gateways metrics to be removed too.
 	{
 		sets, err := c.listStatefulSetsWithRolloutGroup()
 		require.NoError(t, err)
-		require.Equal(t, 4, len(sets)) // Pre-condition check.
+		require.Len(t, sets, 4) // Pre-condition check.
 
 		// Delete store-gateway StatefulSets from mocked tracker.
 		for _, sts := range sets {
@@ -353,14 +353,14 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 		require.NoError(t, c.reconcile(context.Background()))
 
 		assert.NoError(t, testutil.GatherAndCompare(reg, strings.NewReader(`
-		# HELP rollout_operator_group_reconciles_total Total number of reconciles started for a specific rollout group.
-		# TYPE rollout_operator_group_reconciles_total counter
-		rollout_operator_group_reconciles_total{rollout_group="ingester"} 2
+			# HELP rollout_operator_group_reconciles_total Total number of reconciles started for a specific rollout group.
+			# TYPE rollout_operator_group_reconciles_total counter
+			rollout_operator_group_reconciles_total{rollout_group="ingester"} 2
 
-		# HELP rollout_operator_group_reconciles_failed_total Total number of reconciles failed for a specific rollout group.
-		# TYPE rollout_operator_group_reconciles_failed_total counter
-		rollout_operator_group_reconciles_failed_total{rollout_group="ingester"} 0
-	`), "rollout_operator_group_reconciles_total", "rollout_operator_group_reconciles_failed_total"))
+			# HELP rollout_operator_group_reconciles_failed_total Total number of reconciles failed for a specific rollout group.
+			# TYPE rollout_operator_group_reconciles_failed_total counter
+			rollout_operator_group_reconciles_failed_total{rollout_group="ingester"} 0
+		`), "rollout_operator_group_reconciles_total", "rollout_operator_group_reconciles_failed_total"))
 	}
 }
 

@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -56,8 +55,7 @@ type RolloutController struct {
 
 	// Keep track of discovered rollout groups. We use this information to delete metrics
 	// related to rollout groups that have been decommissioned.
-	discoveredGroupsMx sync.Mutex
-	discoveredGroups   map[string]struct{}
+	discoveredGroups map[string]struct{}
 }
 
 func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg prometheus.Registerer, logger log.Logger) *RolloutController {
@@ -416,9 +414,6 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 }
 
 func (c *RolloutController) deleteMetricsForDecommissionedGroups(groups map[string][]*v1.StatefulSet) {
-	c.discoveredGroupsMx.Lock()
-	defer c.discoveredGroupsMx.Unlock()
-
 	// Delete metrics for decommissioned groups.
 	for name := range c.discoveredGroups {
 		if _, ok := groups[name]; ok {
