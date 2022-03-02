@@ -16,8 +16,8 @@ build-image: build-linux-amd64
 
 .PHONY: publish-image
 publish-image: build-image
-	docker tag rollout-operator:$(IMAGE_TAG) us.gcr.io/kubernetes-dev/rollout-operator:$(IMAGE_TAG)
-	docker push us.gcr.io/kubernetes-dev/rollout-operator:$(IMAGE_TAG)
+	docker tag rollout-operator:$(IMAGE_TAG) grafana/rollout-operator:$(IMAGE_TAG)
+	docker push grafana/rollout-operator:$(IMAGE_TAG)
 
 .PHONY: test
 test:
