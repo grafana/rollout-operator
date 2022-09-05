@@ -395,11 +395,16 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 		return nil, errors.New("updateRevision is empty")
 	}
 
-	// Get any pods whose revision doesn't match the StatefulSet's updateRevision
+	// Create selector for all the pods selected by the Statefulset
+	podsSelector, err := metav1.LabelSelectorAsSelector(sts.Spec.Selector)
+	if err != nil {
+		panic(err)
+	}
+
+	// Filter pods whose revision doesn't match the StatefulSet's updateRevision
 	// and so it means they still need to be updated.
-	podsSelector := labels.NewSelector().Add(
+	podsSelector = podsSelector.Add(
 		mustNewLabelsRequirement(v1.ControllerRevisionHashLabelKey, selection.NotEquals, []string{updateRev}),
-		mustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
 
 	pods, err := c.listPods(podsSelector)
