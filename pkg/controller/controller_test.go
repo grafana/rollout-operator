@@ -365,6 +365,11 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 }
 
 func mockStatefulSet(name string, overrides ...func(sts *v1.StatefulSet)) *v1.StatefulSet {
+	labelSelector := metav1.LabelSelector{
+		MatchLabels: map[string]string{
+				"name": name,
+		},
+	};
 	sts := &v1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -387,6 +392,7 @@ func mockStatefulSet(name string, overrides ...func(sts *v1.StatefulSet)) *v1.St
 					},
 				},
 			},
+			Selector: &labelSelector,
 		},
 		Status: v1.StatefulSetStatus{
 			Replicas:        3,
