@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Improve logs messages. #19
+* [ENHANCEMENT] Improve log messages about not read statefulset. #19
 
 ## v0.1.1
 
