@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Improve logs messages. #19
+
 ## v0.1.1
 
 * [BUGFIX] Fix metrics deletion on decommissioned rollout group. #11
