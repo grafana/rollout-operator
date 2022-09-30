@@ -257,7 +257,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 
 	// If there's a StatefulSet with not-Ready pods we also want that one to be the first one to reconcile.
 	if len(notReadySets) == 1 {
-		level.Info(c.logger).Log("msg", "A StatefulSet has some not-Ready pods, reconcile it first", "statefulset", notReadySets[0].Name)
+		level.Info(c.logger).Log("msg", "a StatefulSet has some not-Ready pods, reconcile it first", "statefulset", notReadySets[0].Name)
 		sets = moveStatefulSetToFront(sets, notReadySets[0])
 	}
 
