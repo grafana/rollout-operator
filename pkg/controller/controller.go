@@ -245,7 +245,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// get back to Ready first before proceeding.
 	if len(notReadySets) > 1 {
 		// Do not return error because it's not an actionable error with regards to the operator behaviour.
-		level.Warn(c.logger).Log("msg", "StatefulSets have some not-Ready pods, skipping reconcile", "statefulsetCount", len(notReadySets))
+		level.Warn(c.logger).Log("msg", "StatefulSets have some not-Ready pods, skipping reconcile", "notReadyStatefulSets", len(notReadySets))
 		return nil
 	}
 
