@@ -417,12 +417,12 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	// Ensure all pods in this StatefulSet are Ready, otherwise we consider a rollout is in progress
 	// (in any case, it's not safe to proceed with other StatefulSets).
-	if sts.Status.Replicas != sts.Status.ReadyReplicas {
+	if hasNotReadyPods, err := c.hasStatefulSetNotReadyPods(sts); err != nil {
+		return true, errors.Wrapf(err, "unable to check if StatefulSet %s has not ready pods", sts.Name)
+	} else if hasNotReadyPods {
 		level.Info(c.logger).Log(
 			"msg", "StatefulSet pods are all updated but StatefulSet has some not-Ready replicas",
-			"statefulset", sts.Name,
-			"replicas", sts.Status.Replicas,
-			"ready_replicas", sts.Status.ReadyReplicas)
+			"statefulset", sts.Name)
 
 		return true, nil
 	}

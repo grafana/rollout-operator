@@ -207,7 +207,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
 			},
 		},
-		"should not proceed with the next StatefulSet if there's another one with not-Ready pods": {
+		"should not proceed with the next StatefulSet if there's another one with not-Ready pods reported by the StatefulSet": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withReplicas(3, 2)),
 				mockStatefulSet("ingester-zone-b", withPrevRevision()),
@@ -216,6 +216,22 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+		},
+		"should not proceed with the next StatefulSet if there's another one with not-Ready pods but NOT reported by the StatefulSet yet": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withReplicas(3, 3)),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash, func(pod *corev1.Pod) {
+					pod.DeletionTimestamp = now()
+				}),
 				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
