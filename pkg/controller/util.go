@@ -25,6 +25,39 @@ func sortPods(pods []*corev1.Pod) {
 	})
 }
 
+// podNames returns the names of input pods.
+func podNames(pods []*corev1.Pod) []string {
+	names := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		names = append(names, pod.Name)
+	}
+	return names
+}
+
+// isPodRunningAndReady returns whether the input pod is running and ready.
+func isPodRunningAndReady(pod *corev1.Pod) bool {
+	// The pod phase must be "running".
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+
+	// It must not be in the terminating state.
+	if pod.DeletionTimestamp != nil {
+		return false
+	}
+
+	// All containers must be running and ready.
+	for i := len(pod.Status.ContainerStatuses) - 1; i >= 0; i-- {
+		container := pod.Status.ContainerStatuses[i]
+
+		if !container.Ready || container.State.Running == nil {
+			return false
+		}
+	}
+
+	return true
+}
+
 // moveStatefulSetToFront returns a new slice where the input StatefulSet toMove is moved
 // at the beginning. Comparison is done via pointer equality.
 func moveStatefulSetToFront(sets []*v1.StatefulSet, toMove *v1.StatefulSet) []*v1.StatefulSet {

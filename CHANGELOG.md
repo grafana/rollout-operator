@@ -3,6 +3,7 @@
 ## main / unreleased
 
 * [ENHANCEMENT] Improve log messages about not read statefulset. #19
+* [BUGFIX] Detect as not-ready pods which are terminating but their readiness probe hasn't failed yet. #20
 
 ## v0.1.1
 
