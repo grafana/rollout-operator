@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -234,7 +235,12 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// Find StatefulSets with some not-Ready pods.
 	notReadySets := make([]*v1.StatefulSet, 0, len(sets))
 	for _, sts := range sets {
-		if sts.Status.Replicas != sts.Status.ReadyReplicas {
+		hasNotReadyPods, err := c.hasStatefulSetNotReadyPods(sts)
+		if err != nil {
+			return errors.Wrapf(err, "unable to check if StatefulSet %s has not ready pods", sts.Name)
+		}
+
+		if hasNotReadyPods {
 			notReadySets = append(notReadySets, sts)
 		}
 	}
@@ -245,13 +251,13 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// get back to Ready first before proceeding.
 	if len(notReadySets) > 1 {
 		// Do not return error because it's not an actionable error with regards to the operator behaviour.
-		level.Warn(c.logger).Log("msg", "StatefulSets have some not-Ready pods, skipping reconcile", "notReadyStatefulSets", len(notReadySets))
+		level.Warn(c.logger).Log("msg", "StatefulSets have some not-Ready pods, skipping reconcile", "not_ready_statefulsets", len(notReadySets))
 		return nil
 	}
 
 	// If there's a StatefulSet with not-Ready pods we also want that one to be the first one to reconcile.
 	if len(notReadySets) == 1 {
-		level.Info(c.logger).Log("msg", "A StatefulSet has some not-Ready pods, reconcile it first", "statefulset", notReadySets[0].Name)
+		level.Info(c.logger).Log("msg", "a StatefulSet has some not-Ready pods, reconcile it first", "statefulset", notReadySets[0].Name)
 		sets = moveStatefulSetToFront(sets, notReadySets[0])
 	}
 
@@ -291,6 +297,63 @@ func (c *RolloutController) listStatefulSetsWithRolloutGroup() ([]*v1.StatefulSe
 	}
 
 	return deepCopy, nil
+}
+
+func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (bool, error) {
+	// We can quickly check the number of ready replicas reported by the StatefulSet.
+	// If they don't match the total number of replicas, then we're sure there are some
+	// not ready pods.
+	if sts.Status.Replicas != sts.Status.ReadyReplicas {
+		return true, nil
+	}
+
+	// The number of ready replicas reported by the StatefulSet match the total number of
+	// replicas. However, there's still no guarantee that all pods are running. For example,
+	// a terminating pod (which we don't consider "ready") may have not yet failed the
+	// readiness probe for the consecutive number of times required to switch its status
+	// to not-ready. For this reason, we list all StatefulSet pods and check them one-by-one.
+	notReadyPods, err := c.listNotReadyPodsByStatefulSet(sts)
+	if err != nil {
+		return false, err
+	}
+	if len(notReadyPods) == 0 {
+		return false, nil
+	}
+
+	// Log which pods have been detected as not-ready. This may be useful for debugging.
+	level.Info(c.logger).Log(
+		"msg", "StatefulSet status is reporting all pods ready, but the rollout operator has found some not-Ready pods",
+		"statefulset", sts.Name,
+		"not_ready_pods", strings.Join(podNames(notReadyPods), " "))
+
+	return true, nil
+}
+
+func (c *RolloutController) listNotReadyPodsByStatefulSet(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
+	// Select all pods belonging to the input StatefulSet.
+	podsSelector := labels.NewSelector().Add(
+		mustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
+	)
+
+	all, err := c.listPods(podsSelector)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build a list of not-ready ones. We don't pre-allocate this list cause most of the times we
+	// expect all pods are running and ready.
+	var notReady []*corev1.Pod
+
+	for _, pod := range all {
+		if !isPodRunningAndReady(pod) {
+			notReady = append(notReady, pod)
+		}
+	}
+
+	// Sort pods in order to provide a deterministic behaviour.
+	sortPods(notReady)
+
+	return notReady, nil
 }
 
 // listPods returns pods matching the provided labels selector. Please remember to call
@@ -354,12 +417,12 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	// Ensure all pods in this StatefulSet are Ready, otherwise we consider a rollout is in progress
 	// (in any case, it's not safe to proceed with other StatefulSets).
-	if sts.Status.Replicas != sts.Status.ReadyReplicas {
+	if hasNotReadyPods, err := c.hasStatefulSetNotReadyPods(sts); err != nil {
+		return true, errors.Wrapf(err, "unable to check if StatefulSet %s has not ready pods", sts.Name)
+	} else if hasNotReadyPods {
 		level.Info(c.logger).Log(
 			"msg", "StatefulSet pods are all updated but StatefulSet has some not-Ready replicas",
-			"statefulset", sts.Name,
-			"replicas", sts.Status.Replicas,
-			"ready_replicas", sts.Status.ReadyReplicas)
+			"statefulset", sts.Name)
 
 		return true, nil
 	}
