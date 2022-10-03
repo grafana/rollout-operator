@@ -47,7 +47,7 @@ func isPodRunningAndReady(pod *corev1.Pod) bool {
 	}
 
 	// All containers must be running and ready.
-	for i := len(pod.Status.ContainerStatuses) - 1; i >= 0; i-- {
+	for i := 0; i < len(pod.Status.ContainerStatuses); i++ {
 		container := pod.Status.ContainerStatuses[i]
 
 		if !container.Ready || container.State.Running == nil {
