@@ -8,7 +8,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/pkg/errors v0.9.1
-	github.com/prometheus/client_golang v1.11.0
+	github.com/prometheus/client_golang v1.13.0
 	github.com/stretchr/testify v1.7.0
 	go.uber.org/atomic v1.7.0
 	k8s.io/api v0.18.17
