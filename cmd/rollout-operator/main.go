@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -17,7 +18,10 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/grafana/rollout-operator/pkg/admission"
 	"github.com/grafana/rollout-operator/pkg/controller"
+	"github.com/grafana/rollout-operator/pkg/tlscert"
+
 	// Required to get the GCP auth provider working.
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 )
@@ -29,6 +33,19 @@ func main() {
 	kubeConfigFile := flag.String("kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	kubeNamespace := flag.String("kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	reconcileInterval := flag.Duration("reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
+
+	serverTLSEnabled := flag.Bool("server-tls.enabled", false, "Enable TLS server for webhook connections.")
+	serverTLSPort := flag.Int("server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
+	serverCertFile := flag.String("server-tls.cert-file", "", "Path to the TLS certificate file if not using the self-signed certificate.")
+	serverKeyFile := flag.String("server-tls.key-file", "", "Path to the TLS private key file if not using the self-signed certificate.")
+
+	serverSelfSignedCert := flag.Bool("server-tls.self-signed-cert.enabled", true, "Generate a self-signed certificate for the TLS server.")
+	serverSelfSignedCertSecretName := flag.String("server-tls.self-signed-cert.secret-name", "rollout-operator-self-signed-certificate", "Secret name to store the self-signed certificate (if enabled).")
+	serverSelfSignedCertDNSName := flag.String("server-tls.self-signed-cert.dns-name", "", "DNS name to use for the self-signed certificate (if enabled). If left empty, then 'rollout-operator.<namespace>.svc' will be used.")
+	serverSelfSignedCertOrg := flag.String("server-tls.self-signed-cert.org", "Grafana Labs", "Organization name to use for the self-signed certificate (if enabled).")
+
+	updateWebhooksWithSelfSignedCABundle := flag.Bool("webhooks.update-ca-bundle", true, "Update the CA bundle in the properly labeled webhook configurations with the self-signed certificate (-server-tls.self-signed-cert.enabled should be enabled).")
+
 	logLevel := flag.String("log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
 	flag.Parse()
 
@@ -72,6 +89,50 @@ func main() {
 	kubeClient, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		fatal(errors.Wrap(err, "failed to build Kubernetes client"))
+	}
+
+	if *serverTLSEnabled {
+		var certProvider tlscert.Provider
+		if *serverSelfSignedCert {
+			if *serverSelfSignedCertDNSName == "" {
+				*serverSelfSignedCertDNSName = fmt.Sprintf("rollout-operator.%s.svc", *kubeNamespace)
+			}
+			selfSignedProvider := tlscert.NewSelfSignedCertProvider("rollout-operator", []string{*serverSelfSignedCertDNSName}, []string{*serverSelfSignedCertOrg})
+			certProvider = tlscert.NewKubeSecretPersistedCertProvider(selfSignedProvider, logger, kubeClient, *kubeNamespace, *serverSelfSignedCertSecretName)
+		} else if *serverCertFile != "" && *serverKeyFile != "" {
+			certProvider, err = tlscert.NewFileCertProvider(*serverCertFile, *serverKeyFile)
+			if err != nil {
+				fatal(err)
+			}
+		} else {
+			fatal(errors.New("either self-signed certificate should be enabled or path to the certificate and key should be provided"))
+		}
+
+		cert, err := certProvider.Certificate(context.Background())
+		if err != nil {
+			fatal(err)
+		}
+
+		if *updateWebhooksWithSelfSignedCABundle {
+			if !*serverSelfSignedCert {
+				fatal(errors.New("self-signed certificate should be enabled to update the CA bundle in the webhook configurations"))
+			}
+
+			// TODO watch webhook configurations instead of doing one-off.
+			err = admission.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, *kubeNamespace, cert.CA)
+			if err != nil {
+				fatal(err)
+			}
+		}
+
+		tlsSrv, err := newTLSServer(*serverTLSPort, logger, cert)
+		if err != nil {
+			fatal(err)
+		}
+		tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger))
+		if err := tlsSrv.Start(); err != nil {
+			fatal(err)
+		}
 	}
 
 	// Init the controller.
