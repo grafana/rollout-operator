@@ -1,4 +1,4 @@
-FROM alpine:3.14
+FROM alpine:3.16
 
 COPY       rollout-operator /bin/rollout-operator
 ENTRYPOINT [ "/bin/rollout-operator" ]
