@@ -8,7 +8,7 @@ rollout-operator:
 
 .PHONY: build-linux-amd64
 build-linux-amd64:
-	GOOS=linux GOARCH=amd64 go build ./cmd/rollout-operator
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
 .PHONY: build-image
 build-image: build-linux-amd64
