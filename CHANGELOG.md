@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.2.0
+
 * [ENHANCEMENT] Update Docker base image to `alpine:3.16`. #23
 * [ENHANCEMENT] Update the minimum go version to `1.18`. #23
 * [ENHANCEMENT] Update dependencies to address CVEs, including: #23
