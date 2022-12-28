@@ -23,6 +23,10 @@ publish-image: build-image
 test:
 	go test ./...
 
+.PHONY: integration
+integration:
+	go test -v -tags requires_docker ./integration/...
+
 .PHONY: lint
 lint:
 	golangci-lint run --timeout=5m

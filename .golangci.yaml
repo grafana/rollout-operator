@@ -1,3 +1,6 @@
+run:
+  build-tags:
+    - requires_docker
 linters-settings:
   errcheck:
     exclude: .errcheck-excludes.txt
