@@ -23,6 +23,14 @@ publish-image: build-image
 test:
 	go test ./...
 
+.PHONY: integration
+integration: integration/mock-service/.uptodate
+	go test -v -tags requires_docker -count 1 ./integration/...
+
+integration/mock-service/.uptodate:
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
+	docker build --build-arg "$(GIT_REVISION)" -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
+
 .PHONY: lint
 lint:
 	golangci-lint run --timeout=5m

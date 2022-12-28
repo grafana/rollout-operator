@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -24,18 +25,19 @@ import (
 func main() {
 	// CLI flags.
 	serverPort := flag.Int("server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
-	kubeAPIURL := flag.String("kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	kubeConfigFile := flag.String("kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	kubeNamespace := flag.String("kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
+	kubeAPIURL := flag.String("kubernetes.api-url", "", "The API server API URL. If not specified, it will be auto-detected when running within a API cluster.")
+	kubeConfigFile := flag.String("kubernetes.config-file", "", "The API config file path. If not specified, it will be auto-detected when running within a API cluster.")
+	kubeNamespace := flag.String("kubernetes.namespace", "", "The API namespace for which this operator is running.")
+	reconcileInterval := flag.Duration("reconcile.interval", 5*time.Second, "The interval of reconciliation.")
 	logLevel := flag.String("log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
 	flag.Parse()
 
 	// Validate CLI flags.
 	if *kubeNamespace == "" {
-		fatal(errors.New("The Kubernetes namespace has not been specified."))
+		fatal(errors.New("The API namespace has not been specified."))
 	}
 	if (*kubeAPIURL == "") != (*kubeConfigFile == "") {
-		fatal(errors.New("Either configure both Kubernetes API URL and config file or none of them."))
+		fatal(errors.New("Either configure both API API URL and config file or none of them."))
 	}
 
 	logger, err := initLogger(*logLevel)
@@ -61,19 +63,19 @@ func main() {
 		fatal(err)
 	}
 
-	// Build the Kubernetes client config.
+	// Build the API client config.
 	cfg, err := buildKubeConfig(*kubeAPIURL, *kubeConfigFile)
 	if err != nil {
-		fatal(errors.Wrap(err, "failed to build Kubernetes config"))
+		fatal(errors.Wrap(err, "failed to build API config"))
 	}
 
 	kubeClient, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		fatal(errors.Wrap(err, "failed to build Kubernetes client"))
+		fatal(errors.Wrap(err, "failed to build API client"))
 	}
 
 	// Init the controller.
-	c := controller.NewRolloutController(kubeClient, *kubeNamespace, reg, logger)
+	c := controller.NewRolloutController(kubeClient, *kubeNamespace, *reconcileInterval, reg, logger)
 	if err := c.Init(); err != nil {
 		fatal(errors.Wrap(err, "error while initialising the controller"))
 	}

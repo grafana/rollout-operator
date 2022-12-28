@@ -34,6 +34,7 @@ const (
 type RolloutController struct {
 	kubeClient           kubernetes.Interface
 	namespace            string
+	reconcileInterval    time.Duration
 	statefulSetsFactory  informers.SharedInformerFactory
 	statefulSetLister    listersv1.StatefulSetLister
 	statefulSetsInformer cache.SharedIndexInformer
@@ -59,7 +60,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -77,6 +78,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reg
 	c := &RolloutController{
 		kubeClient:           kubeClient,
 		namespace:            namespace,
+		reconcileInterval:    reconcileInterval,
 		statefulSetsFactory:  statefulSetsFactory,
 		statefulSetLister:    statefulSetsInformer.Lister(),
 		statefulSetsInformer: statefulSetsInformer.Informer(),
@@ -160,7 +162,7 @@ func (c *RolloutController) Run() {
 		select {
 		case <-c.stopCh:
 			return
-		case <-time.After(5 * time.Second):
+		case <-time.After(c.reconcileInterval):
 			// Throttle before checking again if we should reconcile.
 		}
 	}
