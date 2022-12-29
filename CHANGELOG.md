@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Update Go to `1.19.4`. #29
+
 ## v0.2.0
 
 * [ENHANCEMENT] Update Docker base image to `alpine:3.16`. #23
