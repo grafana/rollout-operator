@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -27,6 +28,7 @@ func main() {
 	kubeAPIURL := flag.String("kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	kubeConfigFile := flag.String("kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	kubeNamespace := flag.String("kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
+	reconcileInterval := flag.Duration("reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
 	logLevel := flag.String("log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
 	flag.Parse()
 
@@ -73,7 +75,7 @@ func main() {
 	}
 
 	// Init the controller.
-	c := controller.NewRolloutController(kubeClient, *kubeNamespace, reg, logger)
+	c := controller.NewRolloutController(kubeClient, *kubeNamespace, *reconcileInterval, reg, logger)
 	if err := c.Init(); err != nil {
 		fatal(errors.Wrap(err, "error while initialising the controller"))
 	}

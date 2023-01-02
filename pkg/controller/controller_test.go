@@ -291,7 +291,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, testNamespace, reg, log.NewNopLogger())
+			c := NewRolloutController(kubeClient, testNamespace, 5*time.Second, reg, log.NewNopLogger())
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -359,7 +359,7 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 
 	// Create the controller and start informers.
 	reg := prometheus.NewPedanticRegistry()
-	c := NewRolloutController(kubeClient, testNamespace, reg, log.NewNopLogger())
+	c := NewRolloutController(kubeClient, testNamespace, 5*time.Second, reg, log.NewNopLogger())
 	require.NoError(t, c.Init())
 	defer c.Stop()
 
