@@ -4,9 +4,7 @@ package integration
 
 import (
 	"context"
-	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -18,10 +16,7 @@ import (
 func TestRolloutHappyCase(t *testing.T) {
 	ctx := context.Background()
 
-	k3t.ConfigureLogger(t)
-	cluster := k3t.NewCluster(ctx, t, fmt.Sprintf("k3d-test-%d", time.Now().UnixMilli()))
-	cluster.LoadImages(ctx, t, "rollout-operator:latest", "mock-service:latest")
-
+	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
 	// Create rollout operator and check it's running and ready.

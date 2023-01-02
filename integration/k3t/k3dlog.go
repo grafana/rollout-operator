@@ -9,6 +9,8 @@ import (
 )
 
 // ConfigureLogger configures k3d logger to use testing.T's Log method instead of stdout.
+// This funciton is called from NewCluster, unless disabled by an option.
+// Note that this configures a global config, so it's not safe to configure from tests running in parallel.
 // Note that testing.T automatically logs the name of this file, hence the short but still descriptive filename.
 func ConfigureLogger(t *testing.T) {
 	logger.Logger.SetOutput(testingTWriter{t})

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	cliutil "github.com/k3d-io/k3d/v5/cmd/util"
 	k3dclient "github.com/k3d-io/k3d/v5/pkg/client"
@@ -25,22 +26,52 @@ func init() {
 	version.Version = "v5.4.0"
 }
 
-func NewCluster(ctx context.Context, t *testing.T, clusterName string) Cluster {
-	lbPort := getFreePort(t, "8080")
+// WithName returns an option that sets a defined cluster name on creation.
+func WithName(name string) Option { return nameOption(name) }
+
+// WithImages returns an option that preloads the specified images into the cluster.
+// It expects those images to be already present on the host.
+// Can be specified multiple times.
+func WithImages(images ...string) Option { return imagesOption(images) }
+
+// WithNoLoggerOverride disables the k3d logger override to the testing.T.Logf().
+// This is useful if multiple tests are ran in parallel, as k3d logger is one global one.
+func WithNoLoggerOverride() Option { return noLoggerOverrideOption{} }
+
+// WithLoadBalancerPort overrides the load balancer port exposed on the host machine, instead of using a random free one.
+func WithLoadBalancerPort(port string) Option { return loadBalancerPortOption(port) }
+
+// WithAPIPort overrides the Kubernetes API port exposed on the host machine, instead of using a random free one.
+func WithAPIPort(port string) Option { return apiPortOption(port) }
+
+func NewCluster(ctx context.Context, t *testing.T, opts ...Option) Cluster {
+	opt := options{
+		clusterName:    testClusterName(),
+		overrideLogger: true,
+		lbPort:         getFreePort(t, "8080"),
+		apiPort:        getFreePort(t, k3d.DefaultAPIPort),
+	}
+	for _, o := range opts {
+		o.configure(&opt)
+	}
+
+	if opt.overrideLogger {
+		ConfigureLogger(t)
+	}
 
 	// Prepare the cluster config.
 	simpleCfg := v1alpha4.SimpleConfig{
 		TypeMeta: configtypes.TypeMeta{},
 		ObjectMeta: configtypes.ObjectMeta{
-			Name: clusterName,
+			Name: opt.clusterName,
 		},
 		Servers: 1,
 		Agents:  0,
 		ExposeAPI: v1alpha4.SimpleExposureOpts{
-			HostPort: getFreePort(t, k3d.DefaultAPIPort),
+			HostPort: opt.apiPort,
 		},
 		Ports: []v1alpha4.PortWithNodeFilters{
-			{Port: fmt.Sprintf("%s:80", lbPort), NodeFilters: []string{"loadbalancer"}},
+			{Port: fmt.Sprintf("%s:80", opt.lbPort), NodeFilters: []string{"loadbalancer"}},
 		},
 		Image: fmt.Sprintf("%s:%s", k3d.DefaultK3sImageRepo, version.K3sVersion),
 		Options: v1alpha4.SimpleConfigOptions{
@@ -75,7 +106,7 @@ func NewCluster(ctx context.Context, t *testing.T, clusterName string) Cluster {
 	t.Logf("Cluster '%s' created successfully!", clusterConfig.Cluster.Name)
 
 	// Get kubeconfig and instantiate kubernetes.Clientset.
-	kubeConfigFile := filepath.Join(t.TempDir(), fmt.Sprintf("kubeconfig.%s.yaml", clusterName))
+	kubeConfigFile := filepath.Join(t.TempDir(), fmt.Sprintf("kubeconfig.%s.yaml", opt.clusterName))
 
 	kubeconfig, err := k3dclient.KubeconfigGet(ctx, runtimes.SelectedRuntime, &clusterConfig.Cluster)
 	require.NoError(t, err, "Failed to get kubeconfig from cluster")
@@ -91,11 +122,20 @@ func NewCluster(ctx context.Context, t *testing.T, clusterName string) Cluster {
 
 	t.Logf("KUBECONFIG=%s", kubeConfigFile)
 
+	if len(opt.images) > 0 {
+		t.Logf("Preloading images: %v", opt.images)
+		loadImages(ctx, t, opt.images, &clusterConfig.Cluster)
+	}
+
 	return Cluster{
 		k:             clientset,
 		clusterConfig: clusterConfig,
-		lbPort:        lbPort,
+		lbPort:        opt.lbPort,
 	}
+}
+
+func testClusterName() string {
+	return fmt.Sprintf("k3d-test-%d", time.Now().UnixMilli())
 }
 
 func getFreePort(t *testing.T, defaultPort string) string {
@@ -123,10 +163,47 @@ func (c Cluster) LBPort() string {
 	return c.lbPort
 }
 
-func (c Cluster) LoadImages(ctx context.Context, t *testing.T, images ...string) {
-	t.Helper()
+func loadImages(ctx context.Context, t *testing.T, images []string, cluster *k3d.Cluster) {
 	// TODO: we're using k3d.ImportModeTooldNode mode because the auto-detect (that uses pipe) fails in CI: https://github.com/k3d-io/k3d/issues/900
 	loadImageOpts := k3d.ImageImportOpts{Mode: k3d.ImportModeToolsNode}
-	err := k3dclient.ImageImportIntoClusterMulti(ctx, runtimes.SelectedRuntime, images, &c.clusterConfig.Cluster, loadImageOpts)
+	err := k3dclient.ImageImportIntoClusterMulti(ctx, runtimes.SelectedRuntime, images, cluster, loadImageOpts)
 	require.NoError(t, err, "Failed to load images.")
 }
+
+type options struct {
+	clusterName    string
+	images         []string
+	overrideLogger bool
+	lbPort         string
+	apiPort        string
+}
+
+// Option configures a cluster creation.
+// It intentionally contains unexported methods to make sure that the contract of Option can be changed without breaking changes.
+// We're using an interface with specific types for each option because it's easier to debug these kind of options later,
+// compared to a list of anonymous functions.
+type Option interface {
+	configure(cfg *options)
+}
+
+type nameOption string
+
+func (n nameOption) configure(opts *options) { opts.clusterName = string(n) }
+
+type imagesOption []string
+
+func (imgs imagesOption) configure(opts *options) {
+	opts.images = append(opts.images, []string(imgs)...)
+}
+
+type noLoggerOverrideOption struct{}
+
+func (noLoggerOverrideOption) configure(opts *options) { opts.overrideLogger = false }
+
+type loadBalancerPortOption string
+
+func (p loadBalancerPortOption) configure(opts *options) { opts.lbPort = string(p) }
+
+type apiPortOption string
+
+func (p apiPortOption) configure(opts *options) { opts.apiPort = string(p) }
