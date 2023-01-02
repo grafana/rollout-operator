@@ -18,7 +18,7 @@ import (
 )
 
 // requireEventuallyPod runs the tests provided on the pod retrieved from the API.
-// Once a test suceeds, it's not evaluated again.
+// Once a test succeeds, it's not evaluated again.
 func requireEventuallyPod(t *testing.T, api *kubernetes.Clientset, ctx context.Context, podName string, tests ...func(t *testing.T, pod *corev1.Pod) bool) {
 	ok := 0
 	require.Eventuallyf(t, func() bool {
@@ -37,7 +37,7 @@ func requireEventuallyPod(t *testing.T, api *kubernetes.Clientset, ctx context.C
 	}, 5*time.Minute, 500*time.Millisecond, "Pod %s did not match the expected condition", podName)
 }
 
-func expectedPodPhase(expectedPhase corev1.PodPhase) func(t *testing.T, pod *corev1.Pod) bool {
+func expectPodPhase(expectedPhase corev1.PodPhase) func(t *testing.T, pod *corev1.Pod) bool {
 	return func(t *testing.T, pod *corev1.Pod) bool {
 		phase := pod.Status.Phase
 		if phase == expectedPhase {

@@ -22,16 +22,16 @@ func TestRolloutHappyCase(t *testing.T) {
 	// Create rollout operator and check it's running and ready.
 	createRolloutOperator(t, ctx, api)
 	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
-	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectedPodPhase(corev1.PodRunning))
+	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning))
 	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectReady())
 
 	// Create mock service, and check that it is in the desired state.
 	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a")
 	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b")
 	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-c")
-	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectedPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
-	requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectedPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
-	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectedPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 
 	// Update all mock service statefulsets.
 	_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-a", "2", false), metav1.UpdateOptions{})

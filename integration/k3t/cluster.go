@@ -164,7 +164,7 @@ func (c Cluster) LBPort() string {
 }
 
 func loadImages(ctx context.Context, t *testing.T, images []string, cluster *k3d.Cluster) {
-	// TODO: we're using k3d.ImportModeTooldNode mode because the auto-detect (that uses pipe) fails in CI: https://github.com/k3d-io/k3d/issues/900
+	// TODO: we're using k3d.ImportModeToolsNode mode because the auto-detect (that uses pipe) fails in CI: https://github.com/k3d-io/k3d/issues/900
 	loadImageOpts := k3d.ImageImportOpts{Mode: k3d.ImportModeToolsNode}
 	err := k3dclient.ImageImportIntoClusterMulti(ctx, runtimes.SelectedRuntime, images, cluster, loadImageOpts)
 	require.NoError(t, err, "Failed to load images.")
