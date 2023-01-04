@@ -92,6 +92,24 @@ func expectedPodReadyState(expectedReady bool) func(t *testing.T, pod *corev1.Po
 	}
 }
 
+func requireEventuallyPodCount(ctx context.Context, t *testing.T, api *kubernetes.Clientset, selector string, expectedCount int) {
+	require.Eventually(t, func() bool {
+		l, err := api.CoreV1().Pods(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			t.Logf("Can't list pods matching %s: %s", selector, err)
+			return false
+		}
+
+		if len(l.Items) != expectedCount {
+			t.Logf("Expected pod count %d for %s, got %d", expectedCount, selector, len(l.Items))
+			return false
+		}
+
+		t.Logf("Got exactly %d pods for %s", expectedCount, selector)
+		return true
+	}, 5*time.Minute, 500*time.Millisecond)
+}
+
 func eventuallyGetFirstPod(ctx context.Context, t *testing.T, api *kubernetes.Clientset, selector string) string {
 	var podName string
 	require.Eventuallyf(t, func() bool {
@@ -107,7 +125,7 @@ func eventuallyGetFirstPod(ctx context.Context, t *testing.T, api *kubernetes.Cl
 		podName = l.Items[0].Name
 		t.Logf("Found %s pod %s", selector, podName)
 		return true
-	}, 5*time.Minute, 500*time.Millisecond, "Could not find rollout-operator pods")
+	}, 5*time.Minute, 500*time.Millisecond, "Could not find pods matching %s", selector)
 	return podName
 }
 
