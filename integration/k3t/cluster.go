@@ -24,7 +24,8 @@ import (
 )
 
 func init() {
-	version.Version = "v5.4.0"
+	version.Version = "v5.4.6"
+
 	if path := os.Getenv("K3T_DEBUG_KUBECONFIG_PATH"); path != "" {
 		DebugKubeconfigPath = path
 	}
