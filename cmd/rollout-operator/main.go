@@ -129,7 +129,7 @@ func main() {
 		if err != nil {
 			fatal(err)
 		}
-		tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger))
+		tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
 		if err := tlsSrv.Start(); err != nil {
 			fatal(err)
 		}

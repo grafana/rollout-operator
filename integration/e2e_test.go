@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -65,60 +64,151 @@ func TestRolloutHappyCase(t *testing.T) {
 	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectReady(), expectVersion("2"))
 }
 
-func TestNoDownscale(t *testing.T) {
+func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 	ctx := context.Background()
 
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
-	requireCreateStatefulSet := func(sts *appsv1.StatefulSet) {
-		_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Create(ctx, sts, metav1.CreateOptions{})
-		require.NoError(t, err, "Can't create StatefulSet")
+	{
+		t.Log("Create the webhook before the rollout-operator, as rollout-operator should update its certificate.")
+		_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+		require.NoError(t, err)
 	}
 
-	requireUpdateStatefulSet := func(sts *appsv1.StatefulSet) {
-		_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, sts, metav1.UpdateOptions{})
-		require.NoError(t, err, "Can't update StatefulSet")
+	{
+		t.Log("Create rollout operator and check it's running and ready.")
+		createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
+		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 	}
 
-	// Create the webhook before the rollout-operator, as rollout-operator should update its certificate.
-	_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
-	require.NoError(t, err)
-
-	// Create rollout operator and check it's running and ready.
-	createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
-	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
-	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-
-	// Create the service with two replicas.
 	mock := mockServiceStatefulSet("mock", "1", true)
-	mock.Spec.Replicas = ptr[int32](2)
-	requireCreateStatefulSet(mock)
-	requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+	{
+		t.Log("Create the service with two replicas.")
+		mock.Spec.Replicas = ptr[int32](2)
+		requireCreateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+	}
 
-	// Scale down, we should be able as it's not labeled with grafana/no-downscale.
-	mock.Spec.Replicas = ptr[int32](1)
-	requireUpdateStatefulSet(mock)
-	requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
+	{
+		t.Log("Scale down, we should be able as it's not labeled with grafana/no-downscale.")
+		mock.Spec.Replicas = ptr[int32](1)
+		requireUpdateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
+	}
 
-	// Scale up and make it have two replicas again.
+	{
+		t.Log("Scale up and make it have two replicas again.")
+		mock.Spec.Replicas = ptr[int32](2)
+		requireUpdateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+	}
+
+	{
+		t.Log("Scale down using /scale subresource, we should be able as it's not labeled with grafana/no-downscale.")
+		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, false)
+		require.NoError(t, err)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
+	}
+}
+
+func TestNoDownscale_DownscaleUpdatingStatefulSet(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	api := cluster.API()
+
+	{
+		t.Log("Create the webhook before the rollout-operator, as rollout-operator should update its certificate.")
+		_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+		require.NoError(t, err)
+	}
+
+	{
+		t.Log("Create rollout operator and check it's running and ready.")
+		createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
+		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+	}
+
+	mock := mockServiceStatefulSet("mock", "1", true)
+	{
+		t.Log("Create the service with two replicas.")
+		mock.ObjectMeta.Labels["grafana.com/no-downscale"] = "true"
+		mock.Spec.Replicas = ptr[int32](2)
+		requireCreateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+	}
+
+	{
+		t.Log("Downscale, this should be rejected.")
+		mock.Spec.Replicas = ptr[int32](1)
+		_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mock, metav1.UpdateOptions{})
+		require.Error(t, err, "Downscale should fail")
+		require.ErrorContains(t, err, `downscale of statefulsets/mock in default from 2 to 1 replicas is not allowed because it has the label 'grafana.com/no-downscale=true'`)
+	}
+
+	{
+		t.Log("Dry run is also rejected.")
+		_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mock, metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}})
+		require.Error(t, err, "Downscale should fail")
+		require.ErrorContains(t, err, `downscale of statefulsets/mock in default from 2 to 1 replicas is not allowed because it has the label 'grafana.com/no-downscale=true'`)
+	}
+
+	{
+		t.Log("Upscaling should still work correctly.")
+		mock.Spec.Replicas = ptr[int32](3)
+		requireUpdateStatefulSet(ctx, t, api, mock)
+	}
+}
+
+func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	api := cluster.API()
+
+	{
+		t.Log("Create the webhook before the rollout-operator, as rollout-operator should update its certificate.")
+		_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+		require.NoError(t, err)
+	}
+
+	{
+		t.Log("Create rollout operator and check it's running and ready.")
+		createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
+		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+	}
+
+	mock := mockServiceStatefulSet("mock", "1", true)
 	mock.ObjectMeta.Labels["grafana.com/no-downscale"] = "true"
-	mock.Spec.Replicas = ptr[int32](2)
-	requireUpdateStatefulSet(mock)
-	requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+	{
+		t.Log("Create the service with two replicas.")
+		mock.Spec.Replicas = ptr[int32](2)
+		requireCreateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+	}
 
-	// Downscale, this should be rejected.
-	mock.Spec.Replicas = ptr[int32](1)
-	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mock, metav1.UpdateOptions{})
-	require.Error(t, err, "Downscale should fail")
-	require.ErrorContains(t, err, `downscale of mock (StatefulSet.apps) from 2 to 1 replicas is not allowed because it has the label 'grafana.com/no-downscale=true`)
+	{
+		t.Log("Downscale using /scale subresource update, this should be rejected.")
+		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, false)
+		require.Error(t, err, "Downscale should fail")
+		require.ErrorContains(t, err, `downscale of statefulsets/mock in default from 2 to 1 replicas is not allowed because it has the label 'grafana.com/no-downscale=true'`)
+	}
 
-	// Dry run is also rejected.
-	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mock, metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}})
-	require.Error(t, err, "Downscale should fail")
-	require.ErrorContains(t, err, `downscale of mock (StatefulSet.apps) from 2 to 1 replicas is not allowed because it has the label 'grafana.com/no-downscale=true`)
+	{
+		t.Log("Dry run is also rejected.")
+		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, true)
+		require.Error(t, err, "Downscale should fail")
+		require.ErrorContains(t, err, `downscale of statefulsets/mock in default from 2 to 1 replicas is not allowed because it has the label 'grafana.com/no-downscale=true'`)
+	}
 
-	// Upscaling should still work correctly.
-	mock.Spec.Replicas = ptr[int32](3)
-	requireUpdateStatefulSet(mock)
+	{
+		t.Log("Upscaling should still work correctly.")
+		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 3, false)
+		require.NoError(t, err)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 3)
+	}
 }

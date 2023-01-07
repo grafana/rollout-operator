@@ -52,6 +52,7 @@ func rolloutOperatorDeployment(namespace string, webhook bool) *appsv1.Deploymen
 	args := []string{
 		fmt.Sprintf("-kubernetes.namespace=%s", namespace),
 		"-reconcile.interval=1s",
+		"-log.level=debug",
 	}
 	if webhook {
 		args = append(args,
@@ -300,17 +301,19 @@ func noDownscaleValidatingWebhook(namespace string) *admissionregistrationv1.Val
 						Rule: admissionregistrationv1.Rule{
 							APIGroups:   []string{"apps"},
 							APIVersions: []string{"v1"},
-							Resources:   []string{"statefulsets", "deploymentsets", "replicasets"},
-							Scope:       ptr(admissionregistrationv1.NamespacedScope),
+							Resources: []string{
+								"statefulsets",
+								"deploymentsets",
+								"replicasets",
+								"statefulsets/scale",
+								"deploymentsets/scale",
+								"replicasets/scale",
+							},
+							Scope: ptr(admissionregistrationv1.NamespacedScope),
 						},
 					},
 				},
-				FailurePolicy: ptr(admissionregistrationv1.Fail),
-				ObjectSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"grafana.com/no-downscale": "true",
-					},
-				},
+				FailurePolicy:           ptr(admissionregistrationv1.Fail),
 				SideEffects:             ptr(admissionregistrationv1.SideEffectClassNone),
 				AdmissionReviewVersions: []string{"v1"},
 			},

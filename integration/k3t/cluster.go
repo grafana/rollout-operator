@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +110,9 @@ func NewCluster(ctx context.Context, t *testing.T, opts ...Option) Cluster {
 
 	// Create the cluster.
 	err = k3dclient.ClusterRun(ctx, runtimes.SelectedRuntime, clusterConfig)
+	if err != nil && strings.Contains(err.Error(), "could not find an available, non-overlapping IPv4 address pool among the defaults to assign to the network") {
+		t.Logf("Hint: try running `docker network prune`")
+	}
 	require.NoError(t, err, "Failed creating cluster.")
 	t.Logf("Cluster '%s' created successfully!", clusterConfig.Cluster.Name)
 

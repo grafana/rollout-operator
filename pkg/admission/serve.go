@@ -6,6 +6,7 @@
 package admission
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,24 +17,25 @@ import (
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/api/admission/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 )
 
 // admitv1beta1Func handles a v1beta1 admission
-type admitv1beta1Func func(log.Logger, v1beta1.AdmissionReview) *v1beta1.AdmissionResponse
+type admitv1beta1Func func(context.Context, log.Logger, v1beta1.AdmissionReview, *kubernetes.Clientset) *v1beta1.AdmissionResponse
 
 // AdmitV1Func handles a v1 admission
-type AdmitV1Func func(log.Logger, v1.AdmissionReview) *v1.AdmissionResponse
+type AdmitV1Func func(context.Context, log.Logger, v1.AdmissionReview, *kubernetes.Clientset) *v1.AdmissionResponse
 
 func delegateV1beta1AdmitToV1(f AdmitV1Func) admitv1beta1Func {
-	return func(logger log.Logger, review v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
+	return func(ctx context.Context, logger log.Logger, review v1beta1.AdmissionReview, api *kubernetes.Clientset) *v1beta1.AdmissionResponse {
 		in := v1.AdmissionReview{Request: convertAdmissionRequestToV1(review.Request)}
-		out := f(logger, in)
+		out := f(ctx, logger, in, api)
 		return convertAdmissionResponseToV1beta1(out)
 	}
 }
 
 // Serve handles the http portion of a request prior to handing to a V1Handler.
-func Serve(admit AdmitV1Func, logger log.Logger) http.HandlerFunc {
+func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body []byte
 		if r.Body != nil {
@@ -69,7 +71,7 @@ func Serve(admit AdmitV1Func, logger log.Logger) http.HandlerFunc {
 			level.Debug(logger).Log("msg", "handling request", "kind", requestedAdmissionReview.Request.Kind, "namespace", requestedAdmissionReview.Request.Namespace, "name", requestedAdmissionReview.Request.Name)
 			responseAdmissionReview := &v1beta1.AdmissionReview{}
 			responseAdmissionReview.SetGroupVersionKind(*gvk)
-			responseAdmissionReview.Response = delegateV1beta1AdmitToV1(admit)(logger, *requestedAdmissionReview)
+			responseAdmissionReview.Response = delegateV1beta1AdmitToV1(admit)(r.Context(), logger, *requestedAdmissionReview, api)
 			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 			responseObj = responseAdmissionReview
 		case v1.SchemeGroupVersion.WithKind("AdmissionReview"):
@@ -81,7 +83,7 @@ func Serve(admit AdmitV1Func, logger log.Logger) http.HandlerFunc {
 			level.Debug(logger).Log("msg", "handling request", "kind", requestedAdmissionReview.Request.Kind, "namespace", requestedAdmissionReview.Request.Namespace, "name", requestedAdmissionReview.Request.Name)
 			responseAdmissionReview := &v1.AdmissionReview{}
 			responseAdmissionReview.SetGroupVersionKind(*gvk)
-			responseAdmissionReview.Response = admit(logger, *requestedAdmissionReview)
+			responseAdmissionReview.Response = admit(r.Context(), logger, *requestedAdmissionReview, api)
 			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 			responseObj = responseAdmissionReview
 		default:
