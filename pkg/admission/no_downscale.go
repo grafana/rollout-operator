@@ -158,7 +158,7 @@ func allowBecauseCannotGetResource(ar v1.AdmissionReview, logger log.Logger, err
 	reviewResponse := v1.AdmissionResponse{}
 	reviewResponse.Allowed = true
 	msg := fmt.Sprintf("can't get %s/%s in namespace %s, allowing the change", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace)
-	level.Error(logger).Log("msg", fmt.Sprintf("can't get %s/%s in namespace %s, allowing the change", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace), "err", err)
+	level.Error(logger).Log("msg", msg, "err", err)
 	reviewResponse.Warnings = append(reviewResponse.Warnings, fmt.Sprintf("%s: %s", msg, err))
 	return &reviewResponse
 }
