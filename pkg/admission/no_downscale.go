@@ -48,17 +48,22 @@ func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, 
 	}
 	logger = log.With(logger, "new_replicas", int32PtrStr(newReplicas))
 
+	// Both replicas are nil, nothing to warn about.
+	if oldReplicas == nil && newReplicas == nil {
+		level.Debug(logger).Log("msg", "no replicas change, allowing")
+		return &v1.AdmissionResponse{Allowed: true}
+	}
 	// Changes from/to nil scale are not downscales strictly speaking.
-	if oldReplicas == nil {
-		return allowWarn(logger, "old replicas is nil, allowing the change")
+	if oldReplicas == nil || newReplicas == nil {
+		return allowWarn(logger, "old/new replicas is nil, allowing the change")
 	}
-	if newReplicas == nil {
-		return allowWarn(logger, "new replicas is nil, allowing the change")
-	}
-
 	// If it's not a downscale, just log debug.
-	if *oldReplicas <= *newReplicas {
-		level.Debug(logger).Log("msg", "upscale allowed", "old_replicas", oldReplicas, "new_replicas", newReplicas)
+	if *oldReplicas < *newReplicas {
+		level.Debug(logger).Log("msg", "upscale allowed")
+		return &v1.AdmissionResponse{Allowed: true}
+	}
+	if *oldReplicas < *newReplicas {
+		level.Debug(logger).Log("msg", "no replicas change, allowing")
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
