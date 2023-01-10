@@ -62,7 +62,7 @@ func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, 
 		level.Debug(logger).Log("msg", "upscale allowed")
 		return &v1.AdmissionResponse{Allowed: true}
 	}
-	if *oldReplicas < *newReplicas {
+	if *oldReplicas == *newReplicas {
 		level.Debug(logger).Log("msg", "no replicas change, allowing")
 		return &v1.AdmissionResponse{Allowed: true}
 	}
