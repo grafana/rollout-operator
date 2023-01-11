@@ -13,14 +13,15 @@ import (
 )
 
 // NewSelfSignedCertProvider creates a new certificate provider that creates a self-signed certificate.
-func NewSelfSignedCertProvider(commonName string, dnsNames []string, orgs []string) SelfSignedProvider {
-	return SelfSignedProvider{commonName: commonName, dnsNames: dnsNames, orgs: orgs}
+func NewSelfSignedCertProvider(commonName string, dnsNames []string, orgs []string, expiration time.Duration) SelfSignedProvider {
+	return SelfSignedProvider{commonName: commonName, dnsNames: dnsNames, orgs: orgs, expiration: expiration}
 }
 
 type SelfSignedProvider struct {
 	orgs       []string
 	dnsNames   []string
 	commonName string
+	expiration time.Duration
 }
 
 func (p SelfSignedProvider) Certificate(context.Context) (Certificate, error) {
@@ -29,7 +30,7 @@ func (p SelfSignedProvider) Certificate(context.Context) (Certificate, error) {
 		SerialNumber:          big.NewInt(2022),
 		Subject:               pkix.Name{Organization: p.orgs},
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(1, 0, 0), // expired in 1 year
+		NotAfter:              time.Now().Add(p.expiration),
 		IsCA:                  true,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
@@ -64,7 +65,7 @@ func (p SelfSignedProvider) Certificate(context.Context) (Certificate, error) {
 			Organization: p.orgs,
 		},
 		NotBefore:   time.Now(),
-		NotAfter:    time.Now().AddDate(1, 0, 0), // expired in 1 year
+		NotAfter:    time.Now().Add(p.expiration),
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:    x509.KeyUsageDigitalSignature,
 	}

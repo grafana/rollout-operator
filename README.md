@@ -244,4 +244,8 @@ subjects:
     namespace: default
 ```
 
+#### Certificate expiration
+
+Whenever the certificate expires, the `rollout-operator` will detect it and will restart, which will trigger the self-signed certificate generation again if it's configured.
+The default expiration for the self-signed certificate is 1 year and it can be changed by setting the flag `-server-tls.self-signed-cert.expiration`.
 

@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -13,6 +17,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/model"
 	"go.uber.org/atomic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -43,11 +48,21 @@ func main() {
 	serverSelfSignedCertSecretName := flag.String("server-tls.self-signed-cert.secret-name", "rollout-operator-self-signed-certificate", "Secret name to store the self-signed certificate (if enabled).")
 	serverSelfSignedCertDNSName := flag.String("server-tls.self-signed-cert.dns-name", "", "DNS name to use for the self-signed certificate (if enabled). If left empty, then 'rollout-operator.<namespace>.svc' will be used.")
 	serverSelfSignedCertOrg := flag.String("server-tls.self-signed-cert.org", "Grafana Labs", "Organization name to use for the self-signed certificate (if enabled).")
+	serverSelfSignedCertExpirationString := flag.String("server-tls.self-signed-cert.expiration", "1y", "Expiration time for the self-signed certificate in Prometheus duration format (Go format plus support for days, weeks and years as 1d/1w/1y).")
 
 	updateWebhooksWithSelfSignedCABundle := flag.Bool("webhooks.update-ca-bundle", true, "Update the CA bundle in the properly labeled webhook configurations with the self-signed certificate (-server-tls.self-signed-cert.enabled should be enabled).")
 
 	logLevel := flag.String("log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
 	flag.Parse()
+
+	var serverSelfSignedCertExpiration time.Duration
+	if *serverSelfSignedCert {
+		serverSelfSignedCertExpirationPromDuration, err := model.ParseDuration(*serverSelfSignedCertExpirationString)
+		if err != nil {
+			fatal(fmt.Errorf("can't parse "))
+		}
+		serverSelfSignedCertExpiration = time.Duration(serverSelfSignedCertExpirationPromDuration)
+	}
 
 	// Validate CLI flags.
 	if *kubeNamespace == "" {
@@ -64,6 +79,7 @@ func main() {
 
 	reg := prometheus.NewRegistry()
 	ready := atomic.NewBool(false)
+	restart := make(chan string)
 
 	// Expose HTTP endpoints.
 	srv := newServer(*serverPort, logger)
@@ -97,7 +113,7 @@ func main() {
 			if *serverSelfSignedCertDNSName == "" {
 				*serverSelfSignedCertDNSName = fmt.Sprintf("rollout-operator.%s.svc", *kubeNamespace)
 			}
-			selfSignedProvider := tlscert.NewSelfSignedCertProvider("rollout-operator", []string{*serverSelfSignedCertDNSName}, []string{*serverSelfSignedCertOrg})
+			selfSignedProvider := tlscert.NewSelfSignedCertProvider("rollout-operator", []string{*serverSelfSignedCertDNSName}, []string{*serverSelfSignedCertOrg}, serverSelfSignedCertExpiration)
 			certProvider = tlscert.NewKubeSecretPersistedCertProvider(selfSignedProvider, logger, kubeClient, *kubeNamespace, *serverSelfSignedCertSecretName)
 		} else if *serverCertFile != "" && *serverKeyFile != "" {
 			certProvider, err = tlscert.NewFileCertProvider(*serverCertFile, *serverKeyFile)
@@ -112,6 +128,7 @@ func main() {
 		if err != nil {
 			fatal(err)
 		}
+		checkAndWatchCertificate(cert, logger, restart)
 
 		if *updateWebhooksWithSelfSignedCABundle {
 			if !*serverSelfSignedCert {
@@ -141,9 +158,49 @@ func main() {
 		fatal(errors.Wrap(err, "error while initialising the controller"))
 	}
 
+	// Listen to sigterm, as well as for restart (like for certificate renewal).
+	go func() {
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, syscall.SIGINT, syscall.SIGTERM)
+		select {
+		case sig := <-sigint:
+			level.Info(logger).Log("msg", "received signal", "signal", sig)
+		case reason := <-restart:
+			level.Info(logger).Log("msg", "restarting", "reason", reason)
+		}
+		c.Stop()
+	}()
+
 	// The operator is ready once the controller successfully initialised.
 	ready.Store(true)
+
+	// Run and block until stopped.
 	c.Run()
+}
+
+func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, restart chan string) {
+	pair, err := tls.X509KeyPair(cert.Cert, cert.Key)
+	if err != nil {
+		fatal(fmt.Errorf("failed to parse the provided certificate pair: %w", err))
+	}
+
+	for i, bytes := range pair.Certificate {
+		c, err := x509.ParseCertificate(bytes)
+		if err != nil {
+			fatal(fmt.Errorf("failed to parse the provided certificate %s: %s", i, err))
+		}
+
+		expiresIn := time.Until(c.NotAfter)
+		if expiresIn <= 0 {
+			fatal(fmt.Errorf("the provided certificate %d for %s issued by %s is expired: notAfter=%s", i, c.Subject, c.Issuer, c.NotAfter))
+		}
+
+		level.Info(logger).Log("msg", "setting restart timer for CA certificate expiration", "expires_in", expiresIn, "expires_at", c.NotAfter, "subject", c.Subject, "issuer", c.Issuer)
+		time.AfterFunc(expiresIn, func() {
+			restart <- fmt.Sprintf("certificate for %s issued by %s expired", c.Subject, c.Issuer)
+		})
+	}
+
 }
 
 func buildKubeConfig(apiURL, cfgFile string) (*rest.Config, error) {

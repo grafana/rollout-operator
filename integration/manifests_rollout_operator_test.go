@@ -18,6 +18,13 @@ import (
 )
 
 func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace string, webhook bool) {
+	createRolloutOperatorDependencies(t, ctx, api, namespace, webhook)
+
+	_, err := api.AppsV1().Deployments(namespace).Create(ctx, rolloutOperatorDeployment(namespace, webhook), metav1.CreateOptions{})
+	require.NoError(t, err)
+}
+
+func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace string, webhook bool) {
 	_, err := api.CoreV1().ServiceAccounts(namespace).Create(ctx, rolloutOperatorServiceAccount(), metav1.CreateOptions{})
 	require.NoError(t, err)
 
@@ -43,9 +50,6 @@ func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Cl
 		_, err = api.CoreV1().Services(namespace).Create(ctx, rolloutOperatorService(), metav1.CreateOptions{})
 		require.NoError(t, err)
 	}
-
-	_, err = api.AppsV1().Deployments(namespace).Create(ctx, rolloutOperatorDeployment(namespace, webhook), metav1.CreateOptions{})
-	require.NoError(t, err)
 }
 
 func rolloutOperatorDeployment(namespace string, webhook bool) *appsv1.Deployment {

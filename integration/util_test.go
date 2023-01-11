@@ -153,6 +153,12 @@ func requireCreateDeployment(ctx context.Context, t *testing.T, api *kubernetes.
 	require.NoError(t, err, "Can't create deployment")
 }
 
+func requireUpdatedeployment(ctx context.Context, t *testing.T, api *kubernetes.Clientset, deployment *appsv1.Deployment) {
+	t.Helper()
+	_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Update(ctx, deployment, metav1.UpdateOptions{})
+	require.NoError(t, err, "Can't update deployment")
+}
+
 func requireCreateStatefulSet(ctx context.Context, t *testing.T, api *kubernetes.Clientset, sts *appsv1.StatefulSet) {
 	t.Helper()
 	_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Create(ctx, sts, metav1.CreateOptions{})
