@@ -23,7 +23,7 @@ const (
 )
 
 func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource)
+	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
 
 	oldObj, oldGVK, err := codecs.UniversalDeserializer().Decode(ar.Request.OldObject.Raw, nil, nil)
 	if err != nil {
