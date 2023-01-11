@@ -184,7 +184,7 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 		}
 
 		// TODO watch webhook configurations instead of doing one-off.
-		err = admission.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA)
+		err = tlscert.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA)
 		if err != nil {
 			fatal(err)
 		}
