@@ -55,13 +55,15 @@ func (cp KubeSecretPersistedCertProvider) Certificate(ctx context.Context) (Cert
 }
 
 func (cp KubeSecretPersistedCertProvider) getOrCreateCertificateSecret(ctx context.Context, namespace, secretName string) (*corev1.Secret, error) {
+	found := false
 	secret, err := cp.kubeClient.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 	if err == nil {
 		level.Debug(cp.logger).Log("msg", "found existing certificate secret", "secret", secretName)
 		if len(secret.Data) > 0 {
 			return secret, nil
 		}
-		level.Warn(cp.logger).Log("msg", "found a certificate secret but it's empty, will update with new certirficate data", "secret", secretName)
+		level.Warn(cp.logger).Log("msg", "found a certificate secret but it's empty, will update with new certificate data", "secret", secretName)
+		found = true
 	} else if !apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("failed to get secret: %w", err)
 	}
@@ -72,7 +74,7 @@ func (cp KubeSecretPersistedCertProvider) getOrCreateCertificateSecret(ctx conte
 		return nil, fmt.Errorf("failed to generate ca and certificate key pair: %w", err)
 	}
 
-	if secret != nil {
+	if found {
 		// We already had a secret, we need to update it.
 		secret, err := cp.kubeClient.CoreV1().Secrets(namespace).Update(ctx, newCertSecret(secretName, cert), metav1.UpdateOptions{})
 		if err != nil {
