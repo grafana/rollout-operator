@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"time"
 )
@@ -49,13 +50,6 @@ func (p SelfSignedProvider) Certificate(context.Context) (Certificate, error) {
 		return Certificate{}, err
 	}
 
-	// CA certificate with PEM encoded
-	caPEM := new(bytes.Buffer)
-	_ = pem.Encode(caPEM, &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: caBytes,
-	})
-
 	// new certificate config
 	newCert := &x509.Certificate{
 		DNSNames:     p.dnsNames,
@@ -82,19 +76,17 @@ func (p SelfSignedProvider) Certificate(context.Context) (Certificate, error) {
 		return Certificate{}, err
 	}
 
-	// new certificate with PEM encoded
-	newCertPEM := new(bytes.Buffer)
-	_ = pem.Encode(newCertPEM, &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: newCertBytes,
-	})
+	return Certificate{
+		CA:   pemBlockBytes(&pem.Block{Type: "CERTIFICATE", Bytes: caBytes}),
+		Cert: pemBlockBytes(&pem.Block{Type: "CERTIFICATE", Bytes: newCertBytes}),
+		Key:  pemBlockBytes(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(newPrivateKey)}),
+	}, nil
+}
 
-	// new private key with PEM encoded
-	newPrivateKeyPEM := new(bytes.Buffer)
-	_ = pem.Encode(newPrivateKeyPEM, &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(newPrivateKey),
-	})
-
-	return Certificate{CA: caPEM.Bytes(), Cert: newCertPEM.Bytes(), Key: newPrivateKeyPEM.Bytes()}, nil
+func pemBlockBytes(block *pem.Block) []byte {
+	buf := new(bytes.Buffer)
+	if err := pem.Encode(buf, block); err != nil {
+		panic(fmt.Errorf("failed writing PEM block %+v into bytes.Buffer: %s", block, err))
+	}
+	return buf.Bytes()
 }
