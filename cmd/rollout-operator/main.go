@@ -31,6 +31,8 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 )
 
+const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
+
 type config struct {
 	logLevel string
 
@@ -45,61 +47,59 @@ type config struct {
 	serverCertFile   string
 	serverKeyFile    string
 
-	serverSelfSignedCert                 bool
-	serverSelfSignedCertSecretName       string
-	serverSelfSignedCertDNSName          string
-	serverSelfSignedCertOrg              string
-	serverSelfSignedCertExpirationString string
+	serverSelfSignedCert           bool
+	serverSelfSignedCertSecretName string
+	serverSelfSignedCertDNSName    string
+	serverSelfSignedCertOrg        string
+	serverSelfSignedCertExpiration model.Duration
 
 	updateWebhooksWithSelfSignedCABundle bool
+}
+
+func (cfg *config) register(fs *flag.FlagSet) {
+	fs.StringVar(&cfg.logLevel, "log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
+	fs.IntVar(&cfg.serverPort, "server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
+	fs.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
+	fs.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
+	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
+	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
+
+	fs.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
+	fs.IntVar(&cfg.serverTLSPort, "server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
+	fs.StringVar(&cfg.serverCertFile, "server-tls.cert-file", "", "Path to the TLS certificate file if not using the self-signed certificate.")
+	fs.StringVar(&cfg.serverKeyFile, "server-tls.key-file", "", "Path to the TLS private key file if not using the self-signed certificate.")
+
+	fs.BoolVar(&cfg.serverSelfSignedCert, "server-tls.self-signed-cert.enabled", true, "Generate a self-signed certificate for the TLS server.")
+	fs.StringVar(&cfg.serverSelfSignedCertSecretName, "server-tls.self-signed-cert.secret-name", "rollout-operator-self-signed-certificate", "Secret name to store the self-signed certificate (if enabled).")
+	fs.StringVar(&cfg.serverSelfSignedCertDNSName, "server-tls.self-signed-cert.dns-name", "", "DNS name to use for the self-signed certificate (if enabled). If left empty, then 'rollout-operator.<namespace>.svc' will be used.")
+	fs.StringVar(&cfg.serverSelfSignedCertOrg, "server-tls.self-signed-cert.org", "Grafana Labs", "Organization name to use for the self-signed certificate (if enabled).")
+	fs.Var(&cfg.serverSelfSignedCertExpiration, "server-tls.self-signed-cert.expiration", "Expiration time for the self-signed certificate in Prometheus duration format (Go format plus support for days, weeks and years as 1d/1w/1y).")
+	cfg.serverSelfSignedCertExpiration = defaultServerSelfSignedCertExpiration
+
+	fs.BoolVar(&cfg.updateWebhooksWithSelfSignedCABundle, "webhooks.update-ca-bundle", true, "Update the CA bundle in the properly labeled webhook configurations with the self-signed certificate (-server-tls.self-signed-cert.enabled should be enabled).")
+}
+
+func (cfg config) validate() error {
+	// Validate CLI flags.
+	if cfg.kubeNamespace == "" {
+		return errors.New("the Kubernetes namespace has not been specified")
+	}
+	if (cfg.kubeAPIURL == "") != (cfg.kubeConfigFile == "") {
+		return errors.New("either configure both Kubernetes API URL and config file or none of them")
+	}
+	return nil
 }
 
 func main() {
 	// CLI flags.
 	var cfg config
-	flag.StringVar(&cfg.logLevel, "log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
-	flag.IntVar(&cfg.serverPort, "server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
-	flag.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	flag.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	flag.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
-	flag.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
-
-	flag.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
-	flag.IntVar(&cfg.serverTLSPort, "server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
-	flag.StringVar(&cfg.serverCertFile, "server-tls.cert-file", "", "Path to the TLS certificate file if not using the self-signed certificate.")
-	flag.StringVar(&cfg.serverKeyFile, "server-tls.key-file", "", "Path to the TLS private key file if not using the self-signed certificate.")
-
-	flag.BoolVar(&cfg.serverSelfSignedCert, "server-tls.self-signed-cert.enabled", true, "Generate a self-signed certificate for the TLS server.")
-	flag.StringVar(&cfg.serverSelfSignedCertSecretName, "server-tls.self-signed-cert.secret-name", "rollout-operator-self-signed-certificate", "Secret name to store the self-signed certificate (if enabled).")
-	flag.StringVar(&cfg.serverSelfSignedCertDNSName, "server-tls.self-signed-cert.dns-name", "", "DNS name to use for the self-signed certificate (if enabled). If left empty, then 'rollout-operator.<namespace>.svc' will be used.")
-	flag.StringVar(&cfg.serverSelfSignedCertOrg, "server-tls.self-signed-cert.org", "Grafana Labs", "Organization name to use for the self-signed certificate (if enabled).")
-	flag.StringVar(&cfg.serverSelfSignedCertExpirationString, "server-tls.self-signed-cert.expiration", "1y", "Expiration time for the self-signed certificate in Prometheus duration format (Go format plus support for days, weeks and years as 1d/1w/1y).")
-
-	flag.BoolVar(&cfg.updateWebhooksWithSelfSignedCABundle, "webhooks.update-ca-bundle", true, "Update the CA bundle in the properly labeled webhook configurations with the self-signed certificate (-server-tls.self-signed-cert.enabled should be enabled).")
-
-	flag.Parse()
-
-	var serverSelfSignedCertExpiration time.Duration
-	if cfg.serverSelfSignedCert {
-		serverSelfSignedCertExpirationPromDuration, err := model.ParseDuration(cfg.serverSelfSignedCertExpirationString)
-		if err != nil {
-			fatal(fmt.Errorf("can't parse "))
-		}
-		serverSelfSignedCertExpiration = time.Duration(serverSelfSignedCertExpirationPromDuration)
-	}
-
-	// Validate CLI flags.
-	if cfg.kubeNamespace == "" {
-		fatal(errors.New("The Kubernetes namespace has not been specified."))
-	}
-	if (cfg.kubeAPIURL == "") != (cfg.kubeConfigFile == "") {
-		fatal(errors.New("Either configure both Kubernetes API URL and config file or none of them."))
-	}
+	fs := flag.NewFlagSet("rollout-operator", flag.ExitOnError)
+	cfg.register(fs)
+	check(fs.Parse(os.Args[1:]))
+	check(cfg.validate())
 
 	logger, err := initLogger(cfg.logLevel)
-	if err != nil {
-		fatal(err)
-	}
+	check(err)
 
 	reg := prometheus.NewRegistry()
 	ready := atomic.NewBool(false)
@@ -108,90 +108,26 @@ func main() {
 	// Expose HTTP endpoints.
 	srv := newServer(cfg.serverPort, logger)
 	srv.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	srv.Handle("/ready", http.HandlerFunc(func(res http.ResponseWriter, _ *http.Request) {
-		if ready.Load() {
-			res.WriteHeader(http.StatusOK)
-		} else {
-			res.WriteHeader(http.StatusInternalServerError)
-		}
-	}))
-
-	if err := srv.Start(); err != nil {
-		fatal(err)
-	}
+	srv.Handle("/ready", readyHandler(ready))
+	check(srv.Start())
 
 	// Build the Kubernetes client config.
 	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile)
-	if err != nil {
-		fatal(errors.Wrap(err, "failed to build Kubernetes config"))
-	}
+	check(errors.Wrap(err, "failed to build Kubernetes client config"))
 
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
-	if err != nil {
-		fatal(errors.Wrap(err, "failed to build Kubernetes client"))
-	}
+	check(errors.Wrap(err, "failed to create Kubernetes client"))
 
-	if cfg.serverTLSEnabled {
-		var certProvider tlscert.Provider
-		if cfg.serverSelfSignedCert {
-			if cfg.serverSelfSignedCertDNSName == "" {
-				cfg.serverSelfSignedCertDNSName = fmt.Sprintf("rollout-operator.%s.svc", cfg.kubeNamespace)
-			}
-			selfSignedProvider := tlscert.NewSelfSignedCertProvider("rollout-operator", []string{cfg.serverSelfSignedCertDNSName}, []string{cfg.serverSelfSignedCertOrg}, serverSelfSignedCertExpiration)
-			certProvider = tlscert.NewKubeSecretPersistedCertProvider(selfSignedProvider, logger, kubeClient, cfg.kubeNamespace, cfg.serverSelfSignedCertSecretName)
-		} else if cfg.serverCertFile != "" && cfg.serverKeyFile != "" {
-			certProvider, err = tlscert.NewFileCertProvider(cfg.serverCertFile, cfg.serverKeyFile)
-			if err != nil {
-				fatal(err)
-			}
-		} else {
-			fatal(errors.New("either self-signed certificate should be enabled or path to the certificate and key should be provided"))
-		}
-
-		cert, err := certProvider.Certificate(context.Background())
-		if err != nil {
-			fatal(err)
-		}
-		checkAndWatchCertificate(cert, logger, restart)
-
-		if cfg.updateWebhooksWithSelfSignedCABundle {
-			if !cfg.serverSelfSignedCert {
-				fatal(errors.New("self-signed certificate should be enabled to update the CA bundle in the webhook configurations"))
-			}
-
-			// TODO watch webhook configurations instead of doing one-off.
-			err = admission.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA)
-			if err != nil {
-				fatal(err)
-			}
-		}
-
-		tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert)
-		if err != nil {
-			fatal(err)
-		}
-		tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
-		if err := tlsSrv.Start(); err != nil {
-			fatal(err)
-		}
-	}
+	// startTLS server if enabled.
+	maybeStartTLSServer(cfg, logger, kubeClient, restart)
 
 	// Init the controller.
 	c := controller.NewRolloutController(kubeClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
-	if err := c.Init(); err != nil {
-		fatal(errors.Wrap(err, "error while initialising the controller"))
-	}
+	check(errors.Wrap(c.Init(), "failed to init controller"))
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).
 	go func() {
-		sigint := make(chan os.Signal, 1)
-		signal.Notify(sigint, syscall.SIGINT, syscall.SIGTERM)
-		select {
-		case sig := <-sigint:
-			level.Info(logger).Log("msg", "received signal", "signal", sig)
-		case reason := <-restart:
-			level.Info(logger).Log("msg", "restarting", "reason", reason)
-		}
+		waitForSignalOrRestart(logger, restart)
 		c.Stop()
 	}()
 
@@ -200,6 +136,68 @@ func main() {
 
 	// Run and block until stopped.
 	c.Run()
+}
+
+func waitForSignalOrRestart(logger log.Logger, restart chan string) {
+	sigint := make(chan os.Signal, 1)
+	signal.Notify(sigint, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case sig := <-sigint:
+		level.Info(logger).Log("msg", "received signal", "signal", sig)
+	case reason := <-restart:
+		level.Info(logger).Log("msg", "restarting", "reason", reason)
+	}
+}
+
+func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string) {
+	if !cfg.serverTLSEnabled {
+		level.Info(logger).Log("msg", "tls server is not enabled")
+		return
+	}
+
+	var certProvider tlscert.Provider
+	var err error
+	if cfg.serverSelfSignedCert {
+		if cfg.serverSelfSignedCertDNSName == "" {
+			cfg.serverSelfSignedCertDNSName = fmt.Sprintf("rollout-operator.%s.svc", cfg.kubeNamespace)
+		}
+		selfSignedProvider := tlscert.NewSelfSignedCertProvider("rollout-operator", []string{cfg.serverSelfSignedCertDNSName}, []string{cfg.serverSelfSignedCertOrg}, time.Duration(cfg.serverSelfSignedCertExpiration))
+		certProvider = tlscert.NewKubeSecretPersistedCertProvider(selfSignedProvider, logger, kubeClient, cfg.kubeNamespace, cfg.serverSelfSignedCertSecretName)
+	} else if cfg.serverCertFile != "" && cfg.serverKeyFile != "" {
+		certProvider, err = tlscert.NewFileCertProvider(cfg.serverCertFile, cfg.serverKeyFile)
+		if err != nil {
+			fatal(err)
+		}
+	} else {
+		fatal(errors.New("either self-signed certificate should be enabled or path to the certificate and key should be provided"))
+	}
+
+	cert, err := certProvider.Certificate(context.Background())
+	if err != nil {
+		fatal(err)
+	}
+	checkAndWatchCertificate(cert, logger, restart)
+
+	if cfg.updateWebhooksWithSelfSignedCABundle {
+		if !cfg.serverSelfSignedCert {
+			fatal(errors.New("self-signed certificate should be enabled to update the CA bundle in the webhook configurations"))
+		}
+
+		// TODO watch webhook configurations instead of doing one-off.
+		err = admission.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA)
+		if err != nil {
+			fatal(err)
+		}
+	}
+
+	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert)
+	if err != nil {
+		fatal(err)
+	}
+	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
+	if err := tlsSrv.Start(); err != nil {
+		fatal(err)
+	}
 }
 
 func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, restart chan string) {
@@ -260,6 +258,22 @@ func initLogger(minLevel string) (log.Logger, error) {
 	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
 
 	return logger, nil
+}
+
+func readyHandler(ready *atomic.Bool) http.Handler {
+	return http.HandlerFunc(func(res http.ResponseWriter, _ *http.Request) {
+		if ready.Load() {
+			res.WriteHeader(http.StatusOK)
+		} else {
+			res.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+}
+
+func check(err error) {
+	if err != nil {
+		fatal(err)
+	}
 }
 
 func fatal(err error) {
