@@ -165,17 +165,14 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 		certProvider = tlscert.NewKubeSecretPersistedCertProvider(selfSignedProvider, logger, kubeClient, cfg.kubeNamespace, cfg.serverSelfSignedCertSecretName)
 	} else if cfg.serverCertFile != "" && cfg.serverKeyFile != "" {
 		certProvider, err = tlscert.NewFileCertProvider(cfg.serverCertFile, cfg.serverKeyFile)
-		if err != nil {
-			fatal(err)
-		}
+		check(errors.Wrap(err, "failed to create file cert provider"))
 	} else {
 		fatal(errors.New("either self-signed certificate should be enabled or path to the certificate and key should be provided"))
 	}
 
 	cert, err := certProvider.Certificate(context.Background())
-	if err != nil {
-		fatal(err)
-	}
+	check(errors.Wrap(err, "failed to get certificate"))
+
 	checkAndWatchCertificate(cert, logger, restart)
 
 	if cfg.updateWebhooksWithSelfSignedCABundle {
@@ -184,27 +181,18 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 		}
 
 		// TODO watch webhook configurations instead of doing one-off.
-		err = tlscert.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA)
-		if err != nil {
-			fatal(err)
-		}
+		check(tlscert.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
 	}
 
 	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert)
-	if err != nil {
-		fatal(err)
-	}
+	check(errors.Wrap(err, "failed to create tls server"))
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
-	if err := tlsSrv.Start(); err != nil {
-		fatal(err)
-	}
+	check(errors.Wrap(tlsSrv.Start(), "failed to start tls server"))
 }
 
 func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, restart chan string) {
 	pair, err := tls.X509KeyPair(cert.Cert, cert.Key)
-	if err != nil {
-		fatal(fmt.Errorf("failed to parse the provided certificate pair: %w", err))
-	}
+	check(errors.Wrap(err, "failed to parse the provided certificate"))
 
 	for i, bytes := range pair.Certificate {
 		c, err := x509.ParseCertificate(bytes)
