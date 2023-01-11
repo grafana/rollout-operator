@@ -200,7 +200,11 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    verbs: [create, update, get]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [rollout-operator-self-signed-certificate]
+    verbs: [update, get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -215,8 +219,6 @@ subjects:
     name: rollout-operator
     namespace: default
 ```
-
->**Note**: it is possible to restrict this `Role` with `resourceNames: ["<value of -server-tls.self-signed-cert.secret-name>"]`, but [Kubernetes won't allow the secret creation then](https://kubernetes.io/docs/reference/access-authn-authz/rbac/), so the secret needs to be pre-created so the `rollout-operator` will only have to update it with proper certificate contents. 
 
 And:
 

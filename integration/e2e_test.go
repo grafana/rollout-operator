@@ -217,9 +217,7 @@ func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 	}
 }
 
-func TestSelfSignedCertificateWithExistingSecretAndRestrictedRole(t *testing.T) {
-	const certificateSecretName = "certificate"
-
+func TestSelfSignedCertificateWithExistingEmptySecret(t *testing.T) {
 	ctx := context.Background()
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
@@ -228,35 +226,6 @@ func TestSelfSignedCertificateWithExistingSecretAndRestrictedRole(t *testing.T) 
 	{
 		t.Log("Create the webhook before the rollout-operator, as rollout-operator should update its certificate.")
 		_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		t.Logf("Create roles etc. for rollout-operator. Update them to be able to update only the specific secret.")
-		_, err = api.CoreV1().ServiceAccounts(corev1.NamespaceDefault).Create(ctx, rolloutOperatorServiceAccount(), metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		_, err = api.RbacV1().Roles(corev1.NamespaceDefault).Create(ctx, rolloutOperatorRole(), metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		_, err = api.RbacV1().RoleBindings(corev1.NamespaceDefault).Create(ctx, rolloutOperatorRoleBinding(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		t.Logf("The webhook role should be restricted only to our secret, and it's not allowed to create them.")
-		webhookRole := webhookRolloutOperatorRole()
-		webhookRole.Rules[0].ResourceNames = []string{certificateSecretName}
-		webhookRole.Rules[0].Verbs = []string{"get", "update"}
-		_, err = api.RbacV1().Roles(corev1.NamespaceDefault).Create(ctx, webhookRole, metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		_, err = api.RbacV1().RoleBindings(corev1.NamespaceDefault).Create(ctx, webhookRolloutOperatorRoleBinding(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		_, err = api.RbacV1().ClusterRoles().Create(ctx, webhookRolloutOperatorClusterRole(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		_, err = api.RbacV1().ClusterRoleBindings().Create(ctx, webhookRolloutOperatorClusterRoleBinding(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		_, err = api.CoreV1().Services(corev1.NamespaceDefault).Create(ctx, rolloutOperatorService(), metav1.CreateOptions{})
 		require.NoError(t, err)
 
 		t.Log("Create an empty secret before the rollout-operator.")
@@ -270,9 +239,7 @@ func TestSelfSignedCertificateWithExistingSecretAndRestrictedRole(t *testing.T) 
 		require.NoError(t, err)
 
 		t.Log("Create rollout-operator and check it's running and ready.")
-		deployment := rolloutOperatorDeployment(corev1.NamespaceDefault, true)
-		deployment.Spec.Template.Spec.Containers[0].Args = append(deployment.Spec.Template.Spec.Containers[0].Args, "-server-tls.self-signed-cert.secret-name="+certificateSecretName)
-		requireCreateDeployment(ctx, t, api, deployment)
+		createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 	}
@@ -355,7 +322,7 @@ func TestExpiringCertificate(t *testing.T) {
 }
 
 func getCertificateExpirationFromSecret(t *testing.T, api *kubernetes.Clientset, ctx context.Context) time.Time {
-	secret, err := api.CoreV1().Secrets(corev1.NamespaceDefault).Get(ctx, "rollout-operator-self-signed-certificate", metav1.GetOptions{})
+	secret, err := api.CoreV1().Secrets(corev1.NamespaceDefault).Get(ctx, certificateSecretName, metav1.GetOptions{})
 	require.NoError(t, err, "Secret should exist one rollout-operator is running")
 	return getCertificateExpiration(t, secret)
 }

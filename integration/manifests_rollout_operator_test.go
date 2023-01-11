@@ -17,6 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const certificateSecretName = "certificate"
+
 func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace string, webhook bool) {
 	createRolloutOperatorDependencies(t, ctx, api, namespace, webhook)
 
@@ -61,6 +63,7 @@ func rolloutOperatorDeployment(namespace string, webhook bool) *appsv1.Deploymen
 	if webhook {
 		args = append(args,
 			"-server-tls.enabled=true",
+			"-server-tls.self-signed-cert.secret-name="+certificateSecretName,
 		)
 	}
 
@@ -213,9 +216,15 @@ func webhookRolloutOperatorRole() *rbacv1.Role {
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
+				APIGroups:     []string{""},
+				Resources:     []string{"secrets"},
+				ResourceNames: []string{certificateSecretName},
+				Verbs:         []string{"update", "get"},
+			},
+			{
 				APIGroups: []string{""},
 				Resources: []string{"secrets"},
-				Verbs:     []string{"create", "update", "get"},
+				Verbs:     []string{"create"},
 			},
 		},
 	}
