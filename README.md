@@ -120,10 +120,10 @@ webhooks:
     operations: [UPDATE]
     resources:
     - statefulsets
-    - deploymentsets
+    - deployments
     - replicasets
     - statefulsets/scale
-    - deploymentsets/scale
+    - deployments/scale
     - replicasets/scale
     scope: Namespaced
   sideEffects: None

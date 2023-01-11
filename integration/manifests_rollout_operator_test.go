@@ -303,10 +303,10 @@ func noDownscaleValidatingWebhook(namespace string) *admissionregistrationv1.Val
 							APIVersions: []string{"v1"},
 							Resources: []string{
 								"statefulsets",
-								"deploymentsets",
+								"deployments",
 								"replicasets",
 								"statefulsets/scale",
-								"deploymentsets/scale",
+								"deployments/scale",
 								"replicasets/scale",
 							},
 							Scope: ptr(admissionregistrationv1.NamespacedScope),
