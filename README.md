@@ -87,7 +87,7 @@ rules:
 ## Webhooks
 
 [Dynamic Admission Control](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/) webhooks are offered on the HTTPS server of the rollout-operator.
-You can enable an HTTPS by setting the flag `-server-tls.enabled=true`.
+You can enable HTTPS by setting the flag `-server-tls.enabled=true`.
 The HTTPS server will listen on port `-server-tls.port=8443` and expose the following endpoints.
 
 ### `/admission/no-downscale`
