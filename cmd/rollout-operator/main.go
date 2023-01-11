@@ -31,33 +31,57 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 )
 
+type config struct {
+	logLevel string
+
+	serverPort        int
+	kubeAPIURL        string
+	kubeConfigFile    string
+	kubeNamespace     string
+	reconcileInterval time.Duration
+
+	serverTLSEnabled bool
+	serverTLSPort    int
+	serverCertFile   string
+	serverKeyFile    string
+
+	serverSelfSignedCert                 bool
+	serverSelfSignedCertSecretName       string
+	serverSelfSignedCertDNSName          string
+	serverSelfSignedCertOrg              string
+	serverSelfSignedCertExpirationString string
+
+	updateWebhooksWithSelfSignedCABundle bool
+}
+
 func main() {
 	// CLI flags.
-	serverPort := flag.Int("server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
-	kubeAPIURL := flag.String("kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	kubeConfigFile := flag.String("kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	kubeNamespace := flag.String("kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
-	reconcileInterval := flag.Duration("reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
+	var cfg config
+	flag.StringVar(&cfg.logLevel, "log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
+	flag.IntVar(&cfg.serverPort, "server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
+	flag.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
+	flag.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
+	flag.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
+	flag.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
 
-	serverTLSEnabled := flag.Bool("server-tls.enabled", false, "Enable TLS server for webhook connections.")
-	serverTLSPort := flag.Int("server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
-	serverCertFile := flag.String("server-tls.cert-file", "", "Path to the TLS certificate file if not using the self-signed certificate.")
-	serverKeyFile := flag.String("server-tls.key-file", "", "Path to the TLS private key file if not using the self-signed certificate.")
+	flag.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
+	flag.IntVar(&cfg.serverTLSPort, "server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
+	flag.StringVar(&cfg.serverCertFile, "server-tls.cert-file", "", "Path to the TLS certificate file if not using the self-signed certificate.")
+	flag.StringVar(&cfg.serverKeyFile, "server-tls.key-file", "", "Path to the TLS private key file if not using the self-signed certificate.")
 
-	serverSelfSignedCert := flag.Bool("server-tls.self-signed-cert.enabled", true, "Generate a self-signed certificate for the TLS server.")
-	serverSelfSignedCertSecretName := flag.String("server-tls.self-signed-cert.secret-name", "rollout-operator-self-signed-certificate", "Secret name to store the self-signed certificate (if enabled).")
-	serverSelfSignedCertDNSName := flag.String("server-tls.self-signed-cert.dns-name", "", "DNS name to use for the self-signed certificate (if enabled). If left empty, then 'rollout-operator.<namespace>.svc' will be used.")
-	serverSelfSignedCertOrg := flag.String("server-tls.self-signed-cert.org", "Grafana Labs", "Organization name to use for the self-signed certificate (if enabled).")
-	serverSelfSignedCertExpirationString := flag.String("server-tls.self-signed-cert.expiration", "1y", "Expiration time for the self-signed certificate in Prometheus duration format (Go format plus support for days, weeks and years as 1d/1w/1y).")
+	flag.BoolVar(&cfg.serverSelfSignedCert, "server-tls.self-signed-cert.enabled", true, "Generate a self-signed certificate for the TLS server.")
+	flag.StringVar(&cfg.serverSelfSignedCertSecretName, "server-tls.self-signed-cert.secret-name", "rollout-operator-self-signed-certificate", "Secret name to store the self-signed certificate (if enabled).")
+	flag.StringVar(&cfg.serverSelfSignedCertDNSName, "server-tls.self-signed-cert.dns-name", "", "DNS name to use for the self-signed certificate (if enabled). If left empty, then 'rollout-operator.<namespace>.svc' will be used.")
+	flag.StringVar(&cfg.serverSelfSignedCertOrg, "server-tls.self-signed-cert.org", "Grafana Labs", "Organization name to use for the self-signed certificate (if enabled).")
+	flag.StringVar(&cfg.serverSelfSignedCertExpirationString, "server-tls.self-signed-cert.expiration", "1y", "Expiration time for the self-signed certificate in Prometheus duration format (Go format plus support for days, weeks and years as 1d/1w/1y).")
 
-	updateWebhooksWithSelfSignedCABundle := flag.Bool("webhooks.update-ca-bundle", true, "Update the CA bundle in the properly labeled webhook configurations with the self-signed certificate (-server-tls.self-signed-cert.enabled should be enabled).")
+	flag.BoolVar(&cfg.updateWebhooksWithSelfSignedCABundle, "webhooks.update-ca-bundle", true, "Update the CA bundle in the properly labeled webhook configurations with the self-signed certificate (-server-tls.self-signed-cert.enabled should be enabled).")
 
-	logLevel := flag.String("log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
 	flag.Parse()
 
 	var serverSelfSignedCertExpiration time.Duration
-	if *serverSelfSignedCert {
-		serverSelfSignedCertExpirationPromDuration, err := model.ParseDuration(*serverSelfSignedCertExpirationString)
+	if cfg.serverSelfSignedCert {
+		serverSelfSignedCertExpirationPromDuration, err := model.ParseDuration(cfg.serverSelfSignedCertExpirationString)
 		if err != nil {
 			fatal(fmt.Errorf("can't parse "))
 		}
@@ -65,14 +89,14 @@ func main() {
 	}
 
 	// Validate CLI flags.
-	if *kubeNamespace == "" {
+	if cfg.kubeNamespace == "" {
 		fatal(errors.New("The Kubernetes namespace has not been specified."))
 	}
-	if (*kubeAPIURL == "") != (*kubeConfigFile == "") {
+	if (cfg.kubeAPIURL == "") != (cfg.kubeConfigFile == "") {
 		fatal(errors.New("Either configure both Kubernetes API URL and config file or none of them."))
 	}
 
-	logger, err := initLogger(*logLevel)
+	logger, err := initLogger(cfg.logLevel)
 	if err != nil {
 		fatal(err)
 	}
@@ -82,7 +106,7 @@ func main() {
 	restart := make(chan string)
 
 	// Expose HTTP endpoints.
-	srv := newServer(*serverPort, logger)
+	srv := newServer(cfg.serverPort, logger)
 	srv.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	srv.Handle("/ready", http.HandlerFunc(func(res http.ResponseWriter, _ *http.Request) {
 		if ready.Load() {
@@ -97,26 +121,26 @@ func main() {
 	}
 
 	// Build the Kubernetes client config.
-	cfg, err := buildKubeConfig(*kubeAPIURL, *kubeConfigFile)
+	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile)
 	if err != nil {
 		fatal(errors.Wrap(err, "failed to build Kubernetes config"))
 	}
 
-	kubeClient, err := kubernetes.NewForConfig(cfg)
+	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
 	if err != nil {
 		fatal(errors.Wrap(err, "failed to build Kubernetes client"))
 	}
 
-	if *serverTLSEnabled {
+	if cfg.serverTLSEnabled {
 		var certProvider tlscert.Provider
-		if *serverSelfSignedCert {
-			if *serverSelfSignedCertDNSName == "" {
-				*serverSelfSignedCertDNSName = fmt.Sprintf("rollout-operator.%s.svc", *kubeNamespace)
+		if cfg.serverSelfSignedCert {
+			if cfg.serverSelfSignedCertDNSName == "" {
+				cfg.serverSelfSignedCertDNSName = fmt.Sprintf("rollout-operator.%s.svc", cfg.kubeNamespace)
 			}
-			selfSignedProvider := tlscert.NewSelfSignedCertProvider("rollout-operator", []string{*serverSelfSignedCertDNSName}, []string{*serverSelfSignedCertOrg}, serverSelfSignedCertExpiration)
-			certProvider = tlscert.NewKubeSecretPersistedCertProvider(selfSignedProvider, logger, kubeClient, *kubeNamespace, *serverSelfSignedCertSecretName)
-		} else if *serverCertFile != "" && *serverKeyFile != "" {
-			certProvider, err = tlscert.NewFileCertProvider(*serverCertFile, *serverKeyFile)
+			selfSignedProvider := tlscert.NewSelfSignedCertProvider("rollout-operator", []string{cfg.serverSelfSignedCertDNSName}, []string{cfg.serverSelfSignedCertOrg}, serverSelfSignedCertExpiration)
+			certProvider = tlscert.NewKubeSecretPersistedCertProvider(selfSignedProvider, logger, kubeClient, cfg.kubeNamespace, cfg.serverSelfSignedCertSecretName)
+		} else if cfg.serverCertFile != "" && cfg.serverKeyFile != "" {
+			certProvider, err = tlscert.NewFileCertProvider(cfg.serverCertFile, cfg.serverKeyFile)
 			if err != nil {
 				fatal(err)
 			}
@@ -130,19 +154,19 @@ func main() {
 		}
 		checkAndWatchCertificate(cert, logger, restart)
 
-		if *updateWebhooksWithSelfSignedCABundle {
-			if !*serverSelfSignedCert {
+		if cfg.updateWebhooksWithSelfSignedCABundle {
+			if !cfg.serverSelfSignedCert {
 				fatal(errors.New("self-signed certificate should be enabled to update the CA bundle in the webhook configurations"))
 			}
 
 			// TODO watch webhook configurations instead of doing one-off.
-			err = admission.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, *kubeNamespace, cert.CA)
+			err = admission.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA)
 			if err != nil {
 				fatal(err)
 			}
 		}
 
-		tlsSrv, err := newTLSServer(*serverTLSPort, logger, cert)
+		tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert)
 		if err != nil {
 			fatal(err)
 		}
@@ -153,7 +177,7 @@ func main() {
 	}
 
 	// Init the controller.
-	c := controller.NewRolloutController(kubeClient, *kubeNamespace, *reconcileInterval, reg, logger)
+	c := controller.NewRolloutController(kubeClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
 	if err := c.Init(); err != nil {
 		fatal(errors.Wrap(err, "error while initialising the controller"))
 	}
