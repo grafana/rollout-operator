@@ -187,7 +187,7 @@ func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, resta
 	for i, bytes := range pair.Certificate {
 		c, err := x509.ParseCertificate(bytes)
 		if err != nil {
-			fatal(fmt.Errorf("failed to parse the provided certificate %s: %s", i, err))
+			fatal(fmt.Errorf("failed to parse the provided certificate %d: %s", i, err))
 		}
 
 		expiresIn := time.Until(c.NotAfter)
