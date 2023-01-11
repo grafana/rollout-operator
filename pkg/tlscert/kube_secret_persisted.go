@@ -58,10 +58,11 @@ func (cp KubeSecretPersistedCertProvider) getOrCreateCertificateSecret(ctx conte
 	secret, err := cp.kubeClient.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 	if err == nil {
 		level.Debug(cp.logger).Log("msg", "found existing certificate secret", "secret", secretName)
-		return secret, nil
-	}
-
-	if !apierrors.IsNotFound(err) {
+		if len(secret.Data) > 0 {
+			return secret, nil
+		}
+		level.Warn(cp.logger).Log("msg", "found a certificate secret but it's empty, will update with new certirficate data", "secret", secretName)
+	} else if !apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("failed to get secret: %w", err)
 	}
 
@@ -71,6 +72,17 @@ func (cp KubeSecretPersistedCertProvider) getOrCreateCertificateSecret(ctx conte
 		return nil, fmt.Errorf("failed to generate ca and certificate key pair: %w", err)
 	}
 
+	if secret != nil {
+		// We already had a secret, we need to update it.
+		secret, err := cp.kubeClient.CoreV1().Secrets(namespace).Update(ctx, newCertSecret(secretName, cert), metav1.UpdateOptions{})
+		if err != nil {
+			level.Error(cp.logger).Log("msg", "failed to update certificate secret", "err", err)
+			return nil, fmt.Errorf("failed to update certificate secret: %w", err)
+		}
+		return secret, nil
+	}
+
+	// There was no secret, so we need to create one from scratch.
 	secret, err = cp.kubeClient.CoreV1().Secrets(namespace).Create(ctx, newCertSecret(secretName, cert), metav1.CreateOptions{})
 	if err == nil {
 		level.Debug(cp.logger).Log("msg", "created certificate secret", "secret", secretName)
