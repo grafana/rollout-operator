@@ -48,6 +48,7 @@ func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset) http
 		contentType := r.Header.Get("Content-Type")
 		if contentType != "application/json" {
 			level.Error(logger).Log("msg", "wrong content type", "contentType", contentType, "expected", "application/json")
+			http.Error(w, "wrong content type", http.StatusBadRequest)
 			return
 		}
 
