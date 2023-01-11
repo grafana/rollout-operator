@@ -226,7 +226,7 @@ And:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: rollout-operator-wenhook-default-clusterrole
+  name: rollout-operator-webhook-default-clusterrole
 rules:
 - apiGroups: [admissionregistration.k8s.io]
   resources: [validatingwebhookconfigurations]
@@ -235,11 +235,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: rollout-operator-wenhook-default-clusterrolebinding
+  name: rollout-operator-webhook-default-clusterrolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rollout-operator-wenhook-default-clusterrole
+  name: rollout-operator-webhook-default-clusterrole
 subjects:
   - kind: ServiceAccount
     name: rollout-operator

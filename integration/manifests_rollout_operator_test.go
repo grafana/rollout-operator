@@ -253,12 +253,12 @@ func webhookRolloutOperatorRoleBinding(namespace string) *rbacv1.RoleBinding {
 func webhookRolloutOperatorClusterRoleBinding(namespace string) *rbacv1.ClusterRoleBinding {
 	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: fmt.Sprintf("rollout-operator-wenhook-%s-clusterrolebinding", namespace),
+			Name: fmt.Sprintf("rollout-operator-webhook-%s-clusterrolebinding", namespace),
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
 			Kind:     "ClusterRole",
-			Name:     fmt.Sprintf("rollout-operator-wenhook-%s-clusterrole", namespace),
+			Name:     fmt.Sprintf("rollout-operator-webhook-%s-clusterrole", namespace),
 		},
 		Subjects: []rbacv1.Subject{
 			{
@@ -273,7 +273,7 @@ func webhookRolloutOperatorClusterRoleBinding(namespace string) *rbacv1.ClusterR
 func webhookRolloutOperatorClusterRole(namespace string) *rbacv1.ClusterRole {
 	return &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: fmt.Sprintf("rollout-operator-wenhook-%s-clusterrole", namespace),
+			Name: fmt.Sprintf("rollout-operator-webhook-%s-clusterrole", namespace),
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
