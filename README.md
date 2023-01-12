@@ -166,7 +166,7 @@ You will see in [TLS Certificates](#tls-certificates) section below that this la
 
 ##### Handling errors
 
-The webhook is conservative and allows changed whenever an error occurs:
+The webhook is conservative and allows changes whenever an error occurs:
 - When parent object can't be retrieved from the API.
 - When the validation request can't be decoded or includes an unsupported type.
 
