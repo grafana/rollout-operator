@@ -43,7 +43,7 @@ func (cp KubeSecretPersistedCertProvider) Certificate(ctx context.Context) (Cert
 	found := false
 	if err == nil {
 		level.Debug(cp.logger).Log("msg", "found existing certificate secret", "secret", cp.secretName)
-		if containsValidCert, err := cp.handleExistingCertificateSecret(secret); err != nil {
+		if containsValidCert, err := cp.containsValidCertificate(secret); err != nil {
 			return Certificate{}, err
 		} else if containsValidCert {
 			return secretToCertificate(secret), nil
@@ -89,7 +89,7 @@ func (cp KubeSecretPersistedCertProvider) createCertificateSecret(ctx context.Co
 		if err != nil {
 			return Certificate{}, fmt.Errorf("failed to get secret after being unable to create it: %w", err)
 		}
-		if containsValidCert, err := cp.handleExistingCertificateSecret(secret); err != nil {
+		if containsValidCert, err := cp.containsValidCertificate(secret); err != nil {
 			return Certificate{}, err
 		} else if containsValidCert {
 			return secretToCertificate(secret), nil
@@ -100,8 +100,8 @@ func (cp KubeSecretPersistedCertProvider) createCertificateSecret(ctx context.Co
 	return Certificate{}, fmt.Errorf("failed to create secret: %w", err)
 }
 
-// handleExistingCertificateSecret will check whether an existing certificate secret contains a valid certificate.
-func (cp KubeSecretPersistedCertProvider) handleExistingCertificateSecret(secret *corev1.Secret) (containsValidCert bool, err error) {
+// containsValidCertificate will check whether an existing certificate secret contains a valid certificate.
+func (cp KubeSecretPersistedCertProvider) containsValidCertificate(secret *corev1.Secret) (containsValidCert bool, err error) {
 	if len(secret.Data) == 0 {
 		level.Warn(cp.logger).Log("msg", "found a certificate secret but it's empty, will update with new certificate data", "secret", cp.secretName)
 		return false, nil
