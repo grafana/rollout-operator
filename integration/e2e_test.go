@@ -294,7 +294,19 @@ func TestExpiringCertificate(t *testing.T) {
 
 		t.Log("Restarting rollout-operator with a configuration to create certificates that expire in a week")
 		deployment.Spec.Template.Spec.Containers[0].Args = append(deployment.Spec.Template.Spec.Containers[0].Args, "-server-tls.self-signed-cert.expiration=1w")
-		requireUpdatedeployment(ctx, t, api, deployment)
+
+		// Since our webhook also catches the deployment changes, we might call the API in that small window while the certificate
+		// is still expired. Let's retry several times.
+		// In your production environment, you'll probably just not use this for deployments.
+		require.Eventually(t, func() bool {
+			_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Update(ctx, deployment, metav1.UpdateOptions{})
+			if err != nil {
+				t.Logf("Failed updating rollout-operator deployment: %v", err)
+				return false
+			}
+			t.Logf("Updated rollout-operator deployment")
+			return true
+		}, 10*time.Second, 500*time.Millisecond, "can't update rollout-operator deployment")
 
 		t.Log("Waiting until the certificate is renewed with new expiration.")
 		require.Eventuallyf(t, func() bool {
