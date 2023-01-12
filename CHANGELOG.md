@@ -4,6 +4,7 @@
 
 * [ENHANCEMENT] Update Go to `1.19.4`. #29
 * [ENHANCEMENT] Added `-reconcile.interval` option to configure the minimum reconciliation interval. #30  
+* [FEATURE] `ValidatingAdmissionWebhook` implementation to prevent downscales on certain resources. #25
 
 ## v0.2.0
 

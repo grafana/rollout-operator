@@ -570,6 +570,8 @@ gopkg.in/yaml.v3
 inet.af/netaddr
 # k8s.io/api v0.25.3
 ## explicit; go 1.19
+k8s.io/api/admission/v1
+k8s.io/api/admission/v1beta1
 k8s.io/api/admissionregistration/v1
 k8s.io/api/admissionregistration/v1beta1
 k8s.io/api/apiserverinternal/v1alpha1

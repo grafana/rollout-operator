@@ -3,8 +3,10 @@ package k3t
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,8 +25,14 @@ import (
 )
 
 func init() {
-	version.Version = "v5.4.0"
+	version.Version = "v5.4.6"
+
+	if path := os.Getenv("K3T_DEBUG_KUBECONFIG_PATH"); path != "" {
+		DebugKubeconfigPath = path
+	}
 }
+
+var DebugKubeconfigPath = "/tmp/k3t/kubeconfig"
 
 // WithName returns an option that sets a defined cluster name on creation.
 func WithName(name string) Option { return nameOption(name) }
@@ -102,6 +110,9 @@ func NewCluster(ctx context.Context, t *testing.T, opts ...Option) Cluster {
 
 	// Create the cluster.
 	err = k3dclient.ClusterRun(ctx, runtimes.SelectedRuntime, clusterConfig)
+	if err != nil && strings.Contains(err.Error(), "could not find an available, non-overlapping IPv4 address pool among the defaults to assign to the network") {
+		t.Logf("Hint: try running `docker network prune`")
+	}
 	require.NoError(t, err, "Failed creating cluster.")
 	t.Logf("Cluster '%s' created successfully!", clusterConfig.Cluster.Name)
 
@@ -113,6 +124,11 @@ func NewCluster(ctx context.Context, t *testing.T, opts ...Option) Cluster {
 
 	err = clientcmd.WriteToFile(*kubeconfig, kubeConfigFile)
 	require.NoError(t, err, "Failed to write kubeconfig to file")
+
+	t.Logf("Writing KUBECONFIG to %s", DebugKubeconfigPath)
+	if err := clientcmd.WriteToFile(*kubeconfig, DebugKubeconfigPath); err != nil {
+		t.Logf("Ignoring error while writing KUBECONFIG to %s: %s", DebugKubeconfigPath, err)
+	}
 
 	config, err := clientcmd.BuildConfigFromFlags("", kubeConfigFile)
 	require.NoError(t, err, "Failed to build config from flags")

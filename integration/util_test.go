@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -92,6 +93,24 @@ func expectedPodReadyState(expectedReady bool) func(t *testing.T, pod *corev1.Po
 	}
 }
 
+func requireEventuallyPodCount(ctx context.Context, t *testing.T, api *kubernetes.Clientset, selector string, expectedCount int) {
+	require.Eventually(t, func() bool {
+		l, err := api.CoreV1().Pods(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			t.Logf("Can't list pods matching %s: %s", selector, err)
+			return false
+		}
+
+		if len(l.Items) != expectedCount {
+			t.Logf("Expected pod count %d for %s, got %d", expectedCount, selector, len(l.Items))
+			return false
+		}
+
+		t.Logf("Got exactly %d pods for %s", expectedCount, selector)
+		return true
+	}, 5*time.Minute, 500*time.Millisecond)
+}
+
 func eventuallyGetFirstPod(ctx context.Context, t *testing.T, api *kubernetes.Clientset, selector string) string {
 	var podName string
 	require.Eventuallyf(t, func() bool {
@@ -107,7 +126,7 @@ func eventuallyGetFirstPod(ctx context.Context, t *testing.T, api *kubernetes.Cl
 		podName = l.Items[0].Name
 		t.Logf("Found %s pod %s", selector, podName)
 		return true
-	}, 5*time.Minute, 500*time.Millisecond, "Could not find rollout-operator pods")
+	}, 5*time.Minute, 500*time.Millisecond, "Could not find pods matching %s", selector)
 	return podName
 }
 
@@ -126,4 +145,34 @@ func makeMockReady(t *testing.T, cluster k3t.Cluster, svc string) {
 		t.Logf("POST %s: returned status code %d", uri, resp.StatusCode)
 		return resp.StatusCode == http.StatusOK
 	}, 1*time.Minute, 500*time.Millisecond, "Never got the expected version from %s", svc)
+}
+
+func requireCreateDeployment(ctx context.Context, t *testing.T, api *kubernetes.Clientset, deployment *appsv1.Deployment) {
+	t.Helper()
+	_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Create(ctx, deployment, metav1.CreateOptions{})
+	require.NoError(t, err, "Can't create deployment")
+}
+
+func requireCreateStatefulSet(ctx context.Context, t *testing.T, api *kubernetes.Clientset, sts *appsv1.StatefulSet) {
+	t.Helper()
+	_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Create(ctx, sts, metav1.CreateOptions{})
+	require.NoError(t, err, "Can't create StatefulSet")
+}
+
+func requireUpdateStatefulSet(ctx context.Context, t *testing.T, api *kubernetes.Clientset, sts *appsv1.StatefulSet) {
+	t.Helper()
+	_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, sts, metav1.UpdateOptions{})
+	require.NoError(t, err, "Can't update StatefulSet")
+}
+
+func getAndUpdateStatefulSetScale(ctx context.Context, t *testing.T, api *kubernetes.Clientset, name string, replicas int32, dryrun bool) error {
+	s, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).GetScale(ctx, name, metav1.GetOptions{})
+	require.NoError(t, err)
+	s.Spec.Replicas = replicas
+	opts := metav1.UpdateOptions{}
+	if dryrun {
+		opts.DryRun = []string{metav1.DryRunAll}
+	}
+	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).UpdateScale(ctx, name, s, opts)
+	return err
 }
