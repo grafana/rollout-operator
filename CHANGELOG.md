@@ -4,6 +4,9 @@
 
 * [ENHANCEMENT] Update Go to `1.19.4`. #29
 * [ENHANCEMENT] Added `-reconcile.interval` option to configure the minimum reconciliation interval. #30  
+* [ENHANCEMENT] Update dependencies to address CVEs, including: #34
+  * `github.com/containerd/containerd` from `v1.6.8` to `v1.6.15` for CVE-2022-23471
+  * `golang.org/x/net` from `v0.1.0` to `v0.5.0` for CVE-2022-41717
 * [FEATURE] `ValidatingAdmissionWebhook` implementation to prevent downscales on certain resources. #25
 
 ## v0.2.0
