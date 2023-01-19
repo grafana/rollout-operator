@@ -326,6 +326,11 @@ func noDownscaleValidatingWebhook(namespace string) *admissionregistrationv1.Val
 						},
 					},
 				},
+				NamespaceSelector: &metav1.LabelSelector{
+					// This is just an example of matching changes only in a specific namespace.
+					// https://kubernetes.io/docs/reference/labels-annotations-taints/#kubernetes-io-metadata-name
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": namespace},
+				},
 				FailurePolicy:           ptr(admissionregistrationv1.Fail),
 				SideEffects:             ptr(admissionregistrationv1.SideEffectClassNone),
 				AdmissionReviewVersions: []string{"v1"},

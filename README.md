@@ -164,6 +164,10 @@ You will see in [TLS Certificates](#tls-certificates) section below that this la
 
  > *Note*: if you plan running validations on `DeploymentSet` or `ReplicaSet` objects, you need to make sure that the `rollout-operator` has the privileges to list and get those objects.
 
+##### Matching namespaces
+
+If you want to restrict the webhook to a specific namespace, you can use the `namespaceSelector` in the webhook configuration and match on the `kubernetes.io/metadata.name` label, [which contains the namespace name](https://kubernetes.io/docs/reference/labels-annotations-taints/#kubernetes-io-metadata-name).
+
 ##### Handling errors
 
 The webhook is conservative and allows changes whenever an error occurs:
