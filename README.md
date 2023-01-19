@@ -157,12 +157,15 @@ Please note that the webhook will NOT receive the requests for `/scale` operatio
 For this reason the webhook will perform the check of the `grafana.com/no-downscale` label on the object itself on every received request. 
 When an object like `StatefulSet`, `DeploymentSet` or `ReplicaSet` is changed itself, the validation request will include the changed object and the webhook will be able to check the label on it. 
 When a `/scale` subresouce is changed (for example by running `kubectl scale ...`) the request will not contain the changed object, and `rollout-operator` will use the Kubernetes API to retrieve the parent object and check the label on it.
-
-Since the `ValidatingAdmissionWebhook` is cluster-wide, it's a good idea to at least include a `namespaceSelector` in the webhook configuration to limit the scope of the webhook to a specific namespace. 
-Since `namespaceSelector` can only match labels, but not the namespace name, we recommend setting a `grafana.com/namespace: <namespace>` label on the namespace and including that label in the `namespaceSelector` of the webhook configuration. 
+ 
 You will see in [TLS Certificates](#tls-certificates) section below that this label is also used to inject the CA bundle into the webhook configuration.
 
  > *Note*: if you plan running validations on `DeploymentSet` or `ReplicaSet` objects, you need to make sure that the `rollout-operator` has the privileges to list and get those objects.
+
+##### Matching namespaces
+
+Since the `ValidatingAdmissionWebhook` is cluster-wide, it's a good idea to at least include a `namespaceSelector` in the webhook configuration to limit the scope of the webhook to a specific namespace.
+If you want to restrict the webhook to a specific namespace, you can use the `namespaceSelector` in the webhook configuration and match on the `kubernetes.io/metadata.name` label, [which contains the namespace name](https://kubernetes.io/docs/reference/labels-annotations-taints/#kubernetes-io-metadata-name).
 
 ##### Handling errors
 
