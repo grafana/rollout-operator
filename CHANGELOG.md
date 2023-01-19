@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.3.0
+
 * [ENHANCEMENT] Update Go to `1.19.4`. #29
 * [ENHANCEMENT] Added `-reconcile.interval` option to configure the minimum reconciliation interval. #30  
 * [ENHANCEMENT] Update dependencies to address CVEs, including: #34
