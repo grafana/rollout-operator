@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Update Go to `1.20.1`. #38
+
 ## v0.3.0
 
 * [ENHANCEMENT] Update Go to `1.19.4`. #29
