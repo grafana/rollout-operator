@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Update Go to `1.20.1`. #38
+* [ENHANCEMENT] Update Go to `1.20.1`. #39
 
 ## v0.3.0
 
