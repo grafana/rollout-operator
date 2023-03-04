@@ -12,7 +12,7 @@
   * `k8s.io/apimachinery` from `v0.25.3` to `v0.26.1`
   * `k8s.io/client-go` from `v0.25.3` to `v0.26.1`
 * [ENHANCEMENT] Update Docker base image to `alpine:3.17`. #40
-* [ENHANCEMENT] Add the ability to publish a linux/amd64,linux/arm64 multi-platform image. #40 
+* [ENHANCEMENT] The image published is now a linux/amd64,linux/arm64 multi-platform image. #40 
 
 ## v0.3.0
 
