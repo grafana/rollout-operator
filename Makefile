@@ -12,11 +12,11 @@ rollout-operator:
 .PHONY: build-image
 build-image: clean
 	# Docker doesn't support loading multiplatform images, so load linux/amd64 for CI/local testing
-	docker buildx build --load --platform linux/amd64 --build-arg "$(GIT_REVISION)" -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: publish-image
 publish-image: clean
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg "$(GIT_REVISION)" -t grafana/rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t grafana/rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: test
 test:
@@ -28,7 +28,7 @@ integration: integration/mock-service/.uptodate
 
 integration/mock-service/.uptodate:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
-	docker build --build-arg "$(GIT_REVISION)" -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
+	docker build --build-arg revision=$(GIT_REVISION) -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
 
 .PHONY: lint
 lint:
