@@ -107,9 +107,15 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 		}, []string{"rollout_group"}),
 	}
 
+	return c
+}
+
+// Init the controller.
+func (c *RolloutController) Init() error {
+
 	// We enqueue a reconcile request each time any of the observed StatefulSets are updated. The UpdateFunc
 	// is also called every sync period even if no changed occurred.
-	c.statefulSetsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := c.statefulSetsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			c.enqueueReconcile()
 		},
@@ -117,20 +123,21 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 			c.enqueueReconcile()
 		},
 	})
+	if err != nil {
+		return err
+	}
 
 	// We enqueue a reconcile request each time any of the observed Pods are updated. Reason is that we may
 	// need to proceed with the rollout whenever the state of Pods change (eg. they become Ready).
-	c.podsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err = c.podsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
 			c.enqueueReconcile()
 		},
 	})
+	if err != nil {
+		return err
+	}
 
-	return c
-}
-
-// Init the controller.
-func (c *RolloutController) Init() error {
 	// Start informers.
 	go c.statefulSetsFactory.Start(c.stopCh)
 	go c.podsFactory.Start(c.stopCh)
