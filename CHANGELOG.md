@@ -4,7 +4,7 @@
 
 * [ENHANCEMENT] Update Go to `1.20.1`. #39
 * [ENHANCEMENT] Updated dependencies, including: #39
-  * `github.com/k3d-io/k3d/v5` from `v5.4.6` to `v5.4.8`
+  * `github.com/k3d-io/k3d/v5` from `v5.4.6` to `v5.4.7`
   * `github.com/prometheus/client_golang` from `v1.13.0` to `v1.14.0`
   * `github.com/prometheus/common` from `v0.37.0` to `v0.39.0`
   * `github.com/stretchr/testify` from `v1.8.0` to `v1.8.1`
