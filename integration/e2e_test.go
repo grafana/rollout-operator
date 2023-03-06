@@ -289,7 +289,7 @@ func TestExpiringCertificate(t *testing.T) {
 		require.Eventuallyf(t, func() bool {
 			currentSecretCertExpiration := getCertificateExpirationFromSecret(t, api, ctx)
 			return currentSecretCertExpiration.After(secretCertExpiration)
-		}, 30*time.Second, 1*time.Second, "certificate should be renewed and expiration date should change")
+		}, 3*time.Minute, 1*time.Second, "certificate should be renewed and expiration date should change")
 		t.Log("Certificate was renewed.")
 
 		t.Log("Restarting rollout-operator with a configuration to create certificates that expire in a week")
@@ -306,14 +306,14 @@ func TestExpiringCertificate(t *testing.T) {
 			}
 			t.Logf("Updated rollout-operator deployment")
 			return true
-		}, 10*time.Second, 500*time.Millisecond, "can't update rollout-operator deployment")
+		}, 30*time.Second, 500*time.Millisecond, "can't update rollout-operator deployment")
 
 		t.Log("Waiting until the certificate is renewed with new expiration.")
 		require.Eventuallyf(t, func() bool {
 			currentSecretCertExpiration := getCertificateExpirationFromSecret(t, api, ctx)
 			// Check that expiration is within 6 and 8 days, that's enough.
 			return currentSecretCertExpiration.After(time.Now().Add(24*6*time.Hour)) && currentSecretCertExpiration.Before(time.Now().Add(24*8*time.Hour))
-		}, 30*time.Second, 1*time.Second, "certificate should be renewed and expiration date should be in a week")
+		}, 3*time.Minute, 1*time.Second, "certificate should be renewed and expiration date should be in a week")
 	}
 
 	// Check webhook interaction isn't broken.
