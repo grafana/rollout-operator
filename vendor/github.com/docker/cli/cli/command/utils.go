@@ -11,7 +11,7 @@ import (
 
 	"github.com/docker/cli/cli/streams"
 	"github.com/docker/docker/api/types/filters"
-	"github.com/moby/sys/sequential"
+	"github.com/docker/docker/pkg/system"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 )
@@ -19,8 +19,8 @@ import (
 // CopyToFile writes the content of the reader to the specified file
 func CopyToFile(outfile string, r io.Reader) error {
 	// We use sequential file access here to avoid depleting the standby list
-	// on Windows. On Linux, this is a call directly to os.CreateTemp
-	tmpFile, err := sequential.CreateTemp(filepath.Dir(outfile), ".docker_temp_")
+	// on Windows. On Linux, this is a call directly to ioutil.TempFile
+	tmpFile, err := system.TempFileSequential(filepath.Dir(outfile), ".docker_temp_")
 	if err != nil {
 		return err
 	}
@@ -96,26 +96,26 @@ func PruneFilters(dockerCli Cli, pruneFilters filters.Args) filters.Args {
 		return pruneFilters
 	}
 	for _, f := range dockerCli.ConfigFile().PruneFilters {
-		k, v, ok := strings.Cut(f, "=")
-		if !ok {
+		parts := strings.SplitN(f, "=", 2)
+		if len(parts) != 2 {
 			continue
 		}
-		if k == "label" {
+		if parts[0] == "label" {
 			// CLI label filter supersede config.json.
 			// If CLI label filter conflict with config.json,
 			// skip adding label! filter in config.json.
-			if pruneFilters.Contains("label!") && pruneFilters.ExactMatch("label!", v) {
+			if pruneFilters.Contains("label!") && pruneFilters.ExactMatch("label!", parts[1]) {
 				continue
 			}
-		} else if k == "label!" {
+		} else if parts[0] == "label!" {
 			// CLI label! filter supersede config.json.
 			// If CLI label! filter conflict with config.json,
 			// skip adding label filter in config.json.
-			if pruneFilters.Contains("label") && pruneFilters.ExactMatch("label", v) {
+			if pruneFilters.Contains("label") && pruneFilters.ExactMatch("label", parts[1]) {
 				continue
 			}
 		}
-		pruneFilters.Add(k, v)
+		pruneFilters.Add(parts[0], parts[1])
 	}
 
 	return pruneFilters

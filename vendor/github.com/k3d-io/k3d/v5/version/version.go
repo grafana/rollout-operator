@@ -40,11 +40,6 @@ var HelperVersionOverride string
 // K3sVersion should contain the latest version tag of k3s (hardcoded at build time)
 var K3sVersion = "v1.21.7-k3s1"
 
-type httpClient struct {
-	client  *http.Client
-	baseURL string
-}
-
 // GetVersion returns the version for cli, it gets it from "git describe --tags" or returns "dev" when doing simple go build
 func GetVersion() string {
 	if len(Version) == 0 {
@@ -56,7 +51,7 @@ func GetVersion() string {
 // GetK3sVersion returns the version string for K3s
 func GetK3sVersion(channel string) (string, error) {
 	if channel != "" {
-		version, err := newHttpClient(k3s.K3sChannelServerURL).fetchLatestK3sVersion(channel)
+		version, err := fetchLatestK3sVersion(channel)
 		if err != nil {
 			return "", fmt.Errorf("error getting K3s version for channel %s: %w", channel, err)
 		}
@@ -66,27 +61,13 @@ func GetK3sVersion(channel string) (string, error) {
 }
 
 // fetchLatestK3sVersion tries to fetch the latest version of k3s from DockerHub
-func (c *httpClient) fetchLatestK3sVersion(channel string) (string, error) {
-	request, err := http.NewRequest(http.MethodGet, c.baseURL, nil)
+func fetchLatestK3sVersion(channel string) (string, error) {
+
+	resp, err := http.Get(k3s.K3sChannelServerURL)
 	if err != nil {
 		return "", err
 	}
-
-	resp, err := c.client.Do(request)
-	if err != nil {
-		return "", err
-	}
-
-	defer func(Body io.ReadCloser) {
-		err = Body.Close()
-		if err != nil {
-
-		}
-	}(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf(fmt.Sprintf("call made to '%s' failed with status code '%d'", c.baseURL, resp.StatusCode))
-	}
+	defer resp.Body.Close()
 
 	out := k3s.ChannelServerResponse{}
 
@@ -95,7 +76,7 @@ func (c *httpClient) fetchLatestK3sVersion(channel string) (string, error) {
 		return "", fmt.Errorf("error reading channelserver response body: %w", err)
 	}
 
-	if err = json.Unmarshal(body, &out); err != nil {
+	if err := json.Unmarshal(body, &out); err != nil {
 		return "", fmt.Errorf("error unmarshalling channelserver response: %w", err)
 	}
 
@@ -105,13 +86,6 @@ func (c *httpClient) fetchLatestK3sVersion(channel string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("no latest version found for channel %s (%s)", channel, c.baseURL)
+	return "", fmt.Errorf("no latest version found for channel %s (%s)", channel, k3s.K3sChannelServerURL)
 
-}
-
-func newHttpClient(baseURL string) *httpClient {
-	return &httpClient{
-		client:  &http.Client{},
-		baseURL: baseURL,
-	}
 }

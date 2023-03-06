@@ -46,10 +46,10 @@ func parseKeyValueFile(filename string, emptyFn func(string) (string, bool)) ([]
 		currentLine++
 		// line is not empty, and not starting with '#'
 		if len(line) > 0 && !strings.HasPrefix(line, "#") {
-			variable, value, hasValue := strings.Cut(line, "=")
+			data := strings.SplitN(line, "=", 2)
 
 			// trim the front of a variable, but nothing else
-			variable = strings.TrimLeft(variable, whiteSpaces)
+			variable := strings.TrimLeft(data[0], whiteSpaces)
 			if strings.ContainsAny(variable, whiteSpaces) {
 				return []string{}, ErrBadKey{fmt.Sprintf("variable '%s' contains whitespaces", variable)}
 			}
@@ -57,17 +57,18 @@ func parseKeyValueFile(filename string, emptyFn func(string) (string, bool)) ([]
 				return []string{}, ErrBadKey{fmt.Sprintf("no variable name on line '%s'", line)}
 			}
 
-			if hasValue {
+			if len(data) > 1 {
 				// pass the value through, no trimming
-				lines = append(lines, variable+"="+value)
+				lines = append(lines, fmt.Sprintf("%s=%s", variable, data[1]))
 			} else {
+				var value string
 				var present bool
 				if emptyFn != nil {
 					value, present = emptyFn(line)
 				}
 				if present {
 					// if only a pass-through variable is given, clean it up.
-					lines = append(lines, strings.TrimSpace(variable)+"="+value)
+					lines = append(lines, fmt.Sprintf("%s=%s", strings.TrimSpace(line), value))
 				}
 			}
 		}

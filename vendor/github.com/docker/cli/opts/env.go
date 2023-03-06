@@ -16,16 +16,15 @@ import (
 //
 // The only validation here is to check if name is empty, per #25099
 func ValidateEnv(val string) (string, error) {
-	k, _, hasValue := strings.Cut(val, "=")
-	if k == "" {
+	arr := strings.SplitN(val, "=", 2)
+	if arr[0] == "" {
 		return "", errors.New("invalid environment variable: " + val)
 	}
-	if hasValue {
-		// val contains a "=" (but value may be an empty string)
+	if len(arr) > 1 {
 		return val, nil
 	}
-	if envVal, ok := os.LookupEnv(k); ok {
-		return k + "=" + envVal, nil
+	if envVal, ok := os.LookupEnv(arr[0]); ok {
+		return arr[0] + "=" + envVal, nil
 	}
 	return val, nil
 }

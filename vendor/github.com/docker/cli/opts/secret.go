@@ -27,7 +27,7 @@ func (o *SecretOpt) Set(value string) error {
 		File: &swarmtypes.SecretReferenceFileTarget{
 			UID:  "0",
 			GID:  "0",
-			Mode: 0o444,
+			Mode: 0444,
 		},
 	}
 
@@ -40,22 +40,25 @@ func (o *SecretOpt) Set(value string) error {
 	}
 
 	for _, field := range fields {
-		key, val, ok := strings.Cut(field, "=")
-		if !ok || key == "" {
+		parts := strings.SplitN(field, "=", 2)
+		key := strings.ToLower(parts[0])
+
+		if len(parts) != 2 {
 			return fmt.Errorf("invalid field '%s' must be a key=value pair", field)
 		}
-		// TODO(thaJeztah): these options should not be case-insensitive.
-		switch strings.ToLower(key) {
+
+		value := parts[1]
+		switch key {
 		case "source", "src":
-			options.SecretName = val
+			options.SecretName = value
 		case "target":
-			options.File.Name = val
+			options.File.Name = value
 		case "uid":
-			options.File.UID = val
+			options.File.UID = value
 		case "gid":
-			options.File.GID = val
+			options.File.GID = value
 		case "mode":
-			m, err := strconv.ParseUint(val, 0, 32)
+			m, err := strconv.ParseUint(value, 0, 32)
 			if err != nil {
 				return fmt.Errorf("invalid mode specified: %v", err)
 			}

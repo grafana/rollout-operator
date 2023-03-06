@@ -5,7 +5,6 @@ import (
 
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/manifest/manifestlist"
-	"github.com/docker/distribution/manifest/ocischema"
 	"github.com/docker/distribution/manifest/schema2"
 	"github.com/docker/distribution/reference"
 	"github.com/opencontainers/go-digest"
@@ -17,12 +16,10 @@ import (
 type ImageManifest struct {
 	Ref        *SerializableNamed
 	Descriptor ocispec.Descriptor
-	Raw        []byte `json:",omitempty"`
 
 	// SchemaV2Manifest is used for inspection
+	// TODO: Deprecate this and store manifest blobs
 	SchemaV2Manifest *schema2.DeserializedManifest `json:",omitempty"`
-	// OCIManifest is used for inspection
-	OCIManifest *ocischema.DeserializedManifest `json:",omitempty"`
 }
 
 // OCIPlatform creates an OCI platform from a manifest list platform spec
@@ -56,15 +53,8 @@ func PlatformSpecFromOCI(p *ocispec.Platform) *manifestlist.PlatformSpec {
 // Blobs returns the digests for all the blobs referenced by this manifest
 func (i ImageManifest) Blobs() []digest.Digest {
 	digests := []digest.Digest{}
-	switch {
-	case i.SchemaV2Manifest != nil:
-		for _, descriptor := range i.SchemaV2Manifest.References() {
-			digests = append(digests, descriptor.Digest)
-		}
-	case i.OCIManifest != nil:
-		for _, descriptor := range i.OCIManifest.References() {
-			digests = append(digests, descriptor.Digest)
-		}
+	for _, descriptor := range i.SchemaV2Manifest.References() {
+		digests = append(digests, descriptor.Digest)
 	}
 	return digests
 }
@@ -75,8 +65,6 @@ func (i ImageManifest) Payload() (string, []byte, error) {
 	switch {
 	case i.SchemaV2Manifest != nil:
 		return i.SchemaV2Manifest.Payload()
-	case i.OCIManifest != nil:
-		return i.OCIManifest.Payload()
 	default:
 		return "", nil, errors.Errorf("%s has no payload", i.Ref)
 	}
@@ -88,8 +76,6 @@ func (i ImageManifest) References() []distribution.Descriptor {
 	switch {
 	case i.SchemaV2Manifest != nil:
 		return i.SchemaV2Manifest.References()
-	case i.OCIManifest != nil:
-		return i.OCIManifest.References()
 	default:
 		return nil
 	}
@@ -98,32 +84,10 @@ func (i ImageManifest) References() []distribution.Descriptor {
 // NewImageManifest returns a new ImageManifest object. The values for Platform
 // are initialized from those in the image
 func NewImageManifest(ref reference.Named, desc ocispec.Descriptor, manifest *schema2.DeserializedManifest) ImageManifest {
-	raw, err := manifest.MarshalJSON()
-	if err != nil {
-		raw = nil
-	}
-
 	return ImageManifest{
 		Ref:              &SerializableNamed{Named: ref},
 		Descriptor:       desc,
-		Raw:              raw,
 		SchemaV2Manifest: manifest,
-	}
-}
-
-// NewOCIImageManifest returns a new ImageManifest object. The values for
-// Platform are initialized from those in the image
-func NewOCIImageManifest(ref reference.Named, desc ocispec.Descriptor, manifest *ocischema.DeserializedManifest) ImageManifest {
-	raw, err := manifest.MarshalJSON()
-	if err != nil {
-		raw = nil
-	}
-
-	return ImageManifest{
-		Ref:         &SerializableNamed{Named: ref},
-		Descriptor:  desc,
-		Raw:         raw,
-		OCIManifest: manifest,
 	}
 }
 

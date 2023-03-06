@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -18,8 +17,7 @@ type MountOpt struct {
 }
 
 // Set a new mount value
-//
-//nolint:gocyclo
+// nolint: gocyclo
 func (m *MountOpt) Set(value string) error {
 	csvReader := csv.NewReader(strings.NewReader(value))
 	fields, err := csvReader.Read()
@@ -56,21 +54,21 @@ func (m *MountOpt) Set(value string) error {
 	}
 
 	setValueOnMap := func(target map[string]string, value string) {
-		k, v, _ := strings.Cut(value, "=")
-		if k != "" {
-			target[k] = v
+		parts := strings.SplitN(value, "=", 2)
+		if len(parts) == 1 {
+			target[value] = ""
+		} else {
+			target[parts[0]] = parts[1]
 		}
 	}
 
 	mount.Type = mounttypes.TypeVolume // default to volume mounts
 	// Set writable as the default
 	for _, field := range fields {
-		key, val, ok := strings.Cut(field, "=")
+		parts := strings.SplitN(field, "=", 2)
+		key := strings.ToLower(parts[0])
 
-		// TODO(thaJeztah): these options should not be case-insensitive.
-		key = strings.ToLower(key)
-
-		if !ok {
+		if len(parts) == 1 {
 			switch key {
 			case "readonly", "ro":
 				mount.ReadOnly = true
@@ -81,61 +79,59 @@ func (m *MountOpt) Set(value string) error {
 			case "bind-nonrecursive":
 				bindOptions().NonRecursive = true
 				continue
-			default:
-				return fmt.Errorf("invalid field '%s' must be a key=value pair", field)
 			}
 		}
 
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid field '%s' must be a key=value pair", field)
+		}
+
+		value := parts[1]
 		switch key {
 		case "type":
-			mount.Type = mounttypes.Type(strings.ToLower(val))
+			mount.Type = mounttypes.Type(strings.ToLower(value))
 		case "source", "src":
-			mount.Source = val
-			if strings.HasPrefix(val, "."+string(filepath.Separator)) || val == "." {
-				if abs, err := filepath.Abs(val); err == nil {
-					mount.Source = abs
-				}
-			}
+			mount.Source = value
 		case "target", "dst", "destination":
-			mount.Target = val
+			mount.Target = value
 		case "readonly", "ro":
-			mount.ReadOnly, err = strconv.ParseBool(val)
+			mount.ReadOnly, err = strconv.ParseBool(value)
 			if err != nil {
-				return fmt.Errorf("invalid value for %s: %s", key, val)
+				return fmt.Errorf("invalid value for %s: %s", key, value)
 			}
 		case "consistency":
-			mount.Consistency = mounttypes.Consistency(strings.ToLower(val))
+			mount.Consistency = mounttypes.Consistency(strings.ToLower(value))
 		case "bind-propagation":
-			bindOptions().Propagation = mounttypes.Propagation(strings.ToLower(val))
+			bindOptions().Propagation = mounttypes.Propagation(strings.ToLower(value))
 		case "bind-nonrecursive":
-			bindOptions().NonRecursive, err = strconv.ParseBool(val)
+			bindOptions().NonRecursive, err = strconv.ParseBool(value)
 			if err != nil {
-				return fmt.Errorf("invalid value for %s: %s", key, val)
+				return fmt.Errorf("invalid value for %s: %s", key, value)
 			}
 		case "volume-nocopy":
-			volumeOptions().NoCopy, err = strconv.ParseBool(val)
+			volumeOptions().NoCopy, err = strconv.ParseBool(value)
 			if err != nil {
-				return fmt.Errorf("invalid value for volume-nocopy: %s", val)
+				return fmt.Errorf("invalid value for volume-nocopy: %s", value)
 			}
 		case "volume-label":
-			setValueOnMap(volumeOptions().Labels, val)
+			setValueOnMap(volumeOptions().Labels, value)
 		case "volume-driver":
-			volumeOptions().DriverConfig.Name = val
+			volumeOptions().DriverConfig.Name = value
 		case "volume-opt":
 			if volumeOptions().DriverConfig.Options == nil {
 				volumeOptions().DriverConfig.Options = make(map[string]string)
 			}
-			setValueOnMap(volumeOptions().DriverConfig.Options, val)
+			setValueOnMap(volumeOptions().DriverConfig.Options, value)
 		case "tmpfs-size":
-			sizeBytes, err := units.RAMInBytes(val)
+			sizeBytes, err := units.RAMInBytes(value)
 			if err != nil {
-				return fmt.Errorf("invalid value for %s: %s", key, val)
+				return fmt.Errorf("invalid value for %s: %s", key, value)
 			}
 			tmpfsOptions().SizeBytes = sizeBytes
 		case "tmpfs-mode":
-			ui64, err := strconv.ParseUint(val, 8, 32)
+			ui64, err := strconv.ParseUint(value, 8, 32)
 			if err != nil {
-				return fmt.Errorf("invalid value for %s: %s", key, val)
+				return fmt.Errorf("invalid value for %s: %s", key, value)
 			}
 			tmpfsOptions().Mode = os.FileMode(ui64)
 		default:

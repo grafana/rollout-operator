@@ -13,15 +13,14 @@ type ValidatorWeightFctType func(val string) (*blkiodev.WeightDevice, error)
 
 // ValidateWeightDevice validates that the specified string has a valid device-weight format.
 func ValidateWeightDevice(val string) (*blkiodev.WeightDevice, error) {
-	k, v, ok := strings.Cut(val, ":")
-	if !ok || k == "" {
+	split := strings.SplitN(val, ":", 2)
+	if len(split) != 2 {
 		return nil, fmt.Errorf("bad format: %s", val)
 	}
-	// TODO(thaJeztah): should we really validate this on the client?
-	if !strings.HasPrefix(k, "/dev/") {
+	if !strings.HasPrefix(split[0], "/dev/") {
 		return nil, fmt.Errorf("bad format for device path: %s", val)
 	}
-	weight, err := strconv.ParseUint(v, 10, 16)
+	weight, err := strconv.ParseUint(split[1], 10, 16)
 	if err != nil {
 		return nil, fmt.Errorf("invalid weight for device: %s", val)
 	}
@@ -30,7 +29,7 @@ func ValidateWeightDevice(val string) (*blkiodev.WeightDevice, error) {
 	}
 
 	return &blkiodev.WeightDevice{
-		Path:   k,
+		Path:   split[0],
 		Weight: uint16(weight),
 	}, nil
 }
@@ -43,8 +42,9 @@ type WeightdeviceOpt struct {
 
 // NewWeightdeviceOpt creates a new WeightdeviceOpt
 func NewWeightdeviceOpt(validator ValidatorWeightFctType) WeightdeviceOpt {
+	values := []*blkiodev.WeightDevice{}
 	return WeightdeviceOpt{
-		values:    []*blkiodev.WeightDevice{},
+		values:    values,
 		validator: validator,
 	}
 }
@@ -59,7 +59,7 @@ func (opt *WeightdeviceOpt) Set(val string) error {
 		}
 		value = v
 	}
-	opt.values = append(opt.values, value)
+	(opt.values) = append((opt.values), value)
 	return nil
 }
 
