@@ -28,7 +28,7 @@ integration: integration/mock-service/.uptodate
 
 integration/mock-service/.uptodate:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
-	docker build --build-arg revision=$(GIT_REVISION) -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
 
 .PHONY: lint
 lint:
