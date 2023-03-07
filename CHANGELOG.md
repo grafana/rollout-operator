@@ -3,7 +3,7 @@
 ## main / unreleased
 
 * [ENHANCEMENT] Update Go to `1.20.1`. #39
-* [ENHANCEMENT] Updated dependencies, including: #39
+* [ENHANCEMENT] Updated dependencies, including: #39 #42
   * `github.com/k3d-io/k3d/v5` from `v5.4.6` to `v5.4.7`
   * `github.com/prometheus/client_golang` from `v1.13.0` to `v1.14.0`
   * `github.com/prometheus/common` from `v0.37.0` to `v0.39.0`
@@ -11,6 +11,8 @@
   * `k8s.io/api` from `v0.25.3` to `v0.26.1`
   * `k8s.io/apimachinery` from `v0.25.3` to `v0.26.1`
   * `k8s.io/client-go` from `v0.25.3` to `v0.26.1`
+  * `github.com/containerd/containerd` from `v1.6.15` to `v1.6.18` for CVE-2023-25153 and CVE-2023-25173
+  * `golang.org/x/net` from `v0.5.0` to `v0.8.0` for CVE-2022-41723
 
 ## v0.3.0
 
