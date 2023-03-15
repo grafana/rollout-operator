@@ -1,6 +1,16 @@
-FROM alpine:3.16
+FROM --platform=$BUILDPLATFORM golang:1.20.1-bullseye AS build
 
-COPY       rollout-operator /bin/rollout-operator
+ARG TARGETOS
+ARG TARGETARCH
+
+COPY . /src/rollout-operator
+WORKDIR /src/rollout-operator
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make
+
+FROM alpine:3.17
+RUN apk add --no-cache ca-certificates
+
+COPY --from=build /src/rollout-operator/rollout-operator /bin/rollout-operator
 ENTRYPOINT [ "/bin/rollout-operator" ]
 
 # Create rollout-operator user to run as non-root.

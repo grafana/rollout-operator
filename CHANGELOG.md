@@ -13,6 +13,8 @@
   * `k8s.io/client-go` from `v0.25.3` to `v0.26.1`
   * `github.com/containerd/containerd` from `v1.6.15` to `v1.6.18` for CVE-2023-25153 and CVE-2023-25173
   * `golang.org/x/net` from `v0.5.0` to `v0.8.0` for CVE-2022-41723
+* [ENHANCEMENT] Update Docker base image to `alpine:3.17`. #40
+* [ENHANCEMENT] The image published is now a linux/amd64,linux/arm64 multi-platform image. #40
 
 ## v0.3.0
 

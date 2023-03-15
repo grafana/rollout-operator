@@ -1,23 +1,22 @@
 # Generate the default image tag based on the git branch and revision.
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 GIT_REVISION := $(shell git rev-parse --short HEAD)
+IMAGE_PREFIX ?= grafana
 IMAGE_TAG ?= $(GIT_BRANCH)-$(GIT_REVISION)
 
-rollout-operator:
-	go build ./cmd/rollout-operator
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
 
-.PHONY: build-linux-amd64
-build-linux-amd64:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
+rollout-operator:
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
 .PHONY: build-image
-build-image: build-linux-amd64
-	docker build --build-arg "$(GIT_REVISION)" -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+build-image: clean
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: publish-image
-publish-image: build-image
-	docker tag rollout-operator:$(IMAGE_TAG) grafana/rollout-operator:$(IMAGE_TAG)
-	docker push grafana/rollout-operator:$(IMAGE_TAG)
+publish-image: clean
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: test
 test:
@@ -29,8 +28,13 @@ integration: integration/mock-service/.uptodate
 
 integration/mock-service/.uptodate:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
-	docker build --build-arg "$(GIT_REVISION)" -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
 
 .PHONY: lint
 lint:
 	golangci-lint run --timeout=5m
+
+.PHONY: clean
+clean:
+	rm -f rollout-operator
+	go clean ./...
