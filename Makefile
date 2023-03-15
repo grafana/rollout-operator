@@ -1,6 +1,7 @@
 # Generate the default image tag based on the git branch and revision.
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 GIT_REVISION := $(shell git rev-parse --short HEAD)
+IMAGE_PREFIX ?= grafana
 IMAGE_TAG ?= $(GIT_BRANCH)-$(GIT_REVISION)
 
 GOOS ?= $(shell go env GOOS)
@@ -16,7 +17,7 @@ build-image: clean
 
 .PHONY: publish-image
 publish-image: clean
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t grafana/rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: test
 test:
