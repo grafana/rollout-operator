@@ -12,7 +12,6 @@ rollout-operator:
 
 .PHONY: build-image
 build-image: clean
-	# Docker doesn't support loading multiplatform images, so load linux/amd64 for CI/local testing
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: publish-image
