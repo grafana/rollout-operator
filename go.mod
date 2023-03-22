@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
-	github.com/go-kit/kit v0.10.0
+	github.com/go-kit/log v0.2.1
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/k3d-io/k3d/v5 v5.4.7
 	github.com/pkg/errors v0.9.1
