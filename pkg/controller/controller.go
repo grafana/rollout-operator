@@ -272,7 +272,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 		ongoing, err := c.updateStatefulSetPods(ctx, sts)
 		if err != nil {
 			// Do not continue with other StatefulSets because this StatefulSet
-			// is expected to be successfully updated before proceeding with next ones.
+			// is expected to be successfully updated before proceeding.
 			return errors.Wrapf(err, "failed to update StatefulSet %s", sts.Name)
 		}
 
@@ -405,8 +405,8 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 		}
 
 		for _, pod := range podsToUpdate[:numPods] {
-			// Skip if the pod is terminating. Since "Terminating" is not a pod Phase, we can infer it checking
-			// if the pod is in Running phase but the deletionTimestamp has been set (kubectl does something
+			// Skip if the pod is terminating. Since "Terminating" is not a pod Phase, we can infer it by checking
+			// if the pod is in the Running phase but the deletionTimestamp has been set (kubectl does something
 			// similar too).
 			if pod.Status.Phase == corev1.PodRunning && pod.DeletionTimestamp != nil {
 				level.Debug(c.logger).Log("msg", fmt.Sprintf("waiting for pod %s to be terminated", pod.Name))
@@ -457,7 +457,7 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 		updateRev = sts.Status.UpdateRevision
 	)
 
-	// Do NOT introduce a short circuit if "currRev == updateRev". Reason is that if a change
+	// Do NOT introduce a short circuit if "currRev == updateRev". The reason is that if a change
 	// is rolled back in the StatefulSet to the previous version, the updateRev == currRev but
 	// its pods may still run the previous updateRev. We need to check pods to be 100% sure.
 	if currRev == "" {
@@ -466,7 +466,7 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 		return nil, errors.New("updateRevision is empty")
 	}
 
-	// Get any pods whose revision doesn't match the StatefulSet's updateRevision
+	// Get any pods which revision doesn't match the StatefulSet's updateRevision
 	// and so it means they still need to be updated.
 	podsSelector := labels.NewSelector().Add(
 		mustNewLabelsRequirement(v1.ControllerRevisionHashLabelKey, selection.NotEquals, []string{updateRev}),
