@@ -118,7 +118,7 @@ func main() {
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
 	check(errors.Wrap(err, "failed to create Kubernetes client"))
 
-	// startTLS server if enabled.
+	// Start TLS server if enabled.
 	maybeStartTLSServer(cfg, logger, kubeClient, restart)
 
 	// Init the controller.
