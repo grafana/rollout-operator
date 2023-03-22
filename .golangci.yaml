@@ -3,4 +3,8 @@ run:
     - requires_docker
 linters-settings:
   errcheck:
-    exclude: .errcheck-excludes.txt
+    # Use exclude-functions instead of exclude, since the GitHub Action's caching is broken.
+    # When changing the file referenced by exclude, the GitHub Action may use an older cache
+    # entry and ignore the changes in said file (thus breaking CI).
+    exclude-functions:
+      - (github.com/go-kit/log.Logger).Log
