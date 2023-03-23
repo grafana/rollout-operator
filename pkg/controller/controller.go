@@ -112,9 +112,8 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 
 // Init the controller.
 func (c *RolloutController) Init() error {
-
 	// We enqueue a reconcile request each time any of the observed StatefulSets are updated. The UpdateFunc
-	// is also called every sync period even if no changed occurred.
+	// is also called every sync period even if no changes occurred.
 	_, err := c.statefulSetsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			c.enqueueReconcile()
@@ -142,7 +141,7 @@ func (c *RolloutController) Init() error {
 	go c.statefulSetsFactory.Start(c.stopCh)
 	go c.podsFactory.Start(c.stopCh)
 
-	// Wait until all informers caches have been synched.
+	// Wait until all informers' caches have been synched.
 	level.Info(c.logger).Log("msg", "informers cache is synching")
 	if ok := cache.WaitForCacheSync(c.stopCh, c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced); !ok {
 		return errors.New("informers cache failed to sync")
@@ -180,8 +179,7 @@ func (c *RolloutController) Stop() {
 	close(c.stopCh)
 }
 
-// enqueueReconcile enqueues a request to run a reconcile as soon as possible. If multiple reconcile
-// requests are enqueued while
+// enqueueReconcile requests to run a reconcile at the next interval.
 func (c *RolloutController) enqueueReconcile() {
 	c.shouldReconcile.Store(true)
 }
@@ -233,8 +231,8 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// Sort StatefulSets to provide a deterministic behaviour.
 	sortStatefulSets(sets)
 
-	// Ensure all StatefulSets have OnDelete update strategy. If not, then we're not able to guarantee
-	// that will be updated only 1 StatefulSet at a time.
+	// Ensure all StatefulSets have OnDelete update strategy. Otherwise, we're not able to guarantee
+	// for only 1 StatefulSet to be updated at a time.
 	for _, sts := range sets {
 		if sts.Spec.UpdateStrategy.Type != v1.OnDeleteStatefulSetStrategyType {
 			return fmt.Errorf("StatefulSet %s has %s update strategy while %s is expected, skipping reconcile", sts.Name, sts.Spec.UpdateStrategy.Type, v1.OnDeleteStatefulSetStrategyType)
@@ -255,8 +253,8 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	}
 
 	// Ensure there are not 2+ StatefulSets with not-Ready pods. If there are, we shouldn't proceed
-	// rolling out pods and we should wait until these pods are Ready. Reason is that if there are
-	// unavailable pods in multiple StatefulSets this could lead to an outage, so we want pods to
+	// rolling out pods and we should wait until these pods are Ready. The reason is that if there are
+	// unavailable pods in multiple StatefulSets, this could lead to an outage, so we want pods to
 	// get back to Ready first before proceeding.
 	if len(notReadySets) > 1 {
 		// Do not return error because it's not an actionable error with regards to the operator behaviour.
@@ -316,7 +314,7 @@ func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (boo
 		return true, nil
 	}
 
-	// The number of ready replicas reported by the StatefulSet match the total number of
+	// The number of ready replicas reported by the StatefulSet matches the total number of
 	// replicas. However, there's still no guarantee that all pods are running. For example,
 	// a terminating pod (which we don't consider "ready") may have not yet failed the
 	// readiness probe for the consecutive number of times required to switch its status
@@ -349,7 +347,7 @@ func (c *RolloutController) listNotReadyPodsByStatefulSet(sts *v1.StatefulSet) (
 		return nil, err
 	}
 
-	// Build a list of not-ready ones. We don't pre-allocate this list cause most of the times we
+	// Build a list of not-ready ones. We don't pre-allocate this list because most of the time we
 	// expect all pods are running and ready.
 	var notReady []*corev1.Pod
 
