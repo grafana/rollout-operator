@@ -59,9 +59,9 @@ func IsPodRunningAndReady(pod *corev1.Pod) bool {
 	return true
 }
 
-// moveStatefulSetToFront returns a new slice where the input StatefulSet toMove is moved
+// MoveStatefulSetToFront returns a new slice where the input StatefulSet toMove is moved
 // to the beginning. Comparison is done via pointer equality.
-func moveStatefulSetToFront(sets []*v1.StatefulSet, toMove *v1.StatefulSet) []*v1.StatefulSet {
+func MoveStatefulSetToFront(sets []*v1.StatefulSet, toMove *v1.StatefulSet) []*v1.StatefulSet {
 	out := make([]*v1.StatefulSet, 0, len(sets))
 	out = append(out, toMove)
 

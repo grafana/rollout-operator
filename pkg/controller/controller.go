@@ -505,7 +505,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	// At this point there are no pods to update, so we can update the currentRevision in the StatefulSet.
 	// When the StatefulSet update strategy is RollingUpdate this is done automatically by the controller,
-	// when when it's OnDelete (our case) then it's our responsibility to update it once done.
+	// but when it's OnDelete (our case) then it's our responsibility to update it once done.
 	if sts.Status.CurrentRevision != sts.Status.UpdateRevision {
 		oldRev := sts.Status.CurrentRevision
 		sts.Status.CurrentRevision = sts.Status.UpdateRevision
