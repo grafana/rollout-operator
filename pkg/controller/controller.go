@@ -415,7 +415,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 			level.Info(c.logger).Log("msg", fmt.Sprintf("terminating pod %s", pod.Name))
 			if err := c.kubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
-				return false, errors.Wrapf(err, "failed to restart pod %s", pod.Name)
+				return false, errors.Wrapf(err, "failed to delete pod %s", pod.Name)
 			}
 		}
 
