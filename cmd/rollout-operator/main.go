@@ -117,12 +117,14 @@ func main() {
 
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
 	check(errors.Wrap(err, "failed to create Kubernetes client"))
+	customClient, err := clientset.NewForConfig(kubeConfig)
+	check(errors.Wrap(err, "failed to create custom client"))
 
 	// Start TLS server if enabled.
 	maybeStartTLSServer(cfg, logger, kubeClient, restart)
 
 	// Init the controller.
-	c := controller.NewRolloutController(kubeClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
+	c := controller.NewRolloutController(kubeClient, customClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
 	check(errors.Wrap(c.Init(), "failed to init controller"))
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).

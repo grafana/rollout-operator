@@ -23,6 +23,10 @@ import (
 	listersv1 "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
+
+	clientset "github.com/grafana/rollout-operator/pkg/generated/clientset/versioned"
+	custominformers "github.com/grafana/rollout-operator/pkg/generated/informers/externalversions"
 )
 
 const (
@@ -60,7 +64,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, customClient *clientset.Clientset, namespace string, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -72,6 +76,10 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 
 	statefulSetsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt, statefulSetsSelOpt)
 	statefulSetsInformer := statefulSetsFactory.Apps().V1().StatefulSets()
+
+	ingesterAutoScalerInformerFactory := custominformers.NewSharedInformerFactory(customClient, informerSyncInterval)
+	ingesterAutoScalerInformer := ingesterAutoScalerInformerFactory.RolloutOperator().V1alpha1().MultiZoneIngesterAutoScalers()
+
 	podsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt)
 	podsInformer := podsFactory.Core().V1().Pods()
 
@@ -88,6 +96,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 		logger:               logger,
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
+		autoScalingQueue:     workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "MultiZoneIngesterAutoScalers"),
 		groupReconcileTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_group_reconciles_total",
 			Help: "Total number of reconciles started for a specific rollout group.",
@@ -138,8 +147,36 @@ func (c *RolloutController) Init() error {
 	}
 
 	// Start informers.
-	go c.statefulSetsFactory.Start(c.stopCh)
-	go c.podsFactory.Start(c.stopCh)
+	c.statefulSetsFactory.Start(c.stopCh)
+	c.podsFactory.Start(c.stopCh)
+
+	// Set up an event handler for when MultiZoneIngesterAutoScaler resources change
+	ingesterAutoScalerInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: c.enqueueIngesterAutoScaler,
+		UpdateFunc: func(old, new interface{}) {
+			c.enqueueIngesterAutoScaler(new)
+		},
+	})
+	// Set up an event handler for when Deployment resources change. This
+	// handler will lookup the owner of the given Deployment, and if it is
+	// owned by a Foo resource then the handler will enqueue that Foo resource for
+	// processing. This way, we don't need to implement custom logic for
+	// handling Deployment resources. More info on this pattern:
+	// https://github.com/kubernetes/community/blob/8cafef897a22026d42f5e5bb3f104febe7e29830/contributors/devel/controllers.md
+	deploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: controller.handleObject,
+		UpdateFunc: func(old, new interface{}) {
+			newDepl := new.(*appsv1.Deployment)
+			oldDepl := old.(*appsv1.Deployment)
+			if newDepl.ResourceVersion == oldDepl.ResourceVersion {
+				// Periodic resync will send update events for all known Deployments.
+				// Two different versions of the same Deployment will always have different RVs.
+				return
+			}
+			controller.handleObject(new)
+		},
+		DeleteFunc: controller.handleObject,
+	})
 
 	// Wait until all informers' caches have been synched.
 	level.Info(c.logger).Log("msg", "informers cache is synching")
@@ -153,7 +190,11 @@ func (c *RolloutController) Init() error {
 
 // Run runs the controller and blocks until Stop() is called.
 func (c *RolloutController) Run() {
+	defer c.workqueue.ShutDown()
+
 	ctx := context.Background()
+
+	go c.ingesterAutoScalingWorker(ctx)
 
 	for {
 		if c.shouldReconcile.CompareAndSwap(true, false) {
