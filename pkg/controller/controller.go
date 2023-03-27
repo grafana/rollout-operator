@@ -21,12 +21,14 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listersv1 "k8s.io/client-go/listers/apps/v1"
+	autoscalinglisters "k8s.io/client-go/listers/autoscaling/v2"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
 	clientset "github.com/grafana/rollout-operator/pkg/generated/clientset/versioned"
 	custominformers "github.com/grafana/rollout-operator/pkg/generated/informers/externalversions"
+	operatorlisters "github.com/grafana/rollout-operator/pkg/generated/listers/rolloutoperator/v1alpha1"
 )
 
 const (
@@ -36,16 +38,22 @@ const (
 )
 
 type RolloutController struct {
-	kubeClient           kubernetes.Interface
-	namespace            string
-	reconcileInterval    time.Duration
-	statefulSetsFactory  informers.SharedInformerFactory
-	statefulSetLister    listersv1.StatefulSetLister
-	statefulSetsInformer cache.SharedIndexInformer
-	podsFactory          informers.SharedInformerFactory
-	podLister            corelisters.PodLister
-	podsInformer         cache.SharedIndexInformer
-	logger               log.Logger
+	kubeClient                 kubernetes.Interface
+	customClient               *clientset.Clientset
+	namespace                  string
+	reconcileInterval          time.Duration
+	statefulSetsFactory        informers.SharedInformerFactory
+	statefulSetLister          listersv1.StatefulSetLister
+	statefulSetsInformer       cache.SharedIndexInformer
+	podsFactory                informers.SharedInformerFactory
+	podLister                  corelisters.PodLister
+	podsInformer               cache.SharedIndexInformer
+	customInformerFactory      custominformers.SharedInformerFactory
+	ingesterAutoScalerInformer cache.SharedIndexInformer
+	ingesterAutoScalerLister   operatorlisters.MultiZoneIngesterAutoScalerLister
+	hpaLister                  autoscalinglisters.HorizontalPodAutoscalerLister
+	autoScalingQueue           workqueue.RateLimitingInterface
+	logger                     log.Logger
 
 	// This bool is true if we should trigger a reconcile.
 	shouldReconcile atomic.Bool
@@ -77,26 +85,40 @@ func NewRolloutController(kubeClient kubernetes.Interface, customClient *clients
 	statefulSetsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt, statefulSetsSelOpt)
 	statefulSetsInformer := statefulSetsFactory.Apps().V1().StatefulSets()
 
-	ingesterAutoScalerInformerFactory := custominformers.NewSharedInformerFactory(customClient, informerSyncInterval)
-	ingesterAutoScalerInformer := ingesterAutoScalerInformerFactory.RolloutOperator().V1alpha1().MultiZoneIngesterAutoScalers()
+	// Initialise the HPA informer to restrict the returned HPAs to only the ones
+	// having the rollout group label. Only these HPAs are managed by this operator.
+	hpaSel := labels.NewSelector().Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil)).String()
+	hpaSelOpt := informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+		options.LabelSelector = hpaSel
+	})
+
+	customInformerFactory := custominformers.NewSharedInformerFactory(customClient, informerSyncInterval)
+	ingesterAutoScalerInformer := customInformerFactory.Rolloutoperator().V1alpha1().MultiZoneIngesterAutoScalers()
+	hpaFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt, hpaSelOpt)
+	hpaInformer := hpaFactory.Autoscaling().V2().HorizontalPodAutoscalers()
 
 	podsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt)
 	podsInformer := podsFactory.Core().V1().Pods()
 
 	c := &RolloutController{
-		kubeClient:           kubeClient,
-		namespace:            namespace,
-		reconcileInterval:    reconcileInterval,
-		statefulSetsFactory:  statefulSetsFactory,
-		statefulSetLister:    statefulSetsInformer.Lister(),
-		statefulSetsInformer: statefulSetsInformer.Informer(),
-		podsFactory:          podsFactory,
-		podLister:            podsInformer.Lister(),
-		podsInformer:         podsInformer.Informer(),
-		logger:               logger,
-		stopCh:               make(chan struct{}),
-		discoveredGroups:     map[string]struct{}{},
-		autoScalingQueue:     workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "MultiZoneIngesterAutoScalers"),
+		kubeClient:                 kubeClient,
+		customClient:               customClient,
+		namespace:                  namespace,
+		reconcileInterval:          reconcileInterval,
+		statefulSetsFactory:        statefulSetsFactory,
+		statefulSetLister:          statefulSetsInformer.Lister(),
+		statefulSetsInformer:       statefulSetsInformer.Informer(),
+		customInformerFactory:      customInformerFactory,
+		ingesterAutoScalerInformer: ingesterAutoScalerInformer.Informer(),
+		ingesterAutoScalerLister:   ingesterAutoScalerInformer.Lister(),
+		hpaLister:                  hpaInformer.Lister(),
+		podsFactory:                podsFactory,
+		podLister:                  podsInformer.Lister(),
+		podsInformer:               podsInformer.Informer(),
+		logger:                     logger,
+		stopCh:                     make(chan struct{}),
+		discoveredGroups:           map[string]struct{}{},
+		autoScalingQueue:           workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "MultiZoneIngesterAutoScalers"),
 		groupReconcileTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_group_reconciles_total",
 			Help: "Total number of reconciles started for a specific rollout group.",
@@ -149,21 +171,24 @@ func (c *RolloutController) Init() error {
 	// Start informers.
 	c.statefulSetsFactory.Start(c.stopCh)
 	c.podsFactory.Start(c.stopCh)
+	c.customInformerFactory.Start(c.stopCh)
 
 	// Set up an event handler for when MultiZoneIngesterAutoScaler resources change
-	ingesterAutoScalerInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	c.ingesterAutoScalerInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: c.enqueueIngesterAutoScaler,
-		UpdateFunc: func(old, new interface{}) {
-			c.enqueueIngesterAutoScaler(new)
+		UpdateFunc: func(_, n interface{}) {
+			c.enqueueIngesterAutoScaler(n)
 		},
 	})
-	// Set up an event handler for when Deployment resources change. This
-	// handler will lookup the owner of the given Deployment, and if it is
-	// owned by a Foo resource then the handler will enqueue that Foo resource for
+	/* TODO
+	// Set up an event handler for when HPA resources change. This
+	// handler will lookup the owner of the given HPA, and if it is
+	// owned by a MultiZoneIngesterAutoScaler resource then the handler
+	// will enqueue that MultiZoneIngesterAutoScaler resource for
 	// processing. This way, we don't need to implement custom logic for
-	// handling Deployment resources. More info on this pattern:
+	// handling HPA resources. More info on this pattern:
 	// https://github.com/kubernetes/community/blob/8cafef897a22026d42f5e5bb3f104febe7e29830/contributors/devel/controllers.md
-	deploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	hpaInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.handleObject,
 		UpdateFunc: func(old, new interface{}) {
 			newDepl := new.(*appsv1.Deployment)
@@ -177,22 +202,24 @@ func (c *RolloutController) Init() error {
 		},
 		DeleteFunc: controller.handleObject,
 	})
+	*/
 
-	// Wait until all informers' caches have been synched.
-	level.Info(c.logger).Log("msg", "informers cache is synching")
-	if ok := cache.WaitForCacheSync(c.stopCh, c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced); !ok {
-		return errors.New("informers cache failed to sync")
+	// Wait until all informers' caches have been synced.
+	level.Info(c.logger).Log("msg", "informers caches are syncing")
+	if ok := cache.WaitForCacheSync(c.stopCh, c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced,
+		c.ingesterAutoScalerInformer.HasSynced); !ok {
+		return errors.New("informers caches failed to sync")
 	}
-	level.Info(c.logger).Log("msg", "informers cache has synced")
+	level.Info(c.logger).Log("msg", "informers caches have synced")
 
 	return nil
 }
 
 // Run runs the controller and blocks until Stop() is called.
 func (c *RolloutController) Run() {
-	defer c.workqueue.ShutDown()
+	defer c.autoScalingQueue.ShutDown()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	go c.ingesterAutoScalingWorker(ctx)
 
@@ -208,6 +235,7 @@ func (c *RolloutController) Run() {
 
 		select {
 		case <-c.stopCh:
+			cancel()
 			return
 		case <-time.After(c.reconcileInterval):
 			// Throttle before checking again if we should reconcile.

@@ -25,6 +25,7 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/admission"
 	"github.com/grafana/rollout-operator/pkg/controller"
+	clientset "github.com/grafana/rollout-operator/pkg/generated/clientset/versioned"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
 
 	// Required to get the GCP auth provider working.
