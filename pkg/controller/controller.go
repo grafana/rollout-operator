@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -180,7 +181,6 @@ func (c *RolloutController) Init() error {
 			c.enqueueIngesterAutoScaler(n)
 		},
 	})
-	/* TODO
 	// Set up an event handler for when HPA resources change. This
 	// handler will lookup the owner of the given HPA, and if it is
 	// owned by a MultiZoneIngesterAutoScaler resource then the handler
@@ -188,21 +188,20 @@ func (c *RolloutController) Init() error {
 	// processing. This way, we don't need to implement custom logic for
 	// handling HPA resources. More info on this pattern:
 	// https://github.com/kubernetes/community/blob/8cafef897a22026d42f5e5bb3f104febe7e29830/contributors/devel/controllers.md
-	hpaInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: controller.handleObject,
-		UpdateFunc: func(old, new interface{}) {
-			newDepl := new.(*appsv1.Deployment)
-			oldDepl := old.(*appsv1.Deployment)
-			if newDepl.ResourceVersion == oldDepl.ResourceVersion {
-				// Periodic resync will send update events for all known Deployments.
-				// Two different versions of the same Deployment will always have different RVs.
+	c.ingesterAutoScalerInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: c.handleHPA,
+		UpdateFunc: func(o, n interface{}) {
+			newHPA := n.(*autoscalingv2.HorizontalPodAutoscaler)
+			oldHPA := o.(*autoscalingv2.HorizontalPodAutoscaler)
+			if newHPA.ResourceVersion == oldHPA.ResourceVersion {
+				// Periodic resync will send update events for all known HPAs.
+				// Two different versions of the same HPA will always have different RVs.
 				return
 			}
-			controller.handleObject(new)
+			c.handleHPA(n)
 		},
-		DeleteFunc: controller.handleObject,
+		DeleteFunc: c.handleHPA,
 	})
-	*/
 
 	// Wait until all informers' caches have been synced.
 	level.Info(c.logger).Log("msg", "informers caches are syncing")

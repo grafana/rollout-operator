@@ -10,6 +10,7 @@ import (
 	kubeerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 
 	rolloutoperator "github.com/grafana/rollout-operator/pkg/apis/rolloutoperator/v1alpha1"
 )
@@ -126,6 +127,8 @@ func (c *RolloutController) syncHandler(ctx context.Context, key string) error {
 
 	// TODO: Reconcile HPA state
 
+	// TODO: Deal with HPAs for zones B and C
+
 	return c.updateScalerStatus(ctx, rsrc, hpa1)
 }
 
@@ -161,4 +164,41 @@ func newHPA(owner *rolloutoperator.MultiZoneIngesterAutoScaler) *autoscalingv2.H
 			},
 		},
 	}
+}
+
+// handleHPA will take any resource implementing metav1.Object and attempt
+// to find the MultiZoneIngesterAutoScaler resource that owns it.
+// If successful, it enqueues that MultiZoneIngesterAutoScaler resource for processing,
+// otherwise it gets skipped.
+func (c *RolloutController) handleHPA(obj interface{}) {
+	var object metav1.Object
+	var ok bool
+	if object, ok = obj.(metav1.Object); !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			level.Warn(c.logger).Log("msg", "error decoding object, invalid type")
+			return
+		}
+		object, ok = tombstone.Obj.(metav1.Object)
+		if !ok {
+			level.Warn(c.logger).Log("msg", "error decoding object tombstone, invalid type")
+			return
+		}
+		level.Info(c.logger).Log("msg", "recovered deleted object", "resourceName", object.GetName())
+	}
+
+	level.Info(c.logger).Log("msg", "processing object", "object", klog.KObj(object))
+	ownerRef := metav1.GetControllerOf(object)
+	if ownerRef == nil || ownerRef.Kind != "MultiZoneIngesterAutoScaler" {
+		return
+	}
+
+	scaler, err := c.ingesterAutoScalerLister.MultiZoneIngesterAutoScalers(object.GetNamespace()).Get(ownerRef.Name)
+	if err != nil {
+		level.Info(c.logger).Log("msg", "ignoring orphaned object", "object", klog.KObj(object),
+			"owner", ownerRef.Name)
+		return
+	}
+
+	c.enqueueIngesterAutoScaler(scaler)
 }
