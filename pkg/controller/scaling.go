@@ -31,8 +31,6 @@ func (c *RolloutController) ingesterAutoScalingWorker(ctx context.Context) {
 
 	for c.processNextWorkItem(ctx) {
 	}
-
-	return
 }
 
 func (c *RolloutController) processNextWorkItem(ctx context.Context) bool {
@@ -64,7 +62,7 @@ func (c *RolloutController) processNextWorkItem(ctx context.Context) bool {
 		return true
 	}
 	// Run the syncHandler, passing it the namespace/name string of the
-	// Foo resource to be synced.
+	// resource to be synced.
 	if err := c.syncHandler(ctx, key); err != nil {
 		// Put the item back on the workqueue to handle any transient errors.
 		c.autoScalingQueue.AddRateLimited(key)
@@ -141,7 +139,7 @@ func (c *RolloutController) updateScalerStatus(ctx context.Context, scaler *roll
 	// TODO: Update resource status
 	// scalerCopy.Status.AvailableReplicas = deployment.Status.AvailableReplicas
 	// If the CustomResourceSubresources feature gate is not enabled,
-	// we must use Update instead of UpdateStatus to update the Status block of the Foo resource.
+	// we must use Update instead of UpdateStatus to update the Status block of the resource.
 	// UpdateStatus will not allow changes to the Spec of the resource,
 	// which is ideal for ensuring nothing other than resource status has been updated.
 	_, err := c.customClient.RolloutoperatorV1alpha1().MultiZoneIngesterAutoScalers(scaler.Namespace).UpdateStatus(ctx, scalerCopy, metav1.UpdateOptions{})
@@ -149,14 +147,9 @@ func (c *RolloutController) updateScalerStatus(ctx context.Context, scaler *roll
 }
 
 // newHPA creates a new HPA for a MultiZoneIngesterAutoScaler resource. It also sets
-// the appropriate OwnerReferences on the resource so handleObject can discover
+// the appropriate OwnerReferences on the resource so handleHPA can discover
 // the owning resource.
 func newHPA(owner *rolloutoperator.MultiZoneIngesterAutoScaler, name, zone string) *autoscalingv2.HorizontalPodAutoscaler {
-	/*
-		labels := map[string]string{
-			"controller": owner.Name,
-		}
-	*/
 	// TODO: Don't hardcode number of replicas
 	// Temporarily set min and max to the same, to avoid scaling
 	minReplicas := int32(5)
