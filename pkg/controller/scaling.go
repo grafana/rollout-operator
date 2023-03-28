@@ -169,6 +169,9 @@ func newHPA(owner *rolloutoperator.MultiZoneIngesterAutoScaler, name, zone strin
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(owner, rolloutoperator.SchemeGroupVersion.WithKind("MultiZoneIngesterAutoScaler")),
 			},
+			Labels: map[string]string{
+				"controller": owner.Name,
+			},
 		},
 		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
 			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{

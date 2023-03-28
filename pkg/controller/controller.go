@@ -86,16 +86,9 @@ func NewRolloutController(kubeClient kubernetes.Interface, customClient *clients
 	statefulSetsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt, statefulSetsSelOpt)
 	statefulSetsInformer := statefulSetsFactory.Apps().V1().StatefulSets()
 
-	// Initialise the HPA informer to restrict the returned HPAs to only the ones
-	// having the rollout group label. Only these HPAs are managed by this operator.
-	hpaSel := labels.NewSelector().Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil)).String()
-	hpaSelOpt := informers.WithTweakListOptions(func(options *metav1.ListOptions) {
-		options.LabelSelector = hpaSel
-	})
-
 	customInformerFactory := custominformers.NewSharedInformerFactory(customClient, informerSyncInterval)
 	ingesterAutoScalerInformer := customInformerFactory.Rolloutoperator().V1alpha1().MultiZoneIngesterAutoScalers()
-	hpaFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt, hpaSelOpt)
+	hpaFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt)
 	hpaInformer := hpaFactory.Autoscaling().V2().HorizontalPodAutoscalers()
 
 	podsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt)
