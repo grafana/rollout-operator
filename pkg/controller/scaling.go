@@ -157,8 +157,10 @@ func newHPA(owner *rolloutoperator.MultiZoneIngesterAutoScaler, name, zone strin
 			"controller": owner.Name,
 		}
 	*/
-	minReplicas := int32(2)
-	maxReplicas := int32(2)
+	// TODO: Don't hardcode number of replicas
+	// Temporarily set min and max to the same, to avoid scaling
+	minReplicas := int32(5)
+	maxReplicas := int32(5)
 	avgUtilization := int32(90)
 	return &autoscalingv2.HorizontalPodAutoscaler{
 		ObjectMeta: metav1.ObjectMeta{
