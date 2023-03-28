@@ -20,8 +20,6 @@ type MultiZoneIngesterAutoScaler struct {
 
 // MultiZoneIngesterAutoScalerSpec is the spec for a MultiZoneIngesterAutoScaler resource.
 type MultiZoneIngesterAutoScalerSpec struct {
-	DeploymentName string `json:"deploymentName"`
-	Replicas       *int32 `json:"replicas"`
 }
 
 // MultiZoneIngesterAutoScalerStatus is the status for a MultiZoneIngesterAutoScaler resource.

@@ -107,9 +107,11 @@ func (c *RolloutController) syncHandler(ctx context.Context, key string) error {
 	if err != nil {
 		// If the resource doesn't exist, we'll create it
 		if kubeerrors.IsNotFound(err) {
-			level.Info(c.logger).Log("msg", "creating missing zone A HPA", "name", hpa1Name)
+			hpa := newHPA(rsrc, hpa1Name, "a")
+			level.Info(c.logger).Log("msg", "creating missing zone A HPA", "name", hpa.Name,
+				"namespace", hpa.Namespace)
 			hpa1, err = c.kubeClient.AutoscalingV2().HorizontalPodAutoscalers(c.namespace).Create(
-				ctx, newHPA(rsrc), metav1.CreateOptions{})
+				ctx, hpa, metav1.CreateOptions{})
 			err = errors.Wrapf(err, "failed to create HPA %s", hpa1Name)
 		} else {
 			err = errors.Wrapf(err, "couldn't get HPA %s", hpa1Name)
@@ -149,18 +151,51 @@ func (c *RolloutController) updateScalerStatus(ctx context.Context, scaler *roll
 // newHPA creates a new HPA for a MultiZoneIngesterAutoScaler resource. It also sets
 // the appropriate OwnerReferences on the resource so handleObject can discover
 // the owning resource.
-func newHPA(owner *rolloutoperator.MultiZoneIngesterAutoScaler) *autoscalingv2.HorizontalPodAutoscaler {
+func newHPA(owner *rolloutoperator.MultiZoneIngesterAutoScaler, name, zone string) *autoscalingv2.HorizontalPodAutoscaler {
 	/*
 		labels := map[string]string{
 			"controller": owner.Name,
 		}
 	*/
+	minReplicas := int32(2)
+	maxReplicas := int32(2)
+	avgUtilization := int32(90)
 	return &autoscalingv2.HorizontalPodAutoscaler{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      owner.Spec.DeploymentName,
+			Name:      name,
 			Namespace: owner.Namespace,
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(owner, rolloutoperator.SchemeGroupVersion.WithKind("MultiZoneIngesterAutoScaler")),
+			},
+		},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+				Kind: "StatefulSet",
+				Name: fmt.Sprintf("ingester-zone-%s", zone),
+			},
+			MinReplicas: &minReplicas,
+			MaxReplicas: maxReplicas,
+			Metrics: []autoscalingv2.MetricSpec{
+				{
+					Type: "Resource",
+					Resource: &autoscalingv2.ResourceMetricSource{
+						Name: "cpu",
+						Target: autoscalingv2.MetricTarget{
+							Type:               "Utilization",
+							AverageUtilization: &avgUtilization,
+						},
+					},
+				},
+				{
+					Type: "Resource",
+					Resource: &autoscalingv2.ResourceMetricSource{
+						Name: "memory",
+						Target: autoscalingv2.MetricTarget{
+							Type:               "Utilization",
+							AverageUtilization: &avgUtilization,
+						},
+					},
+				},
 			},
 		},
 	}
