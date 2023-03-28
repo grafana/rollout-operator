@@ -52,6 +52,8 @@ type RolloutController struct {
 	customInformerFactory      custominformers.SharedInformerFactory
 	ingesterAutoScalerInformer cache.SharedIndexInformer
 	ingesterAutoScalerLister   operatorlisters.MultiZoneIngesterAutoScalerLister
+	hpaFactory                 informers.SharedInformerFactory
+	hpaInformer                cache.SharedIndexInformer
 	hpaLister                  autoscalinglisters.HorizontalPodAutoscalerLister
 	autoScalingQueue           workqueue.RateLimitingInterface
 	logger                     log.Logger
@@ -105,6 +107,8 @@ func NewRolloutController(kubeClient kubernetes.Interface, customClient *clients
 		customInformerFactory:      customInformerFactory,
 		ingesterAutoScalerInformer: ingesterAutoScalerInformer.Informer(),
 		ingesterAutoScalerLister:   ingesterAutoScalerInformer.Lister(),
+		hpaFactory:                 hpaFactory,
+		hpaInformer:                hpaInformer.Informer(),
 		hpaLister:                  hpaInformer.Lister(),
 		podsFactory:                podsFactory,
 		podLister:                  podsInformer.Lister(),
@@ -166,6 +170,7 @@ func (c *RolloutController) Init() error {
 	c.statefulSetsFactory.Start(c.stopCh)
 	c.podsFactory.Start(c.stopCh)
 	c.customInformerFactory.Start(c.stopCh)
+	c.hpaFactory.Start(c.stopCh)
 
 	// Set up an event handler for when MultiZoneIngesterAutoScaler resources change
 	c.ingesterAutoScalerInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -181,7 +186,7 @@ func (c *RolloutController) Init() error {
 	// processing. This way, we don't need to implement custom logic for
 	// handling HPA resources. More info on this pattern:
 	// https://github.com/kubernetes/community/blob/8cafef897a22026d42f5e5bb3f104febe7e29830/contributors/devel/controllers.md
-	c.ingesterAutoScalerInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	c.hpaInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: c.handleHPA,
 		UpdateFunc: func(o, n interface{}) {
 			newHPA := n.(*autoscalingv2.HorizontalPodAutoscaler)
@@ -199,7 +204,7 @@ func (c *RolloutController) Init() error {
 	// Wait until all informers' caches have been synced.
 	level.Info(c.logger).Log("msg", "informers caches are syncing")
 	if ok := cache.WaitForCacheSync(c.stopCh, c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced,
-		c.ingesterAutoScalerInformer.HasSynced); !ok {
+		c.ingesterAutoScalerInformer.HasSynced, c.hpaInformer.HasSynced); !ok {
 		return errors.New("informers caches failed to sync")
 	}
 	level.Info(c.logger).Log("msg", "informers caches have synced")
