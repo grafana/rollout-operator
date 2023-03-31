@@ -105,16 +105,22 @@ func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 				resp, err := http.Post("http://"+ep, "application/json", nil)
 				if err != nil {
 					level.Error(logger).Log("msg", "error sending HTTP post request", "endpoint", ep, "err", err)
+					return
 				}
 				if resp.StatusCode != 200 {
 					level.Error(logger).Log("msg", "HTTP post request returned non-200 status code", "endpoint", ep, "status", resp.StatusCode)
+					return
 				}
 				if resp.StatusCode == 200 {
 					// TODO(jordanrushing): set a label on the pod to indicate it's been prepared for shutdown? Or do we need to do that?
+					// If we did that, when the rollout operator reconcile loop runs, it would need to "de-prep" the pod and remove the label
+					// OR
+					// we could do that in the conditional below
 					level.Debug(logger).Log("msg", "pod prepared for shutdown", "endpoint", ep)
 					lock.Lock()
 					defer lock.Unlock()
 					success[ep] = struct{}{}
+					return
 				}
 			}(ep)
 		}
