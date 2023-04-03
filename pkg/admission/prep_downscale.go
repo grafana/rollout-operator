@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
@@ -92,27 +92,24 @@ func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 	if lbls[PrepDownscaleLabelKey] == PrepDownscaleLabelValue {
 		diff := (*oldReplicas - *newReplicas)
 		eps := make([]string, diff)
-		lock := sync.Mutex{}
-		success := map[string]struct{}{}
 
 		for i := 0; i < int(diff); i++ {
 			// TODO(jordanrushing): Actually craft the endpoint address
 			eps[i] = fmt.Sprintf("%s:%s", lbls[PrepDownscalePathKey], lbls[PrepDownscalePortKey])
 		}
 
-		var wg sync.WaitGroup
+		g, _ := errgroup.WithContext(ctx)
 		for _, ep := range eps {
-			wg.Add(1)
-			go func(ep string) {
-				defer wg.Done()
+			ep := ep // https://golang.org/doc/faq#closures_and_goroutines
+			g.Go(func() error {
 				resp, err := http.Post("http://"+ep, "application/json", nil)
 				if err != nil {
 					level.Error(logger).Log("msg", "error sending HTTP post request", "endpoint", ep, "err", err)
-					return
+					return err
 				}
 				if resp.StatusCode != 200 {
 					level.Error(logger).Log("msg", "HTTP post request returned non-200 status code", "endpoint", ep, "status", resp.StatusCode)
-					return
+					return err
 				}
 				if resp.StatusCode == 200 {
 					// TODO(jordanrushing): set a label on the pod to indicate it's been prepared for shutdown? Or do we need to do that?
@@ -120,16 +117,13 @@ func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 					// OR
 					// we could do that in the conditional below
 					level.Debug(logger).Log("msg", "pod prepared for shutdown", "endpoint", ep)
-					lock.Lock()
-					defer lock.Unlock()
-					success[ep] = struct{}{}
-					return
+					return err
 				}
-			}(ep)
+				return nil
+			})
 		}
-		wg.Wait()
-
-		if len(success) != len(eps) {
+		err := g.Wait()
+		if err != nil {
 			// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
 			reviewResponse := v1.AdmissionResponse{
 				Allowed: false,
@@ -140,15 +134,13 @@ func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 			level.Warn(logger).Log("msg", "downscale not allowed")
 			return &reviewResponse
 		}
-		if len(success) == len(eps) {
-			// Down-scale operation is allowed because all pods successfully prepared for shutdown
-			level.Info(logger).Log("msg", "downscale allowed")
-			return &v1.AdmissionResponse{
-				Allowed: true,
-				Result: &metav1.Status{
-					Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is allowed -- all pods successfully prepared for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
-				},
-			}
+		// Down-scale operation is allowed because all pods successfully prepared for shutdown
+		level.Info(logger).Log("msg", "downscale allowed")
+		return &v1.AdmissionResponse{
+			Allowed: true,
+			Result: &metav1.Status{
+				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is allowed -- all pods successfully prepared for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
+			},
 		}
 	}
 
