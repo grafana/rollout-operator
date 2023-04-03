@@ -100,8 +100,11 @@ func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 			eps[i] = fmt.Sprintf("%s:%s", lbls[PrepDownscalePathKey], lbls[PrepDownscalePortKey])
 		}
 
+		var wg sync.WaitGroup
 		for _, ep := range eps {
+			wg.Add(1)
 			go func(ep string) {
+				defer wg.Done()
 				resp, err := http.Post("http://"+ep, "application/json", nil)
 				if err != nil {
 					level.Error(logger).Log("msg", "error sending HTTP post request", "endpoint", ep, "err", err)
@@ -124,6 +127,7 @@ func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 				}
 			}(ep)
 		}
+		wg.Wait()
 
 		if len(success) != len(eps) {
 			// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
