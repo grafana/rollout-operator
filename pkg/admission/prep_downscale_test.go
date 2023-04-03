@@ -1,10 +1,14 @@
 package admission
 
 import (
+	"bytes"
 	"context"
-	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
+	"text/template"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -15,6 +19,22 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+func TestUpscale(t *testing.T) {
+	testPrepDownscaleWebhook(t, 2, 5, http.StatusOK, true)
+}
+
+func TestNoReplicasChange(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 5, http.StatusOK, true)
+}
+
+func TestDownscaleValidDownscale(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 3, http.StatusOK, true)
+}
+
+func TestDownscaleInvalidDownscale(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 3, http.StatusInternalServerError, false)
+}
+
 func newDebugLogger() log.Logger {
 	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	var options []level.Option
@@ -24,9 +44,42 @@ func newDebugLogger() log.Logger {
 	return logger
 }
 
-func TestPrepDownscale(t *testing.T) {
+type templateParams struct {
+	Replicas         int
+	DownScalePathKey string
+	DownScalePath    string
+	DownScalePortKey string
+	DownScalePort    string
+}
+
+func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatusCode int, allowed bool) {
 	ctx := context.Background()
 	logger := newDebugLogger()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(httpStatusCode)
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL)
+	require.NoError(t, err)
+	require.NotEmpty(t, u.Port())
+
+	oldParams := templateParams{
+		Replicas:         oldReplicas,
+		DownScalePathKey: PrepDownscalePathKey,
+		DownScalePath:    u.Path,
+		DownScalePortKey: PrepDownscalePortKey,
+		DownScalePort:    u.Port(),
+	}
+
+	newParams := templateParams{
+		Replicas:         newReplicas,
+		DownScalePathKey: PrepDownscalePathKey,
+		DownScalePath:    u.Path,
+		DownScalePortKey: PrepDownscalePortKey,
+		DownScalePort:    u.Port(),
+	}
 
 	ar := v1.AdmissionReview{
 		Request: &v1.AdmissionRequest{
@@ -42,32 +95,40 @@ func TestPrepDownscale(t *testing.T) {
 			},
 			Namespace: "test",
 			Object: runtime.RawExtension{
-				Raw: statefulSetWithReplicas(2),
+				Raw: statefulSetTemplate(newParams),
 			},
 			OldObject: runtime.RawExtension{
-				Raw: statefulSetWithReplicas(3),
+				Raw: statefulSetTemplate(oldParams),
 			},
 		},
 	}
 	var api *kubernetes.Clientset
 
 	admissionResponse := PrepDownscale(ctx, logger, ar, api)
-	require.True(t, admissionResponse.Allowed)
+	require.Equal(t, allowed, admissionResponse.Allowed, "Unexpected result: got %v, expected %v", admissionResponse.Allowed, allowed)
 }
 
-func statefulSetWithReplicas(replicas int) []byte {
-	return []byte(`apiVersion: apps/v1
+func statefulSetTemplate(params templateParams) []byte {
+	t := template.Must(template.New("sts").Parse(stsTemplate))
+	var b bytes.Buffer
+	t.Execute(&b, params)
+	return b.Bytes()
+}
+
+var stsTemplate = `apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: web
   labels:
     grafana.com/prep-downscale: "true"
+    {{.DownScalePathKey}}: {{.DownScalePath}}
+    {{.DownScalePortKey}}: "{{.DownScalePort}}"
 spec:
   selector:
     matchLabels:
       app: nginx # has to match .spec.template.metadata.labels
   serviceName: "nginx"
-  replicas: ` + fmt.Sprintf("%d", replicas) + ` 
+  replicas: {{.Replicas }}
   minReadySeconds: 10 # by default is 0
   template:
     metadata:
@@ -92,5 +153,4 @@ spec:
       storageClassName: "my-storage-class"
       resources:
         requests:
-          storage: 1Gi`)
-}
+          storage: 1Gi`

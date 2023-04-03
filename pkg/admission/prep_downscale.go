@@ -108,7 +108,8 @@ func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 					return err
 				}
 				if resp.StatusCode != 200 {
-					level.Error(logger).Log("msg", "HTTP post request returned non-200 status code", "endpoint", ep, "status", resp.StatusCode)
+					err := fmt.Errorf("HTTP post request returned non-200 status code")
+					level.Error(logger).Log("msg", err, "endpoint", ep, "status", resp.StatusCode)
 					return err
 				}
 				if resp.StatusCode == 200 {
@@ -117,7 +118,7 @@ func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 					// OR
 					// we could do that in the conditional below
 					level.Debug(logger).Log("msg", "pod prepared for shutdown", "endpoint", ep)
-					return err
+					return nil
 				}
 				return nil
 			})
