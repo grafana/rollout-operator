@@ -81,6 +81,12 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatus
 		DownScalePort:    u.Port(),
 	}
 
+	rawObject, err := statefulSetTemplate(newParams)
+	require.NoError(t, err)
+
+	oldRawObject, err := statefulSetTemplate(oldParams)
+	require.NoError(t, err)
+
 	ar := v1.AdmissionReview{
 		Request: &v1.AdmissionRequest{
 			Kind: metav1.GroupVersionKind{
@@ -95,10 +101,10 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatus
 			},
 			Namespace: "test",
 			Object: runtime.RawExtension{
-				Raw: statefulSetTemplate(newParams),
+				Raw: rawObject,
 			},
 			OldObject: runtime.RawExtension{
-				Raw: statefulSetTemplate(oldParams),
+				Raw: oldRawObject,
 			},
 		},
 	}
@@ -108,11 +114,11 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatus
 	require.Equal(t, allowed, admissionResponse.Allowed, "Unexpected result: got %v, expected %v", admissionResponse.Allowed, allowed)
 }
 
-func statefulSetTemplate(params templateParams) []byte {
+func statefulSetTemplate(params templateParams) ([]byte, error) {
 	t := template.Must(template.New("sts").Parse(stsTemplate))
 	var b bytes.Buffer
-	t.Execute(&b, params)
-	return b.Bytes()
+	err := t.Execute(&b, params)
+	return b.Bytes(), err
 }
 
 var stsTemplate = `apiVersion: apps/v1
