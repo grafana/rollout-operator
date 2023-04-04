@@ -16,23 +16,22 @@ import (
 	v1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes"
 )
 
 func TestUpscale(t *testing.T) {
-	testPrepDownscaleWebhook(t, 2, 5, http.StatusOK, true)
+	testPrepDownscaleWebhook(t, 2, 5, http.StatusOK, true, false)
 }
 
 func TestNoReplicasChange(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 5, http.StatusOK, true)
+	testPrepDownscaleWebhook(t, 5, 5, http.StatusOK, true, false)
 }
 
 func TestDownscaleValidDownscale(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, http.StatusOK, true)
+	testPrepDownscaleWebhook(t, 5, 3, http.StatusOK, true, true)
 }
 
 func TestDownscaleInvalidDownscale(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, http.StatusInternalServerError, false)
+	testPrepDownscaleWebhook(t, 5, 3, http.StatusInternalServerError, false, false)
 }
 
 func newDebugLogger() log.Logger {
@@ -52,7 +51,9 @@ type templateParams struct {
 	DownScalePort    string
 }
 
-func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatusCode int, allowed bool) {
+// TODO: test with Scalre resource
+
+func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatusCode int, allowed bool, podsPrepared bool) {
 	ctx := context.Background()
 	logger := newDebugLogger()
 
@@ -87,6 +88,8 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatus
 	oldRawObject, err := statefulSetTemplate(oldParams)
 	require.NoError(t, err)
 
+	namespace := "test"
+	stsName := "my-statefulset"
 	ar := v1.AdmissionReview{
 		Request: &v1.AdmissionRequest{
 			Kind: metav1.GroupVersionKind{
@@ -97,9 +100,10 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatus
 			Resource: metav1.GroupVersionResource{
 				Group:    "apps",
 				Version:  "v1",
-				Resource: "ingester-statefulset-1",
+				Resource: "statefulsets",
 			},
-			Namespace: "test",
+			Name:      stsName,
+			Namespace: namespace,
 			Object: runtime.RawExtension{
 				Raw: rawObject,
 			},
@@ -108,10 +112,17 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatus
 			},
 		},
 	}
-	var api *kubernetes.Clientset
+	api := fakeClientSetWithStatefulSet(namespace, stsName)
 
-	admissionResponse := PrepDownscale(ctx, logger, ar, api)
+	admissionResponse := prepDownscale(ctx, logger, ar, api)
 	require.Equal(t, allowed, admissionResponse.Allowed, "Unexpected result: got %v, expected %v", admissionResponse.Allowed, allowed)
+
+	if podsPrepared {
+		updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
+		require.NoError(t, err)
+		require.NotNil(t, updatedSts.Annotations)
+		require.NotNil(t, updatedSts.Annotations[DownscalingAnnotationKey])
+	}
 }
 
 func statefulSetTemplate(params templateParams) ([]byte, error) {

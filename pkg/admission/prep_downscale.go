@@ -24,6 +24,10 @@ const (
 )
 
 func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
+	return prepDownscale(ctx, logger, ar, api)
+}
+
+func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
 
 	oldObj, oldGVK, err := codecs.UniversalDeserializer().Decode(ar.Request.OldObject.Raw, nil, nil)
@@ -117,6 +121,7 @@ func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 					// If we did that, when the rollout operator reconcile loop runs, it would need to "de-prep" the pod and remove the label
 					// OR
 					// we could do that in the conditional below
+
 					level.Debug(logger).Log("msg", "pod prepared for shutdown", "endpoint", ep)
 					return nil
 				}
@@ -135,6 +140,10 @@ func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 			level.Warn(logger).Log("msg", "downscale not allowed")
 			return &reviewResponse
 		}
+
+		// Add an annotation showing when the downscales were finished
+		addDownscaledAnnotation(ctx, api, ar.Request.Namespace, ar.Request.Name)
+
 		// Down-scale operation is allowed because all pods successfully prepared for shutdown
 		level.Info(logger).Log("msg", "downscale allowed")
 		return &v1.AdmissionResponse{

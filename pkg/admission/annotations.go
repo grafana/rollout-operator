@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	DownscalingAnnotationKey = "downscaling"
+	DownscalingAnnotationKey = "last-downscale"
 )
 
 func addDownscaledAnnotation(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {

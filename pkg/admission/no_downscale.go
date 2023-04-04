@@ -139,7 +139,7 @@ func allowErr(logger log.Logger, msg string, err error) *v1.AdmissionResponse {
 	return &reviewResponse
 }
 
-func getResourceLabels(ctx context.Context, ar v1.AdmissionReview, api *kubernetes.Clientset) (map[string]string, error) {
+func getResourceLabels(ctx context.Context, ar v1.AdmissionReview, api kubernetes.Interface) (map[string]string, error) {
 	switch ar.Request.Resource.Resource {
 	case "statefulsets":
 		obj, err := api.AppsV1().StatefulSets(ar.Request.Namespace).Get(ctx, ar.Request.Name, metav1.GetOptions{})
