@@ -51,8 +51,6 @@ type templateParams struct {
 	DownScalePort    string
 }
 
-// TODO: test with Scale resource
-
 func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatusCode int, allowed bool, podsPrepared bool) {
 	ctx := context.Background()
 	logger := newDebugLogger()
