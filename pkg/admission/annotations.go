@@ -7,6 +7,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const (
+	DownscalingAnnotationKey   = "downscaling"
+	DownscalingAnnotationValue = "true"
+)
+
 func addDownscaledAnnotation(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
 	client := api.AppsV1().StatefulSets(namespace)
 	sts, err := client.Get(ctx, stsName, metav1.GetOptions{})
