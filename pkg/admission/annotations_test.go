@@ -25,7 +25,7 @@ func TestAddDownscaledAnnotation(t *testing.T) {
 	updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
 	require.NoError(t, err)
 	require.NotNil(t, updatedSts.Annotations)
-	require.NotNil(t, updatedSts.Annotations[DownscalingAnnotationKey])
+	require.NotNil(t, updatedSts.Annotations[LastDownscaleAnnotationKey])
 }
 
 func fakeClientSetWithStatefulSet(namespace, stsName string) kubernetes.Interface {

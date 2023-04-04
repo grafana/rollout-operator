@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	DownscalingAnnotationKey = "last-downscale"
+	LastDownscaleAnnotationKey = "last-downscale"
 )
 
 func addDownscaledAnnotation(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
@@ -22,7 +22,7 @@ func addDownscaledAnnotation(ctx context.Context, api kubernetes.Interface, name
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	annotations[DownscalingAnnotationKey] = time.Now().UTC().String()
+	annotations[LastDownscaleAnnotationKey] = time.Now().UTC().String()
 	sts.SetAnnotations(annotations)
 
 	_, err = client.Update(ctx, sts, metav1.UpdateOptions{})

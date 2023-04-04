@@ -142,7 +142,18 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		}
 
 		// Add an annotation showing when the downscales were finished
-		addDownscaledAnnotation(ctx, api, ar.Request.Namespace, ar.Request.Name)
+		err = addDownscaledAnnotation(ctx, api, ar.Request.Namespace, ar.Request.Name)
+		if err != nil {
+			// Down-scale operation is disallowed because the downscale annotation cannot be added
+			reviewResponse := v1.AdmissionResponse{
+				Allowed: false,
+				Result: &metav1.Status{
+					Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because the downscale annotation could not be added.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
+				},
+			}
+			level.Warn(logger).Log("msg", "downscale annotation could not be added", "err", err)
+			return &reviewResponse
+		}
 
 		// Down-scale operation is allowed because all pods successfully prepared for shutdown
 		level.Info(logger).Log("msg", "downscale allowed")

@@ -51,7 +51,7 @@ type templateParams struct {
 	DownScalePort    string
 }
 
-// TODO: test with Scalre resource
+// TODO: test with Scale resource
 
 func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatusCode int, allowed bool, podsPrepared bool) {
 	ctx := context.Background()
@@ -121,7 +121,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatus
 		updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
 		require.NoError(t, err)
 		require.NotNil(t, updatedSts.Annotations)
-		require.NotNil(t, updatedSts.Annotations[DownscalingAnnotationKey])
+		require.NotNil(t, updatedSts.Annotations[LastDownscaleAnnotationKey])
 	}
 }
 
