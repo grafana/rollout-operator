@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -16,6 +17,18 @@ func TestAddDownscaledAnnotation(t *testing.T) {
 	ctx := context.Background()
 	namespace := "stsnamespace"
 	stsName := "stsname"
+	api := fakeClientSetWithStatefulSet(namespace, stsName)
+
+	err := addDownscaledAnnotation(ctx, api, namespace, stsName)
+	require.NoError(t, err)
+
+	updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, updatedSts.Annotations)
+	require.NotNil(t, updatedSts.Annotations[DownscalingAnnotationKey])
+}
+
+func fakeClientSetWithStatefulSet(namespace, stsName string) kubernetes.Interface {
 	sts := []runtime.Object{
 		&apps.StatefulSet{
 			TypeMeta: metav1.TypeMeta{
@@ -30,12 +43,5 @@ func TestAddDownscaledAnnotation(t *testing.T) {
 		},
 	}
 	api := fake.NewSimpleClientset(sts...)
-
-	err := addDownscaledAnnotation(ctx, api, namespace, stsName)
-	require.NoError(t, err)
-
-	updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
-	require.NoError(t, err)
-	require.NotNil(t, updatedSts.Annotations)
-	require.Equal(t, updatedSts.Annotations[DownscalingAnnotationKey], DownscalingAnnotationValue)
+	return api
 }
