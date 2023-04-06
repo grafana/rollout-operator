@@ -108,7 +108,7 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		// The service in this case is ingester-zone-a as well.
 		// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
 		for i := 0; i < int(diff); i++ {
-			eps[i] = fmt.Sprintf("%v-%v.%v.%v.scv.cluster.local:%s/%s",
+			eps[i] = fmt.Sprintf("%v-%v.%v.%v.scv.cluster.local:%s/ingester/%s",
 				ar.Request.Name,       // pod name
 				int(*oldReplicas)-i-1, // nr in statefulset
 				ar.Request.Name,       // svc name
