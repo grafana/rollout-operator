@@ -112,8 +112,19 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		diff := (*oldReplicas - *newReplicas)
 		eps := make([]string, diff)
 
+		// The DNS entry for a pod of a stateful set is
+		// ingester-zone-a-0.$(servicename).$(namespace).svc.cluster.local
+		// The service in this case is ingester-zone-a as well.
+		// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
 		for i := 0; i < int(diff); i++ {
-			eps[i] = fmt.Sprintf("%v-%v/%s:%s", ar.Request.Name, int(*oldReplicas)-i-1, lbls[PrepDownscalePathKey], lbls[PrepDownscalePortKey])
+			eps[i] = fmt.Sprintf("%v-%v.%v.%v.scv.cluster.local/%s:%s",
+				ar.Request.Name,       // pod name
+				int(*oldReplicas)-i-1, // nr in statefulset
+				ar.Request.Name,       // svc name
+				ar.Request.Namespace,
+				lbls[PrepDownscalePathKey],
+				lbls[PrepDownscalePortKey],
+			)
 		}
 
 		g, _ := errgroup.WithContext(ctx)
