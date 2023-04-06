@@ -95,7 +95,7 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 
 	// Since it's a downscale, check if the resource has the label that indicates it's ready to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
-	if lbls[PrepDownscaleLabelKey] == PrepDownscaleLabelValue {
+	if !*ar.Request.DryRun && lbls[PrepDownscaleLabelKey] == PrepDownscaleLabelValue {
 		level.Info(logger).Log("msg", "downscale label set")
 		diff := (*oldReplicas - *newReplicas)
 		eps := make([]string, diff)

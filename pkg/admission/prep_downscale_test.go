@@ -19,19 +19,23 @@ import (
 )
 
 func TestUpscale(t *testing.T) {
-	testPrepDownscaleWebhook(t, 2, 5, http.StatusOK, true, false)
+	testPrepDownscaleWebhook(t, 2, 5)
 }
 
 func TestNoReplicasChange(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 5, http.StatusOK, true, false)
+	testPrepDownscaleWebhook(t, 5, 5)
 }
 
 func TestDownscaleValidDownscale(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, http.StatusOK, true, true)
+	testPrepDownscaleWebhook(t, 5, 3, withDownscaleAnnotation())
 }
 
 func TestDownscaleInvalidDownscale(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, http.StatusInternalServerError, false, false)
+	testPrepDownscaleWebhook(t, 5, 3, withStatusCode(http.StatusInternalServerError))
+}
+
+func TestDownscaleDryRun(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 3, withDryRun())
 }
 
 func newDebugLogger() log.Logger {
@@ -43,6 +47,39 @@ func newDebugLogger() log.Logger {
 	return logger
 }
 
+type testParams struct {
+	statusCode   int
+	podsPrepared bool
+	allowed      bool
+	dryRun       bool
+}
+
+type optionFunc func(*testParams)
+
+func withStatusCode(statusCode int) optionFunc {
+	return func(tp *testParams) {
+		tp.statusCode = statusCode
+		tp.allowed = true
+		if tp.statusCode != http.StatusOK {
+			tp.allowed = false
+			tp.podsPrepared = false
+		}
+	}
+}
+
+func withDryRun() optionFunc {
+	return func(tp *testParams) {
+		tp.dryRun = true
+		tp.podsPrepared = false
+	}
+}
+
+func withDownscaleAnnotation() optionFunc {
+	return func(tp *testParams) {
+		tp.podsPrepared = true
+	}
+}
+
 type templateParams struct {
 	Replicas         int
 	DownScalePathKey string
@@ -51,12 +88,22 @@ type templateParams struct {
 	DownScalePort    string
 }
 
-func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatusCode int, allowed bool, podsPrepared bool) {
+func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, options ...optionFunc) {
+	params := testParams{
+		statusCode:   http.StatusOK,
+		podsPrepared: false,
+		allowed:      true,
+		dryRun:       false,
+	}
+	for _, option := range options {
+		option(&params)
+	}
+
 	ctx := context.Background()
 	logger := newDebugLogger()
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(httpStatusCode)
+		w.WriteHeader(params.statusCode)
 	}))
 	defer ts.Close()
 
@@ -108,14 +155,15 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas, httpStatus
 			OldObject: runtime.RawExtension{
 				Raw: oldRawObject,
 			},
+			DryRun: &params.dryRun,
 		},
 	}
 	api := fakeClientSetWithStatefulSet(namespace, stsName)
 
 	admissionResponse := prepDownscale(ctx, logger, ar, api)
-	require.Equal(t, allowed, admissionResponse.Allowed, "Unexpected result: got %v, expected %v", admissionResponse.Allowed, allowed)
+	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
-	if podsPrepared {
+	if params.podsPrepared {
 		updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
 		require.NoError(t, err)
 		require.NotNil(t, updatedSts.Annotations)
