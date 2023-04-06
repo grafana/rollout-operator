@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/go-kit/log"
@@ -24,10 +25,15 @@ const (
 )
 
 func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-	return prepDownscale(ctx, logger, ar, api)
+	client := &http.Client{}
+	return prepDownscale(ctx, logger, ar, api, client)
 }
 
-func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface) *v1.AdmissionResponse {
+type httpClient interface {
+	Post(url, contentType string, body io.Reader) (resp *http.Response, err error)
+}
+
+func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
 	level.Info(logger).Log("msg", "starting downScaleWebhook")
 	defer func() { level.Info(logger).Log("msg", "finished downScaleWebhook") }()
@@ -107,15 +113,14 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		eps := make([]string, diff)
 
 		for i := 0; i < int(diff); i++ {
-			// TODO(jordanrushing): Actually craft the endpoint address
-			eps[i] = fmt.Sprintf("%s:%s", lbls[PrepDownscalePathKey], lbls[PrepDownscalePortKey])
+			eps[i] = fmt.Sprintf("%v-%v/%s:%s", ar.Request.Name, int(*oldReplicas)-i-1, lbls[PrepDownscalePathKey], lbls[PrepDownscalePortKey])
 		}
 
 		g, _ := errgroup.WithContext(ctx)
 		for _, ep := range eps {
 			ep := ep // https://golang.org/doc/faq#closures_and_goroutines
 			g.Go(func() error {
-				resp, err := http.Post("http://"+ep, "application/json", nil)
+				resp, err := client.Post("http://"+ep, "application/json", nil)
 				if err != nil {
 					level.Error(logger).Log("msg", "error sending HTTP post request", "endpoint", ep, "err", err)
 					return err

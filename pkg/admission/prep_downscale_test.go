@@ -3,6 +3,7 @@ package admission
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -26,11 +27,11 @@ func TestNoReplicasChange(t *testing.T) {
 	testPrepDownscaleWebhook(t, 5, 5)
 }
 
-func TestDownscaleValidDownscale(t *testing.T) {
+func TestValidDownscale(t *testing.T) {
 	testPrepDownscaleWebhook(t, 5, 3, withDownscaleAnnotation())
 }
 
-func TestDownscaleInvalidDownscale(t *testing.T) {
+func TestInvalidDownscale(t *testing.T) {
 	testPrepDownscaleWebhook(t, 5, 3, withStatusCode(http.StatusInternalServerError))
 }
 
@@ -86,6 +87,16 @@ type templateParams struct {
 	DownScalePath    string
 	DownScalePortKey string
 	DownScalePort    string
+}
+
+type fakeHttpClient struct {
+	statusCode int
+}
+
+func (f *fakeHttpClient) Post(url, contentType string, body io.Reader) (resp *http.Response, err error) {
+	return &http.Response{
+		StatusCode: f.statusCode,
+	}, nil
 }
 
 func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, options ...optionFunc) {
@@ -159,8 +170,9 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		},
 	}
 	api := fakeClientSetWithStatefulSet(namespace, stsName)
+	f := &fakeHttpClient{statusCode: params.statusCode}
 
-	admissionResponse := prepDownscale(ctx, logger, ar, api)
+	admissionResponse := prepDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
 	if params.podsPrepared {
