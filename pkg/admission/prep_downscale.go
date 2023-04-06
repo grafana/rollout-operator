@@ -35,8 +35,6 @@ type httpClient interface {
 
 func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
-	level.Info(logger).Log("msg", "starting downScaleWebhook")
-	defer func() { level.Info(logger).Log("msg", "finished downScaleWebhook") }()
 
 	oldObj, oldGVK, err := codecs.UniversalDeserializer().Decode(ar.Request.OldObject.Raw, nil, nil)
 	if err != nil {
@@ -99,16 +97,9 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		return allowWarn(logger, fmt.Sprintf("unsupported type %T, allowing the change", o))
 	}
 
-	level.Info(logger).Log("msg", "Got labels")
-	for k, v := range lbls {
-		level.Info(logger).Log("key", k, "value", v)
-	}
-	level.Info(logger).Log("msg", "Done with labels")
-
 	// Since it's a downscale, check if the resource has the label that indicates it's ready to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
 	if !*ar.Request.DryRun && lbls[PrepDownscaleLabelKey] == PrepDownscaleLabelValue {
-		level.Info(logger).Log("msg", "downscale label set")
 		diff := (*oldReplicas - *newReplicas)
 		eps := make([]string, diff)
 
