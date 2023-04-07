@@ -144,7 +144,7 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 					// we could do that in the conditional below
 					level.Debug(logger).Log("msg", "pod prepared for shutdown", "endpoint", ep.url)
 
-					addDownscaledAnnotationToPod(ctx, api, ar.Request.Namespace, ar.Request.Name, ep.index)
+					err = addDownscaledAnnotationToPod(ctx, api, ar.Request.Namespace, ar.Request.Name, ep.index)
 					level.Debug(logger).Log("msg", "annotation added to pod")
 					return err
 				}
