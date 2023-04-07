@@ -26,9 +26,8 @@ func addDownscaledAnnotationToPod(ctx context.Context, api kubernetes.Interface,
 	if err != nil {
 		return err
 	}
-
 	if len(pods.Items) != 1 {
-		return fmt.Errorf("multiple pods found for statefulset %v and index %v", stsName, podNr)
+		return fmt.Errorf("multiple or no pods found for statefulset %v and index %v", stsName, podNr)
 	}
 
 	pod := pods.Items[0]

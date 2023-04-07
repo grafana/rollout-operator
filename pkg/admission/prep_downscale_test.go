@@ -3,6 +3,7 @@ package admission
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,9 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/admission/v1"
+	podv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -29,7 +32,7 @@ func TestNoReplicasChange(t *testing.T) {
 }
 
 func TestValidDownscale(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, withDownscaleAnnotation())
+	testPrepDownscaleWebhook(t, 3, 1, withDownscaleAnnotation())
 }
 
 func TestInvalidDownscale(t *testing.T) {
@@ -170,11 +173,57 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 			DryRun: &params.dryRun,
 		},
 	}
-	api := fake.NewSimpleClientset()
+	api := fake.NewSimpleClientset(
+		&podv1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ingester-zone-a-0",
+				Namespace: "test",
+				Labels: map[string]string{
+					"name":                               "my-statefulset",
+					"statefulset.kubernetes.io/pod-name": "my-statefulset-0",
+				},
+			},
+		}, &podv1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ingester-zone-a-1",
+				Namespace: "test",
+				Labels: map[string]string{
+					"name":                               "my-statefulset",
+					"statefulset.kubernetes.io/pod-name": "my-statefulset-1",
+				},
+			},
+		}, &podv1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ingester-zone-a-2",
+				Namespace: "test",
+				Labels: map[string]string{
+					"name":                               "my-statefulset",
+					"statefulset.kubernetes.io/pod-name": "my-statefulset-2",
+				},
+			},
+		},
+	)
 	f := &fakeHttpClient{statusCode: params.statusCode}
 
 	admissionResponse := prepDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
+
+	if params.podsPrepared {
+		// Check that one of the pods now has the last-downscale annotation
+		client := api.CoreV1().Pods(namespace)
+		labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{
+			"name":                               stsName,
+			"statefulset.kubernetes.io/pod-name": fmt.Sprintf("%v-%v", stsName, 2),
+		}}
+		pods, err := client.List(ctx,
+			metav1.ListOptions{LabelSelector: labels.Set(labelSelector.MatchLabels).String()})
+		require.NoError(t, err)
+
+		require.Len(t, pods.Items, 1)
+		pod := pods.Items[0]
+		require.NotNil(t, pod.Annotations)
+		require.NotNil(t, pod.Annotations[LastDownscaleAnnotationKey])
+	}
 }
 
 func statefulSetTemplate(params templateParams) ([]byte, error) {
