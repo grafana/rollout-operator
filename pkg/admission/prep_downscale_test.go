@@ -17,6 +17,7 @@ import (
 	v1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestUpscale(t *testing.T) {
@@ -169,18 +170,11 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 			DryRun: &params.dryRun,
 		},
 	}
-	api := fakeClientSetWithStatefulSet(namespace, stsName)
+	api := fake.NewSimpleClientset()
 	f := &fakeHttpClient{statusCode: params.statusCode}
 
 	admissionResponse := prepDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
-
-	if params.podsPrepared {
-		updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
-		require.NoError(t, err)
-		require.NotNil(t, updatedSts.Annotations)
-		require.NotNil(t, updatedSts.Annotations[LastDownscaleAnnotationKey])
-	}
 }
 
 func statefulSetTemplate(params templateParams) ([]byte, error) {

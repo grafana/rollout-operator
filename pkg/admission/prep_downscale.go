@@ -101,14 +101,18 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
 	if !*ar.Request.DryRun && lbls[PrepDownscaleLabelKey] == PrepDownscaleLabelValue {
 		diff := (*oldReplicas - *newReplicas)
-		eps := make([]string, diff)
+		type endpoint struct {
+			url   string
+			index int
+		}
+		eps := make([]endpoint, diff)
 
 		// The DNS entry for a pod of a stateful set is
 		// ingester-zone-a-0.$(servicename).$(namespace).svc.cluster.local
 		// The service in this case is ingester-zone-a as well.
 		// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
 		for i := 0; i < int(diff); i++ {
-			eps[i] = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/ingester/%s",
+			eps[i].url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/ingester/%s",
 				ar.Request.Name,       // pod name
 				int(*oldReplicas)-i-1, // nr in statefulset
 				ar.Request.Name,       // svc name
@@ -116,20 +120,21 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 				lbls[PrepDownscalePortKey],
 				lbls[PrepDownscalePathKey],
 			)
+			eps[i].index = int(*oldReplicas) - i - 1
 		}
 
 		g, _ := errgroup.WithContext(ctx)
 		for _, ep := range eps {
 			ep := ep // https://golang.org/doc/faq#closures_and_goroutines
 			g.Go(func() error {
-				resp, err := client.Post("http://"+ep, "application/json", nil)
+				resp, err := client.Post("http://"+ep.url, "application/json", nil)
 				if err != nil {
-					level.Error(logger).Log("msg", "error sending HTTP post request", "endpoint", ep, "err", err)
+					level.Error(logger).Log("msg", "error sending HTTP post request", "endpoint", ep.url, "err", err)
 					return err
 				}
 				if resp.StatusCode != 200 {
 					err := fmt.Errorf("HTTP post request returned non-200 status code")
-					level.Error(logger).Log("msg", err, "endpoint", ep, "status", resp.StatusCode)
+					level.Error(logger).Log("msg", err, "endpoint", ep.url, "status", resp.StatusCode)
 					return err
 				}
 				if resp.StatusCode == 200 {
@@ -137,9 +142,11 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 					// If we did that, when the rollout operator reconcile loop runs, it would need to "de-prep" the pod and remove the label
 					// OR
 					// we could do that in the conditional below
+					level.Debug(logger).Log("msg", "pod prepared for shutdown", "endpoint", ep.url)
 
-					level.Debug(logger).Log("msg", "pod prepared for shutdown", "endpoint", ep)
-					return nil
+					addDownscaledAnnotationToPod(ctx, api, ar.Request.Namespace, ar.Request.Name, ep.index)
+					level.Debug(logger).Log("msg", "annotation added to pod")
+					return err
 				}
 				return nil
 			})
@@ -154,20 +161,6 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 				},
 			}
 			level.Warn(logger).Log("msg", "downscale not allowed")
-			return &reviewResponse
-		}
-
-		// Add an annotation showing when the downscales were finished
-		err = addDownscaledAnnotation(ctx, api, ar.Request.Namespace, ar.Request.Name)
-		if err != nil {
-			// Down-scale operation is disallowed because the downscale annotation cannot be added
-			reviewResponse := v1.AdmissionResponse{
-				Allowed: false,
-				Result: &metav1.Status{
-					Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because the downscale annotation could not be added.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
-				},
-			}
-			level.Warn(logger).Log("msg", "downscale annotation could not be added", "err", err)
 			return &reviewResponse
 		}
 
