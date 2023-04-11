@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	LastDownscaleAnnotationKey = "last-downscale"
+	LastDownscaleAnnotationKey = "last-prepared-for-downscale"
 )
 
-func addDownscaledAnnotationToPod(ctx context.Context, api kubernetes.Interface, namespace, stsName string, podNr int) error {
+func addPreparedForDownscaleAnnotationToPod(ctx context.Context, api kubernetes.Interface, namespace, stsName string, podNr int) error {
 	client := api.CoreV1().Pods(namespace)
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{
 		"name":                               stsName,

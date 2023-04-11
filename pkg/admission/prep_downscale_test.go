@@ -100,6 +100,7 @@ type fakeHttpClient struct {
 func (f *fakeHttpClient) Post(url, contentType string, body io.Reader) (resp *http.Response, err error) {
 	return &http.Response{
 		StatusCode: f.statusCode,
+		Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
 	}, nil
 }
 
@@ -126,10 +127,11 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	require.NoError(t, err)
 	require.NotEmpty(t, u.Port())
 
+	path := "/prep-downscale"
 	oldParams := templateParams{
 		Replicas:         oldReplicas,
 		DownScalePathKey: PrepDownscalePathKey,
-		DownScalePath:    u.Path,
+		DownScalePath:    path,
 		DownScalePortKey: PrepDownscalePortKey,
 		DownScalePort:    u.Port(),
 	}
@@ -137,7 +139,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	newParams := templateParams{
 		Replicas:         newReplicas,
 		DownScalePathKey: PrepDownscalePathKey,
-		DownScalePath:    u.Path,
+		DownScalePath:    path,
 		DownScalePortKey: PrepDownscalePortKey,
 		DownScalePort:    u.Port(),
 	}

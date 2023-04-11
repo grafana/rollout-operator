@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -97,9 +98,38 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		return allowWarn(logger, fmt.Sprintf("unsupported type %T, allowing the change", o))
 	}
 
+	if lbls[PrepDownscaleLabelKey] != PrepDownscaleLabelValue {
+		// Not labeled, nothing to do.
+		return &v1.AdmissionResponse{Allowed: true}
+	}
+
+	port, ok := lbls[PrepDownscalePortKey]
+	if !ok || len(port) == 0 {
+		reviewResponse := v1.AdmissionResponse{
+			Allowed: false,
+			Result: &metav1.Status{
+				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepDownscalePortKey),
+			},
+		}
+		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepDownscalePortKey))
+		return &reviewResponse
+	}
+
+	path, ok := lbls[PrepDownscalePathKey]
+	if !ok || len(path) == 0 {
+		reviewResponse := v1.AdmissionResponse{
+			Allowed: false,
+			Result: &metav1.Status{
+				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepDownscalePathKey),
+			},
+		}
+		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepDownscalePathKey))
+		return &reviewResponse
+	}
+
 	// Since it's a downscale, check if the resource has the label that indicates it's ready to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
-	if !*ar.Request.DryRun && lbls[PrepDownscaleLabelKey] == PrepDownscaleLabelValue {
+	if !*ar.Request.DryRun {
 		diff := (*oldReplicas - *newReplicas)
 		type endpoint struct {
 			url   string
@@ -112,42 +142,42 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		// The service in this case is ingester-zone-a as well.
 		// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
 		for i := 0; i < int(diff); i++ {
+			index := int(*oldReplicas) - i - 1 // nr in statefulset
 			eps[i].url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/ingester/%s",
-				ar.Request.Name,       // pod name
-				int(*oldReplicas)-i-1, // nr in statefulset
-				ar.Request.Name,       // svc name
+				ar.Request.Name, // pod name
+				index,
+				ar.Request.Name, // svc name
 				ar.Request.Namespace,
-				lbls[PrepDownscalePortKey],
-				lbls[PrepDownscalePathKey],
+				port,
+				path,
 			)
-			eps[i].index = int(*oldReplicas) - i - 1
+			eps[i].index = index
 		}
 
 		g, _ := errgroup.WithContext(ctx)
 		for _, ep := range eps {
 			ep := ep // https://golang.org/doc/faq#closures_and_goroutines
 			g.Go(func() error {
+				logger = log.With(logger, "url", ep.url, "index", ep.index)
 				resp, err := client.Post("http://"+ep.url, "application/json", nil)
 				if err != nil {
-					level.Error(logger).Log("msg", "error sending HTTP post request", "endpoint", ep.url, "err", err)
+					level.Error(logger).Log("msg", "error sending HTTP post request", "err", err)
 					return err
 				}
 				if resp.StatusCode != 200 {
-					err := fmt.Errorf("HTTP post request returned non-200 status code")
-					level.Error(logger).Log("msg", err, "endpoint", ep.url, "status", resp.StatusCode)
-					return err
+					err := errors.New("HTTP post request returned non-200 status code")
+					body, readError := io.ReadAll(resp.Body)
+					defer resp.Body.Close()
+					level.Error(logger).Log("msg", err, "status", resp.StatusCode, "response_body", body)
+					return errors.Join(err, readError)
 				}
-				if resp.StatusCode == 200 {
-					// TODO(jordanrushing): set a label on the pod to indicate it's been prepared for shutdown? Or do we need to do that?
-					// If we did that, when the rollout operator reconcile loop runs, it would need to "de-prep" the pod and remove the label
-					// OR
-					// we could do that in the conditional below
-					level.Debug(logger).Log("msg", "pod prepared for shutdown", "endpoint", ep.url)
+				level.Debug(logger).Log("msg", "pod prepared for shutdown")
 
-					err = addDownscaledAnnotationToPod(ctx, api, ar.Request.Namespace, ar.Request.Name, ep.index)
-					level.Debug(logger).Log("msg", "annotation added to pod", "err", err)
-					return err
+				err = addPreparedForDownscaleAnnotationToPod(ctx, api, ar.Request.Namespace, ar.Request.Name, ep.index)
+				if err != nil {
+					level.Debug(logger).Log("msg", "adding annotation to pod failed", "err", err)
 				}
+				level.Debug(logger).Log("msg", "annotation added to pod")
 				return nil
 			})
 		}
