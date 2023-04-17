@@ -162,25 +162,25 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 			ep := ep // https://golang.org/doc/faq#closures_and_goroutines
 			g.Go(func() error {
 				logger = log.With(logger, "url", ep.url, "index", ep.index)
+				err = addPreparedForDownscaleAnnotationToPod(ctx, api, ar.Request.Namespace, ar.Request.Name, ep.index)
+				if err != nil {
+					level.Debug(logger).Log("msg", "adding annotation to pod failed", "err", err)
+				}
+				level.Debug(logger).Log("msg", "annotation added to pod")
+
 				resp, err := client.Post("http://"+ep.url, "application/json", nil)
 				if err != nil {
 					level.Error(logger).Log("msg", "error sending HTTP post request", "err", err)
 					return err
 				}
-				if resp.StatusCode != 200 {
-					err := errors.New("HTTP post request returned non-200 status code")
+				if resp.StatusCode/100 != 2 {
+					err := errors.New("HTTP post request returned non-2xx status code")
 					body, readError := io.ReadAll(resp.Body)
 					defer resp.Body.Close()
 					level.Error(logger).Log("msg", err, "status", resp.StatusCode, "response_body", body)
 					return errors.Join(err, readError)
 				}
 				level.Debug(logger).Log("msg", "pod prepared for shutdown")
-
-				err = addPreparedForDownscaleAnnotationToPod(ctx, api, ar.Request.Namespace, ar.Request.Name, ep.index)
-				if err != nil {
-					level.Debug(logger).Log("msg", "adding annotation to pod failed", "err", err)
-				}
-				level.Debug(logger).Log("msg", "annotation added to pod")
 				return nil
 			})
 		}

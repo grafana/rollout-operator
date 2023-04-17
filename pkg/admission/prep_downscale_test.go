@@ -35,6 +35,10 @@ func TestValidDownscale(t *testing.T) {
 	testPrepDownscaleWebhook(t, 3, 1, withDownscaleAnnotation())
 }
 
+func TestValidDownscaleWith204(t *testing.T) {
+	testPrepDownscaleWebhook(t, 3, 1, withDownscaleAnnotation(), withStatusCode(http.StatusNoContent))
+}
+
 func TestInvalidDownscale(t *testing.T) {
 	testPrepDownscaleWebhook(t, 5, 3, withStatusCode(http.StatusInternalServerError))
 }
@@ -65,7 +69,7 @@ func withStatusCode(statusCode int) optionFunc {
 	return func(tp *testParams) {
 		tp.statusCode = statusCode
 		tp.allowed = true
-		if tp.statusCode != http.StatusOK {
+		if tp.statusCode/100 != 2 {
 			tp.allowed = false
 			tp.podsPrepared = false
 		}
