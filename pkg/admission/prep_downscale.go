@@ -106,8 +106,8 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
-	port, ok := lbls[PrepDownscalePortKey]
-	if !ok || len(port) == 0 {
+	port := lbls[PrepDownscalePortKey]
+	if port == "" {
 		reviewResponse := v1.AdmissionResponse{
 			Allowed: false,
 			Result: &metav1.Status{
