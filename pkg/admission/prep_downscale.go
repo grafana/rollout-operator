@@ -118,8 +118,8 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		return &reviewResponse
 	}
 
-	path, ok := lbls[PrepDownscalePathKey]
-	if !ok || len(path) == 0 {
+	path := lbls[PrepDownscalePathKey]
+	if path == "" {
 		reviewResponse := v1.AdmissionResponse{
 			Allowed: false,
 			Result: &metav1.Status{
