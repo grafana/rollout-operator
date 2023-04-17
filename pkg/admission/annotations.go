@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	LastDownscaleAnnotationKey = "last-prepared-for-downscale"
+	LastDownscaleAnnotationKey = "grafana.com/last-prepared-for-downscale"
 )
 
 func addPreparedForDownscaleAnnotationToPod(ctx context.Context, api kubernetes.Interface, namespace, stsName string, podNr int) error {
