@@ -36,6 +36,8 @@ func addPreparedForDownscaleAnnotationToPod(ctx context.Context, api kubernetes.
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
+	// The value of the annotation is not important. It is set to the current date and time.
+	// This is to the benefit of the operator only.
 	annotations[LastDownscaleAnnotationKey] = time.Now().UTC().String()
 	pod.SetAnnotations(annotations)
 
