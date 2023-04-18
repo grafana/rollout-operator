@@ -196,7 +196,19 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
 			},
 		}
-		level.Warn(logger).Log("msg", "downscale not allowed")
+		level.Warn(logger).Log("msg", "downscale not allowed due to error", "err", err)
+		return &reviewResponse
+	}
+
+	err = addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name)
+	if err != nil {
+		reviewResponse := v1.AdmissionResponse{
+			Allowed: false,
+			Result: &metav1.Status{
+				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
+			},
+		}
+		level.Warn(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
 		return &reviewResponse
 	}
 

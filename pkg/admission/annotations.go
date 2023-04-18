@@ -43,3 +43,20 @@ func addPreparedForDownscaleAnnotationToPod(ctx context.Context, api kubernetes.
 	_, err = client.Update(ctx, &pod, v1.UpdateOptions{})
 	return err
 }
+
+func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
+	client := api.AppsV1().StatefulSets(namespace)
+	sts, err := client.Get(ctx, stsName, v1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	annotations := sts.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[LastDownscaleAnnotationKey] = time.Now().UTC().String()
+	sts.SetAnnotations(annotations)
+
+	_, err = client.Update(ctx, sts, v1.UpdateOptions{})
+	return err
+}

@@ -3,7 +3,6 @@ package admission
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,10 +15,10 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/admission/v1"
-	podv1 "k8s.io/api/core/v1"
+	apps "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -58,7 +57,7 @@ func newDebugLogger() log.Logger {
 
 type testParams struct {
 	statusCode   int
-	podsPrepared bool
+	stsAnnotated bool
 	allowed      bool
 	dryRun       bool
 }
@@ -71,7 +70,7 @@ func withStatusCode(statusCode int) optionFunc {
 		tp.allowed = true
 		if tp.statusCode/100 != 2 {
 			tp.allowed = false
-			tp.podsPrepared = false
+			tp.stsAnnotated = false
 		}
 	}
 }
@@ -79,13 +78,13 @@ func withStatusCode(statusCode int) optionFunc {
 func withDryRun() optionFunc {
 	return func(tp *testParams) {
 		tp.dryRun = true
-		tp.podsPrepared = false
+		tp.stsAnnotated = false
 	}
 }
 
 func withDownscaleAnnotation() optionFunc {
 	return func(tp *testParams) {
-		tp.podsPrepared = true
+		tp.stsAnnotated = true
 	}
 }
 
@@ -111,7 +110,7 @@ func (f *fakeHttpClient) Post(url, contentType string, body io.Reader) (resp *ht
 func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, options ...optionFunc) {
 	params := testParams{
 		statusCode:   http.StatusOK,
-		podsPrepared: false,
+		stsAnnotated: false,
 		allowed:      true,
 		dryRun:       false,
 	}
@@ -180,32 +179,15 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		},
 	}
 	api := fake.NewSimpleClientset(
-		&podv1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "ingester-zone-a-0",
-				Namespace: "test",
-				Labels: map[string]string{
-					"name":                               "my-statefulset",
-					"statefulset.kubernetes.io/pod-name": "my-statefulset-0",
-				},
+		&apps.StatefulSet{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "StatefulSet",
+				APIVersion: "apps/v1",
 			},
-		}, &podv1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "ingester-zone-a-1",
-				Namespace: "test",
-				Labels: map[string]string{
-					"name":                               "my-statefulset",
-					"statefulset.kubernetes.io/pod-name": "my-statefulset-1",
-				},
-			},
-		}, &podv1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "ingester-zone-a-2",
-				Namespace: "test",
-				Labels: map[string]string{
-					"name":                               "my-statefulset",
-					"statefulset.kubernetes.io/pod-name": "my-statefulset-2",
-				},
+				Name:      stsName,
+				Namespace: namespace,
+				UID:       types.UID(stsName),
 			},
 		},
 	)
@@ -214,21 +196,12 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	admissionResponse := prepDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
-	if params.podsPrepared {
-		// Check that one of the pods now has the last-downscale annotation
-		client := api.CoreV1().Pods(namespace)
-		labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{
-			"name":                               stsName,
-			"statefulset.kubernetes.io/pod-name": fmt.Sprintf("%v-%v", stsName, 2),
-		}}
-		pods, err := client.List(ctx,
-			metav1.ListOptions{LabelSelector: labels.Set(labelSelector.MatchLabels).String()})
+	if params.stsAnnotated {
+		// Check that the statefulset now has the last-downscale annotation
+		updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
 		require.NoError(t, err)
-
-		require.Len(t, pods.Items, 1)
-		pod := pods.Items[0]
-		require.NotNil(t, pod.Annotations)
-		require.NotNil(t, pod.Annotations[LastDownscaleAnnotationKey])
+		require.NotNil(t, updatedSts.Annotations)
+		require.NotNil(t, updatedSts.Annotations[LastDownscaleAnnotationKey])
 	}
 }
 
