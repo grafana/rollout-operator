@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
@@ -17,7 +16,7 @@ const (
 
 func addPreparedForDownscaleAnnotationToPod(ctx context.Context, api kubernetes.Interface, namespace, stsName string, podNr int) error {
 	client := api.CoreV1().Pods(namespace)
-	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{
+	labelSelector := v1.LabelSelector{MatchLabels: map[string]string{
 		"name":                               stsName,
 		"statefulset.kubernetes.io/pod-name": fmt.Sprintf("%v-%v", stsName, podNr),
 	}}
@@ -41,6 +40,6 @@ func addPreparedForDownscaleAnnotationToPod(ctx context.Context, api kubernetes.
 	annotations[LastDownscaleAnnotationKey] = time.Now().UTC().String()
 	pod.SetAnnotations(annotations)
 
-	_, err = client.Update(ctx, &pod, metav1.UpdateOptions{})
+	_, err = client.Update(ctx, &pod, v1.UpdateOptions{})
 	return err
 }
