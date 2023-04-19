@@ -228,9 +228,11 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 					Namespace: namespace,
 					UID:       types.UID(stsName),
 					Labels: map[string]string{
-						RolloutGroupLabelKey:                   "ingester",
-						LastDownscaleAnnotationKey:             time.Now().UTC().Format(time.RFC3339),
-						TimeBetweenZonesDownscaleAnnotationKey: "12h",
+						RolloutGroupLabelKey:                 "ingester",
+						MinTimeBetweenZonesDownscaleLabelKey: "12h",
+					},
+					Annotations: map[string]string{
+						LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339),
 					},
 				},
 			},

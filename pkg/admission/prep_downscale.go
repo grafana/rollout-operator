@@ -131,35 +131,33 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		return &reviewResponse
 	}
 
-	if *ar.Request.DryRun {
-		return &v1.AdmissionResponse{Allowed: true}
+	rolloutGroup := lbls[RolloutGroupLabelKey]
+	if rolloutGroup != "" {
+		foundSts, err := findDownscalesDoneMinTimeAgo(ctx, api, ar.Request.Namespace, ar.Request.Name, rolloutGroup)
+		if err != nil {
+			reviewResponse := v1.AdmissionResponse{
+				Allowed: false,
+				Result: &metav1.Status{
+					Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because finding other statefulsets failed.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
+				},
+			}
+			level.Warn(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
+			return &reviewResponse
+		}
+		if foundSts != nil {
+			reviewResponse := v1.AdmissionResponse{
+				Allowed: false,
+				Result: &metav1.Status{
+					Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime),
+				},
+			}
+			level.Warn(logger).Log("msg", "downscale not allowed because another statefulset was downscaled recently", "err", err)
+			return &reviewResponse
+		}
 	}
 
-	rolloutGroup := lbls[RolloutGroupLabelKey]
-	if rolloutGroup == "" {
-		// Not part of a rollout group, nothing to do.
+	if *ar.Request.DryRun {
 		return &v1.AdmissionResponse{Allowed: true}
-	}
-	found, err := findDownscalesDoneMinTimeAgo(ctx, api, ar.Request.Namespace, ar.Request.Name, rolloutGroup)
-	if err != nil {
-		reviewResponse := v1.AdmissionResponse{
-			Allowed: false,
-			Result: &metav1.Status{
-				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because finding other statefulsets failed.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
-			},
-		}
-		level.Warn(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
-		return &reviewResponse
-	}
-	if found {
-		reviewResponse := v1.AdmissionResponse{
-			Allowed: false,
-			Result: &metav1.Status{
-				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because another statefulset was downscaled recently.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
-			},
-		}
-		level.Warn(logger).Log("msg", "downscale not allowed because another statefulset was downscaled recently", "err", err)
-		return &reviewResponse
 	}
 
 	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
