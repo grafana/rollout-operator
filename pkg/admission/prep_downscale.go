@@ -24,6 +24,7 @@ const (
 	PrepDownscaleLabelKey    = "grafana.com/prep-downscale"
 	PrepDownscaleLabelValue  = "true"
 	PrepDownscaleWebhookPath = "/admission/prep-downscale"
+	RolloutGroupLabelKey     = "rollout-group"
 )
 
 func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
@@ -134,6 +135,33 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
+	rolloutGroup := lbls[RolloutGroupLabelKey]
+	if rolloutGroup == "" {
+		// Not part of a rollout group, nothing to do.
+		return &v1.AdmissionResponse{Allowed: true}
+	}
+	found, err := findDownscalesDoneMinTimeAgo(ctx, api, ar.Request.Namespace, ar.Request.Name, rolloutGroup)
+	if err != nil {
+		reviewResponse := v1.AdmissionResponse{
+			Allowed: false,
+			Result: &metav1.Status{
+				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because finding other statefulsets failed.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
+			},
+		}
+		level.Warn(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
+		return &reviewResponse
+	}
+	if found {
+		reviewResponse := v1.AdmissionResponse{
+			Allowed: false,
+			Result: &metav1.Status{
+				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because another statefulset was downscaled recently.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
+			},
+		}
+		level.Warn(logger).Log("msg", "downscale not allowed because another statefulset was downscaled recently", "err", err)
+		return &reviewResponse
+	}
+
 	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
 	diff := (*oldReplicas - *newReplicas)
@@ -165,11 +193,6 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		ep := ep // https://golang.org/doc/faq#closures_and_goroutines
 		g.Go(func() error {
 			logger = log.With(logger, "url", ep.url, "index", ep.index)
-			err = addPreparedForDownscaleAnnotationToPod(ctx, api, ar.Request.Namespace, ar.Request.Name, ep.index)
-			if err != nil {
-				level.Debug(logger).Log("msg", "adding annotation to pod failed", "err", err)
-			}
-			level.Debug(logger).Log("msg", "annotation added to pod")
 
 			resp, err := client.Post("http://"+ep.url, "application/json", nil)
 			if err != nil {

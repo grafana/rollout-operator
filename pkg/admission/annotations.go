@@ -2,47 +2,18 @@ package admission
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
 )
 
 const (
-	LastDownscaleAnnotationKey = "grafana.com/last-prepared-for-downscale"
+	LastDownscaleAnnotationKey             = "grafana.com/last-prepared-for-downscale" // Should be in time.RFC3339 format
+	TimeBetweenZonesDownscaleAnnotationKey = "grafana.com/min-time-between-zones-downscale"
 )
-
-func addPreparedForDownscaleAnnotationToPod(ctx context.Context, api kubernetes.Interface, namespace, stsName string, podNr int) error {
-	client := api.CoreV1().Pods(namespace)
-	labelSelector := v1.LabelSelector{MatchLabels: map[string]string{
-		"name":                               stsName,
-		"statefulset.kubernetes.io/pod-name": fmt.Sprintf("%v-%v", stsName, podNr),
-	}}
-	pods, err := client.List(ctx,
-		v1.ListOptions{LabelSelector: labels.Set(labelSelector.MatchLabels).String()})
-	if err != nil {
-		return err
-	}
-	if len(pods.Items) != 1 {
-		return fmt.Errorf("multiple or no pods found for statefulset %v and index %v", stsName, podNr)
-	}
-
-	pod := pods.Items[0]
-
-	annotations := pod.GetAnnotations()
-	if annotations == nil {
-		annotations = map[string]string{}
-	}
-	// The value of the annotation is not important. It is set to the current date and time.
-	// This is to the benefit of the operator only.
-	annotations[LastDownscaleAnnotationKey] = time.Now().UTC().String()
-	pod.SetAnnotations(annotations)
-
-	_, err = client.Update(ctx, &pod, v1.UpdateOptions{})
-	return err
-}
 
 func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
 	client := api.AppsV1().StatefulSets(namespace)
@@ -54,9 +25,57 @@ func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.In
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	annotations[LastDownscaleAnnotationKey] = time.Now().UTC().String()
+	annotations[LastDownscaleAnnotationKey] = time.Now().UTC().Format(time.RFC3339)
 	sts.SetAnnotations(annotations)
 
 	_, err = client.Update(ctx, sts, v1.UpdateOptions{})
 	return err
+}
+
+func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface, namespace, stsName, rolloutGroup string) (bool, error) {
+	client := api.AppsV1().StatefulSets(namespace)
+	groupReq, err := labels.NewRequirement(RolloutGroupLabelKey, selection.Equals, []string{rolloutGroup})
+	if err != nil {
+		return false, err
+	}
+	sel := labels.NewSelector().Add(*groupReq)
+	list, err := client.List(ctx, v1.ListOptions{
+		LabelSelector: sel.String(),
+	})
+	if err != nil {
+		return false, err
+	}
+
+	for _, sts := range list.Items {
+		if sts.Name == stsName {
+			continue
+		}
+		lastDownscaleLabel, ok := sts.Labels[LastDownscaleAnnotationKey]
+		if !ok {
+			// No last downscale label set on the statefulset, we can continue
+			continue
+		}
+
+		downscaleTime, err := time.Parse(time.RFC3339, lastDownscaleLabel)
+		if err != nil {
+			return false, err
+		}
+
+		timeBetweenDownscaleLabel, ok := sts.Labels[TimeBetweenZonesDownscaleAnnotationKey]
+		if !ok {
+			// No time between downscale label set on the statefulset, we can continue
+			continue
+		}
+
+		timeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscaleLabel)
+		if err != nil {
+			return false, err
+		}
+
+		if downscaleTime.Add(timeBetweenDownscale).After(time.Now().UTC()) {
+			return true, nil
+		}
+
+	}
+	return false, nil
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"testing"
 	"text/template"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -31,11 +32,15 @@ func TestNoReplicasChange(t *testing.T) {
 }
 
 func TestValidDownscale(t *testing.T) {
-	testPrepDownscaleWebhook(t, 3, 1, withDownscaleAnnotation())
+	testPrepDownscaleWebhook(t, 3, 1, withDownscaleInProgress(false))
 }
 
 func TestValidDownscaleWith204(t *testing.T) {
-	testPrepDownscaleWebhook(t, 3, 1, withDownscaleAnnotation(), withStatusCode(http.StatusNoContent))
+	testPrepDownscaleWebhook(t, 3, 1, withDownscaleInProgress(false), withStatusCode(http.StatusNoContent))
+}
+
+func TestValidDownscaleWithAnotherInProgress(t *testing.T) {
+	testPrepDownscaleWebhook(t, 3, 1, withDownscaleInProgress(true))
 }
 
 func TestInvalidDownscale(t *testing.T) {
@@ -56,10 +61,11 @@ func newDebugLogger() log.Logger {
 }
 
 type testParams struct {
-	statusCode   int
-	stsAnnotated bool
-	allowed      bool
-	dryRun       bool
+	statusCode          int
+	stsAnnotated        bool
+	downscaleInProgress bool
+	allowed             bool
+	dryRun              bool
 }
 
 type optionFunc func(*testParams)
@@ -67,7 +73,6 @@ type optionFunc func(*testParams)
 func withStatusCode(statusCode int) optionFunc {
 	return func(tp *testParams) {
 		tp.statusCode = statusCode
-		tp.allowed = true
 		if tp.statusCode/100 != 2 {
 			tp.allowed = false
 			tp.stsAnnotated = false
@@ -82,9 +87,15 @@ func withDryRun() optionFunc {
 	}
 }
 
-func withDownscaleAnnotation() optionFunc {
+func withDownscaleInProgress(inProgress bool) optionFunc {
 	return func(tp *testParams) {
 		tp.stsAnnotated = true
+		tp.allowed = true
+		if inProgress {
+			tp.stsAnnotated = false
+			tp.allowed = false
+		}
+		tp.downscaleInProgress = inProgress
 	}
 }
 
@@ -109,10 +120,11 @@ func (f *fakeHttpClient) Post(url, contentType string, body io.Reader) (resp *ht
 
 func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, options ...optionFunc) {
 	params := testParams{
-		statusCode:   http.StatusOK,
-		stsAnnotated: false,
-		allowed:      true,
-		dryRun:       false,
+		statusCode:          http.StatusOK,
+		stsAnnotated:        false,
+		downscaleInProgress: false,
+		allowed:             true,
+		dryRun:              false,
 	}
 	for _, option := range options {
 		option(&params)
@@ -178,7 +190,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 			DryRun: &params.dryRun,
 		},
 	}
-	api := fake.NewSimpleClientset(
+	objects := []runtime.Object{
 		&apps.StatefulSet{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "StatefulSet",
@@ -188,9 +200,43 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 				Name:      stsName,
 				Namespace: namespace,
 				UID:       types.UID(stsName),
+				Labels:    map[string]string{RolloutGroupLabelKey: "ingester"},
 			},
 		},
-	)
+		&apps.StatefulSet{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "StatefulSet",
+				APIVersion: "apps/v1",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      stsName + "-1",
+				Namespace: namespace,
+				UID:       types.UID(stsName),
+				Labels:    map[string]string{RolloutGroupLabelKey: "ingester"},
+			},
+		},
+	}
+	if params.downscaleInProgress {
+		objects = append(objects,
+			&apps.StatefulSet{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "StatefulSet",
+					APIVersion: "apps/v1",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      stsName + "-2",
+					Namespace: namespace,
+					UID:       types.UID(stsName),
+					Labels: map[string]string{
+						RolloutGroupLabelKey:                   "ingester",
+						LastDownscaleAnnotationKey:             time.Now().UTC().Format(time.RFC3339),
+						TimeBetweenZonesDownscaleAnnotationKey: "12h",
+					},
+				},
+			},
+		)
+	}
+	api := fake.NewSimpleClientset(objects...)
 	f := &fakeHttpClient{statusCode: params.statusCode}
 
 	admissionResponse := prepDownscale(ctx, logger, ar, api, f)
@@ -220,6 +266,7 @@ metadata:
     grafana.com/prep-downscale: "true"
     {{.DownScalePathKey}}: {{.DownScalePath}}
     {{.DownScalePortKey}}: "{{.DownScalePort}}"
+    rollout-group: "ingester"
 spec:
   selector:
     matchLabels:
