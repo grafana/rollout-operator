@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	LastDownscaleAnnotationKey             = "grafana.com/last--downscale" // Should be in time.RFC3339 format
+	LastDownscaleAnnotationKey             = "grafana.com/last-downscale" // Should be in time.RFC3339 format
 	TimeBetweenZonesDownscaleAnnotationKey = "grafana.com/min-time-between-zones-downscale"
 )
 
