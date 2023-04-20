@@ -64,3 +64,54 @@ func PatchCABundleOnValidatingWebhooks(ctx context.Context, logger log.Logger, k
 
 	return nil
 }
+
+// PatchCABundleOnMutatingWebhooks patches the CA bundle of all mutating webhook configurations that have the specified labels in the cluster.
+// Webhook configurations should have the following labels:
+// "grafana.com/inject-rollout-operator-ca": "true",
+// "grafana.com/namespace":                  <specified namespace>,
+func PatchCABundleOnMutatingWebhooks(ctx context.Context, logger log.Logger, kubeClient kubernetes.Interface, namespace string, caPEM []byte) error {
+	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{
+		"grafana.com/inject-rollout-operator-ca": "true",
+		"grafana.com/namespace":                  namespace,
+	}}
+
+	whcs, err := kubeClient.AdmissionregistrationV1().MutatingWebhookConfigurations().List(ctx, metav1.ListOptions{
+		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list mutating webhook configurations: %w", err)
+	}
+	if len(whcs.Items) == 0 {
+		level.Info(logger).Log("msg", "no mutating webhook configurations found")
+		return nil
+	}
+
+	for _, wh := range whcs.Items {
+		level.Info(logger).Log("msg", "found mutating webhook configuration", "name", wh.GetName())
+
+		changed := false
+		for i := range wh.Webhooks {
+			if !bytes.Equal(wh.Webhooks[i].ClientConfig.CABundle, caPEM) {
+				wh.Webhooks[i].ClientConfig.CABundle = caPEM
+				changed = true
+			}
+		}
+		if !changed {
+			level.Info(logger).Log("msg", "mutating webhook configuration already has same CA bundle set, not patching", "name", wh.GetName())
+			continue
+		}
+
+		data, err := json.Marshal(wh)
+		if err != nil {
+			return fmt.Errorf("failed to marshal mutating webhook configuration: %w", err)
+		}
+
+		res, err := kubeClient.AdmissionregistrationV1().MutatingWebhookConfigurations().Patch(context.Background(), wh.GetName(), types.MergePatchType, data, metav1.PatchOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to patch mutating webhook configuration: %w", err)
+		}
+		level.Info(logger).Log("msg", "patched mutating webhook configuration with CA bundle", "name", res.GetName())
+	}
+
+	return nil
+}
