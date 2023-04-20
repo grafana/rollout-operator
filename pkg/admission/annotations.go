@@ -8,6 +8,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -18,18 +19,8 @@ const (
 
 func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
 	client := api.AppsV1().StatefulSets(namespace)
-	sts, err := client.Get(ctx, stsName, v1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	annotations := sts.GetAnnotations()
-	if annotations == nil {
-		annotations = map[string]string{}
-	}
-	annotations[LastDownscaleAnnotationKey] = time.Now().UTC().Format(time.RFC3339)
-	sts.SetAnnotations(annotations)
-
-	_, err = client.Update(ctx, sts, v1.UpdateOptions{})
+	patch := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))
+	_, err := client.Patch(ctx, stsName, types.StrategicMergePatchType, []byte(patch), v1.PatchOptions{})
 	return err
 }
 
