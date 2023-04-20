@@ -2,6 +2,17 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Update Go to `1.20.3`. #48
+* [ENHANCEMENT] Updated dependencies, including: #49
+  * `github.com/k3d-io/k3d/v5` from `v5.4.7` to `v5.4.9`
+  * `github.com/prometheus/client_golang` from `v1.14.0` to `v1.15.0`
+  * `github.com/prometheus/common` from `v0.39.0` to `v0.42.0`
+  * `github.com/stretchr/testify` from `v1.8.1` to `v1.8.2`
+  * `go.uber.org/atomic` from `v1.9.0` to `v1.10.0`
+  * `k8s.io/api` from `v0.26.1` to `v0.26.2`
+  * `k8s.io/apimachinery` from `v0.26.1` to `v0.26.2`
+  * `k8s.io/client-go` from `v0.26.1` to `v0.26.2`
+
 ## v0.4.0
 
 * [ENHANCEMENT] Update Go to `1.20.1`. #39
