@@ -157,7 +157,7 @@ func (c *RolloutController) Run() {
 	ctx := context.Background()
 
 	for {
-		if c.shouldReconcile.CAS(true, false) {
+		if c.shouldReconcile.CompareAndSwap(true, false) {
 			if err := c.reconcile(ctx); err != nil {
 				level.Warn(c.logger).Log("msg", "reconcile failed", "err", err)
 
