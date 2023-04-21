@@ -106,7 +106,7 @@ func PatchCABundleOnMutatingWebhooks(ctx context.Context, logger log.Logger, kub
 			return fmt.Errorf("failed to marshal mutating webhook configuration: %w", err)
 		}
 
-		res, err := kubeClient.AdmissionregistrationV1().MutatingWebhookConfigurations().Patch(context.Background(), wh.GetName(), types.MergePatchType, data, metav1.PatchOptions{})
+		res, err := kubeClient.AdmissionregistrationV1().MutatingWebhookConfigurations().Patch(ctx, wh.GetName(), types.MergePatchType, data, metav1.PatchOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to patch mutating webhook configuration: %w", err)
 		}
