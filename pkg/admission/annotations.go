@@ -56,7 +56,7 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface,
 
 		downscaleTime, err := time.Parse(time.RFC3339, lastDownscaleAnnotation)
 		if err != nil {
-			return nil, fmt.Errorf("can't parse %v annotation of %s: %s", LastDownscaleAnnotationKey, sts.Name, err)
+			return nil, fmt.Errorf("can't parse %v annotation of %s: %w", LastDownscaleAnnotationKey, sts.Name, err)
 		}
 
 		timeBetweenDownscaleLabel, ok := sts.Labels[MinTimeBetweenZonesDownscaleLabelKey]
