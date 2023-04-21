@@ -217,7 +217,7 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
 			},
 		}
-		level.Warn(logger).Log("msg", "downscale not allowed due to error", "err", err)
+		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
 		return &reviewResponse
 	}
 
