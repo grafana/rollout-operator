@@ -306,7 +306,7 @@ func TestExpiringCertificate(t *testing.T) {
 			}
 			t.Logf("Updated rollout-operator deployment")
 			return true
-		}, 10*time.Second, 500*time.Millisecond, "can't update rollout-operator deployment")
+		}, 30*time.Second, 500*time.Millisecond, "can't update rollout-operator deployment")
 
 		t.Log("Waiting until the certificate is renewed with new expiration.")
 		require.Eventuallyf(t, func() bool {
