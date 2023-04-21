@@ -201,7 +201,7 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 				err := errors.New("HTTP post request returned non-2xx status code")
 				body, readError := io.ReadAll(resp.Body)
 				defer resp.Body.Close()
-				level.Error(logger).Log("msg", err, "status", resp.StatusCode, "response_body", body)
+				level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", err, "status", resp.StatusCode, "response_body", body)
 				return errors.Join(err, readError)
 			}
 			level.Debug(logger).Log("msg", "pod prepared for shutdown")
