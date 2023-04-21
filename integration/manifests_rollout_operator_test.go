@@ -278,7 +278,7 @@ func webhookRolloutOperatorClusterRole(namespace string) *rbacv1.ClusterRole {
 		Rules: []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{"admissionregistration.k8s.io"},
-				Resources: []string{"validatingwebhookconfigurations"},
+				Resources: []string{"validatingwebhookconfigurations, mutatingwebhookconfigurations"},
 				Verbs:     []string{"list", "patch"},
 			},
 		},
