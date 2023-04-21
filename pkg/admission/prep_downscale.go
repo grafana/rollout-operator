@@ -175,7 +175,7 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 	// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
 	for i := 0; i < int(diff); i++ {
 		index := int(*oldReplicas) - i - 1 // nr in statefulset
-		eps[i].url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/ingester/%s",
+		eps[i].url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
 			ar.Request.Name, // pod name
 			index,
 			ar.Request.Name, // svc name

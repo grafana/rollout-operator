@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Add a `prep_downscale` mutating admission webhook that prepares ingesters for shutdown before downscaling. #47
+* [ENHANCEMENT] Add a `prep_downscale` mutating admission webhook that prepares pods for shutdown before downscaling. #47
 * [ENHANCEMENT] Update Go to `1.20.3`. #48
 * [ENHANCEMENT] Updated dependencies, including: #49
   * `github.com/k3d-io/k3d/v5` from `v5.4.7` to `v5.4.9`
