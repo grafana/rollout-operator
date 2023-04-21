@@ -229,7 +229,7 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
 			},
 		}
-		level.Warn(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
+		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
 		return &reviewResponse
 	}
 
