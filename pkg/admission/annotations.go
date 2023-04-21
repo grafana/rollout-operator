@@ -67,7 +67,7 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface,
 
 		timeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscaleLabel)
 		if err != nil {
-			return nil, fmt.Errorf("can't parse %v label of %s: %s", MinTimeBetweenZonesDownscaleLabelKey, sts.Name, err)
+			return nil, fmt.Errorf("can't parse %v label of %s: %w", MinTimeBetweenZonesDownscaleLabelKey, sts.Name, err)
 		}
 
 		if downscaleTime.Add(timeBetweenDownscale).After(time.Now()) {
