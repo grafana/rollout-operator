@@ -146,18 +146,18 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	path := "/prepare-downscale"
 	oldParams := templateParams{
 		Replicas:          oldReplicas,
-		DownScalePathKey:  PrepareDownscalePathKey,
+		DownScalePathKey:  PrepareDownscalePathAnnotationKey,
 		DownScalePath:     path,
-		DownScalePortKey:  PrepareDownscalePortKey,
+		DownScalePortKey:  PrepareDownscalePortAnnotationKey,
 		DownScalePort:     u.Port(),
 		DownScaleLabelKey: PrepareDownscaleLabelKey,
 	}
 
 	newParams := templateParams{
 		Replicas:          newReplicas,
-		DownScalePathKey:  PrepareDownscalePathKey,
+		DownScalePathKey:  PrepareDownscalePathAnnotationKey,
 		DownScalePath:     path,
-		DownScalePortKey:  PrepareDownscalePortKey,
+		DownScalePortKey:  PrepareDownscalePortAnnotationKey,
 		DownScalePort:     u.Port(),
 		DownScaleLabelKey: PrepareDownscaleLabelKey,
 	}
@@ -269,9 +269,10 @@ metadata:
   name: web
   labels:
     {{.DownScaleLabelKey}}: "true"
+    rollout-group: "ingester"
+  annotations:
     {{.DownScalePathKey}}: {{.DownScalePath}}
     {{.DownScalePortKey}}: "{{.DownScalePort}}"
-    rollout-group: "ingester"
 spec:
   selector:
     matchLabels:
