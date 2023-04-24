@@ -177,7 +177,7 @@ The webhook is conservative and allows changes whenever an error occurs:
 
 Changing the replicas number to `null` (or from `null`) is allowed.
 
-### `/admission/pre-downscale`
+### `/admission/prepare-downscale`
 
 This webhook offers a `MutatingAdmissionWebhook` that calls a downscale preparation endpoint on the pods for requests that decrease the number of replicas in objects labeled as `grafana.com/prepare-downscale: true`.
 An example webhook configuration would look like this:
