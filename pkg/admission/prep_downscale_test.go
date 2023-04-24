@@ -143,7 +143,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	require.NoError(t, err)
 	require.NotEmpty(t, u.Port())
 
-	path := "/prep-downscale"
+	path := "/prepare-downscale"
 	oldParams := templateParams{
 		Replicas:          oldReplicas,
 		DownScalePathKey:  PrepareDownscalePathKey,

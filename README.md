@@ -179,7 +179,7 @@ Changing the replicas number to `null` (or from `null`) is allowed.
 
 ### `/admission/pre-downscale`
 
-This webhook offers a `MutatingAdmissionWebhook` that calls a downscale preparation endpoint on the pods for requests that decrease the number of replicas in objects labeled as `grafana.com/prep-downscale: true`.
+This webhook offers a `MutatingAdmissionWebhook` that calls a downscale preparation endpoint on the pods for requests that decrease the number of replicas in objects labeled as `grafana.com/prepare-downscale: true`.
 An example webhook configuration would look like this:
 
 ```yaml
@@ -189,7 +189,7 @@ metadata:
   labels:
     grafana.com/inject-rollout-operator-ca: "true"
     grafana.com/namespace: default
-  name: prep-downscale-default
+  name: prepare-downscale-default
 webhooks:
 - admissionReviewVersions:
   - v1
@@ -197,11 +197,11 @@ webhooks:
     service:
       name: rollout-operator
       namespace: default
-      path: /admission/prep-downscale
+      path: /admission/prepare-downscale
       port: 443
   failurePolicy: Fail
   matchPolicy: Equivalent
-  name: prep-downscale-default.grafana.com
+  name: prepare-downscale-default.grafana.com
   rules:
   - apiGroups:
     - apps
@@ -238,18 +238,18 @@ spec:
 
 Note that the `Service` created for the `/admission/no-downscale` can be reused if already present.
 
-#### Prep-downscale webhook details
+#### Prepare-downscale webhook details
 
 Upscaling requests or requests that don't change the number of replicas are approved.
 For downscaling requests the following labels have to be present on the object:
 
-- `grafana.com/prep-downscale`
-- `grafana.com/prep-downscale-http-path`
-- `grafana.com/prep-downscale-http-port`
+- `grafana.com/prepare-downscale`
+- `grafana.com/prepare-downscale-http-path`
+- `grafana.com/prepare-downscale-http-port`
 
 If the `grafana.com/last-downscale` annotation is present on any of the stateful sets in the same rollout group it's value will be checked against the current time. If the difference is less than the `grafana.com/min-time-between-zones-downscale` label (if present) then the request is rejected. Otherwise the request is approved. This mechanism can be used to maintain a time between downscales of the stateful sets in a rollout group.
 
-The endpoint created from `grafana.com/prep-downscale-http-path` and `grafana.com/prep-downscale-http-port` will be called for each of the pods that have to be downscaled. If any of these requests fail the downscaling request is rejected.
+The endpoint created from `grafana.com/prepare-downscale-http-path` and `grafana.com/prepare-downscale-http-port` will be called for each of the pods that have to be downscaled. If any of these requests fail the downscaling request is rejected.
 
 The `grafana.com/last-downscale` annotation is added to the stateful set mentioned in the validation request.
 
