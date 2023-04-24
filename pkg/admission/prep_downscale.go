@@ -109,50 +109,38 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 
 	port := lbls[PrepDownscalePortKey]
 	if port == "" {
-		reviewResponse := v1.AdmissionResponse{
-			Allowed: false,
-			Result: &metav1.Status{
-				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepDownscalePortKey),
-			},
-		}
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepDownscalePortKey))
-		return &reviewResponse
+		return deny(
+			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.",
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepDownscalePortKey,
+		)
 	}
 
 	path := lbls[PrepDownscalePathKey]
 	if path == "" {
-		reviewResponse := v1.AdmissionResponse{
-			Allowed: false,
-			Result: &metav1.Status{
-				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepDownscalePathKey),
-			},
-		}
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepDownscalePathKey))
-		return &reviewResponse
+		return deny(
+			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.",
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepDownscalePathKey,
+		)
 	}
 
 	rolloutGroup := lbls[RolloutGroupLabelKey]
 	if rolloutGroup != "" {
 		foundSts, err := findDownscalesDoneMinTimeAgo(ctx, api, ar.Request.Namespace, ar.Request.Name, rolloutGroup)
 		if err != nil {
-			reviewResponse := v1.AdmissionResponse{
-				Allowed: false,
-				Result: &metav1.Status{
-					Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because finding other statefulsets failed.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
-				},
-			}
-			level.Warn(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
-			return &reviewResponse
+			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
+			return deny(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because finding other statefulsets failed.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
+			)
 		}
 		if foundSts != nil {
-			reviewResponse := v1.AdmissionResponse{
-				Allowed: false,
-				Result: &metav1.Status{
-					Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime),
-				},
-			}
 			level.Warn(logger).Log("msg", "downscale not allowed because another statefulset was downscaled recently", "err", err)
-			return &reviewResponse
+			return deny(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime,
+			)
 		}
 	}
 
@@ -211,26 +199,20 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 	err = g.Wait()
 	if err != nil {
 		// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
-		reviewResponse := v1.AdmissionResponse{
-			Allowed: false,
-			Result: &metav1.Status{
-				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
-			},
-		}
 		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
-		return &reviewResponse
+		return deny(
+			"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
+		)
 	}
 
 	err = addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name)
 	if err != nil {
-		reviewResponse := v1.AdmissionResponse{
-			Allowed: false,
-			Result: &metav1.Status{
-				Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
-			},
-		}
 		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
-		return &reviewResponse
+		return deny(
+			"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
+		)
 	}
 
 	// Down-scale operation is allowed because all pods successfully prepared for shutdown
@@ -239,6 +221,16 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		Allowed: true,
 		Result: &metav1.Status{
 			Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is allowed -- all pods successfully prepared for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
+		},
+	}
+}
+
+// deny returns a *v1.AdmissionResponse with Allowed: false and the message provided formatted with as in fmt.Sprintf.
+func deny(msg string, args ...any) *v1.AdmissionResponse {
+	return &v1.AdmissionResponse{
+		Allowed: false,
+		Result: &metav1.Status{
+			Message: fmt.Sprintf(msg, args...),
 		},
 	}
 }
