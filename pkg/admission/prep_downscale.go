@@ -135,9 +135,9 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	path := annotations[PrepareDownscalePathAnnotationKey]
 	if path == "" {
-		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepareDownscalePathAnnotationKey))
+		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", PrepareDownscalePathAnnotationKey))
 		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.",
+			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v annotation is not set or empty.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepareDownscalePathAnnotationKey,
 		)
 	}
