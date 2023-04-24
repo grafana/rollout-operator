@@ -182,11 +182,13 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 
 		// TODO watch webhook configurations instead of doing one-off.
 		check(tlscert.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
+		check(tlscert.PatchCABundleOnMutatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
 	}
 
 	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert)
 	check(errors.Wrap(err, "failed to create tls server"))
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
+	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(admission.PrepareDownscale, logger, kubeClient))
 	check(errors.Wrap(tlsSrv.Start(), "failed to start tls server"))
 }
 

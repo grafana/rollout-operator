@@ -177,9 +177,85 @@ The webhook is conservative and allows changes whenever an error occurs:
 
 Changing the replicas number to `null` (or from `null`) is allowed.
 
+### `/admission/prepare-downscale`
+
+This webhook offers a `MutatingAdmissionWebhook` that calls a downscale preparation endpoint on the pods for requests that decrease the number of replicas in objects labeled as `grafana.com/prepare-downscale: true`.
+An example webhook configuration would look like this:
+
+```yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  labels:
+    grafana.com/inject-rollout-operator-ca: "true"
+    grafana.com/namespace: default
+  name: prepare-downscale-default
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: rollout-operator
+      namespace: default
+      path: /admission/prepare-downscale
+      port: 443
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: prepare-downscale-default.grafana.com
+  rules:
+  - apiGroups:
+    - apps
+    apiVersions:
+    - v1
+    operations:
+    - UPDATE
+    resources:
+    - statefulsets
+    - statefulsets/scale
+    scope: Namespaced
+  sideEffects: NoneOnDryRun
+  timeoutSeconds: 10
+```
+
+This webhook configuration should point to a `Service` that points to the `rollout-operator`'s HTTPS server exposed on port `-server-tls.port=8443`. 
+For example:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: rollout-operator
+spec:
+  selector:
+    name: rollout-operator
+  type: ClusterIP
+  ports:
+  - name: https
+    port: 443
+    protocol: TCP
+    targetPort: 8443
+```
+
+Note that the `Service` created for the `/admission/no-downscale` can be reused if already present.
+
+#### Prepare-downscale webhook details
+
+Upscaling requests or requests that don't change the number of replicas are approved.
+For downscaling requests the following labels have to be present on the object:
+
+- `grafana.com/prepare-downscale`
+- `grafana.com/prepare-downscale-http-path`
+- `grafana.com/prepare-downscale-http-port`
+
+If the `grafana.com/last-downscale` annotation is present on any of the stateful sets in the same rollout group it's value will be checked against the current time. If the difference is less than the `grafana.com/min-time-between-zones-downscale` label (if present) then the request is rejected. Otherwise the request is approved. This mechanism can be used to maintain a time between downscales of the stateful sets in a rollout group.
+
+The endpoint created from `grafana.com/prepare-downscale-http-path` and `grafana.com/prepare-downscale-http-port` will be called for each of the pods that have to be downscaled. If any of these requests fail the downscaling request is rejected.
+
+The `grafana.com/last-downscale` annotation is added to the stateful set mentioned in the validation request.
+
 ### TLS Certificates
 
-Note that `ValidatingAdmissionWebhook` require a TLS connection, so the HTTPS server should either use a certificate signed by a well-known CA or a self-signed certificate.
+Note that both the `ValidatingAdmissionWebhook` and the `MutatingAdmissionWebhook` require a TLS connection, so the HTTPS server should either use a certificate signed by a well-known CA or a self-signed certificate.
 You can either [issue a Certificate Signing Request](https://kubernetes.io/docs/reference/access-authn-authz/certificate-signing-requests/) or use an existing approach for issuing self-signed certificates, like [cert-manager](https://cert-manager.io/docs/configuration/selfsigned/).
 You can set the options `-server-tls.cert-file` and `-server-tls.key-file` to point to the certificate and key files respectively.
 
@@ -187,12 +263,12 @@ For convenience, `rollout-operator` offers a self-signed certificates generator 
 This generator will generate a self-signed certificate and store it in a secret specified by the flag `-server-tls.self-signed-cert.secret-name`.
 The certificate is stored in a secret in order to reuse it across restarts of the `rollout-operator`.
 
-`rollout-operator` will list all the `ValidatingWebhookConfiguration` objects in the cluster that are labeled with `grafana.com/inject-rollout-operator-ca: true` and `grafana.com/namespace: <value of -kubernetes-namespace>` and will inject the CA certificate in the `caBundle` field of the webhook configuration. 
+`rollout-operator` will list all the `ValidatingWebhookConfiguration` or `MutatingWebhookConfiguration` objects in the cluster that are labeled with `grafana.com/inject-rollout-operator-ca: true` and `grafana.com/namespace: <value of -kubernetes-namespace>` and will inject the CA certificate in the `caBundle` field of the webhook configuration. 
 This mechanism can be disabled by setting `-webhooks.update-ca-bundle=false`.
 
 This signing and injecting is performed at service startup once, so you would need to restart `rollout-operator` if you want to inject the CA certificate in a new `ValidatingWebhookConfiguration` object.
 
-In order to perform the self-signed certificate generation, `rollout-operator` needs a `Role` that would allow it to list and update the secrets, as well as a `ClusterRole` that would allow listing and patching the `ValidationWebhookConfigurations`. An example of those could be:
+In order to perform the self-signed certificate generation, `rollout-operator` needs a `Role` that would allow it to list and update the secrets, as well as a `ClusterRole` that would allow listing and patching the `ValidationWebhookConfigurations` or `MutatingWebhookConfigurations`. An example of those could be:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -253,4 +329,3 @@ subjects:
 
 Whenever the certificate expires, the `rollout-operator` will detect it and will restart, which will trigger the self-signed certificate generation again if it's configured.
 The default expiration for the self-signed certificate is 1 year and it can be changed by setting the flag `-server-tls.self-signed-cert.expiration`.
-
