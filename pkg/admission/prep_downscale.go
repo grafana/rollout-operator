@@ -190,7 +190,7 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 	for _, ep := range eps {
 		ep := ep // https://golang.org/doc/faq#closures_and_goroutines
 		g.Go(func() error {
-			logger = log.With(logger, "url", ep.url, "index", ep.index)
+			logger := log.With(logger, "url", ep.url, "index", ep.index)
 
 			resp, err := client.Post("http://"+ep.url, "application/json", nil)
 			if err != nil {
