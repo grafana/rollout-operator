@@ -100,11 +100,12 @@ func withDownscaleInProgress(inProgress bool) optionFunc {
 }
 
 type templateParams struct {
-	Replicas         int
-	DownScalePathKey string
-	DownScalePath    string
-	DownScalePortKey string
-	DownScalePort    string
+	Replicas          int
+	DownScalePathKey  string
+	DownScalePath     string
+	DownScalePortKey  string
+	DownScalePort     string
+	DownScaleLabelKey string
 }
 
 type fakeHttpClient struct {
@@ -144,19 +145,21 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 
 	path := "/prep-downscale"
 	oldParams := templateParams{
-		Replicas:         oldReplicas,
-		DownScalePathKey: PrepDownscalePathKey,
-		DownScalePath:    path,
-		DownScalePortKey: PrepDownscalePortKey,
-		DownScalePort:    u.Port(),
+		Replicas:          oldReplicas,
+		DownScalePathKey:  PrepareDownscalePathKey,
+		DownScalePath:     path,
+		DownScalePortKey:  PrepareDownscalePortKey,
+		DownScalePort:     u.Port(),
+		DownScaleLabelKey: PrepareDownscaleLabelKey,
 	}
 
 	newParams := templateParams{
-		Replicas:         newReplicas,
-		DownScalePathKey: PrepDownscalePathKey,
-		DownScalePath:    path,
-		DownScalePortKey: PrepDownscalePortKey,
-		DownScalePort:    u.Port(),
+		Replicas:          newReplicas,
+		DownScalePathKey:  PrepareDownscalePathKey,
+		DownScalePath:     path,
+		DownScalePortKey:  PrepareDownscalePortKey,
+		DownScalePort:     u.Port(),
+		DownScaleLabelKey: PrepareDownscaleLabelKey,
 	}
 
 	rawObject, err := statefulSetTemplate(newParams)
@@ -241,7 +244,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	api := fake.NewSimpleClientset(objects...)
 	f := &fakeHttpClient{statusCode: params.statusCode}
 
-	admissionResponse := prepDownscale(ctx, logger, ar, api, f)
+	admissionResponse := prepareDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
 	if params.stsAnnotated {
@@ -265,7 +268,7 @@ kind: StatefulSet
 metadata:
   name: web
   labels:
-    grafana.com/prep-downscale: "true"
+    {{.DownScaleLabelKey}}: "true"
     {{.DownScalePathKey}}: {{.DownScalePath}}
     {{.DownScalePortKey}}: "{{.DownScalePort}}"
     rollout-group: "ingester"

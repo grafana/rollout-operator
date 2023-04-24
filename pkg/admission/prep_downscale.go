@@ -19,26 +19,26 @@ import (
 )
 
 const (
-	PrepDownscalePathKey     = "grafana.com/prep-downscale-http-path"
-	PrepDownscalePortKey     = "grafana.com/prep-downscale-http-port"
-	PrepDownscaleLabelKey    = "grafana.com/prep-downscale"
-	PrepDownscaleLabelValue  = "true"
-	PrepDownscaleWebhookPath = "/admission/prep-downscale"
-	RolloutGroupLabelKey     = "rollout-group"
+	PrepareDownscalePathKey     = "grafana.com/prepare-downscale-http-path"
+	PrepareDownscalePortKey     = "grafana.com/prepare-downscale-http-port"
+	PrepareDownscaleLabelKey    = "grafana.com/prepare-downscale"
+	PrepareDownscaleLabelValue  = "true"
+	PrepareDownscaleWebhookPath = "/admission/prepare-downscale"
+	RolloutGroupLabelKey        = "rollout-group"
 )
 
-func PrepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
+func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
-	return prepDownscale(ctx, logger, ar, api, client)
+	return prepareDownscale(ctx, logger, ar, api, client)
 }
 
 type httpClient interface {
 	Post(url, contentType string, body io.Reader) (resp *http.Response, err error)
 }
 
-func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
+func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
 
 	oldObj, oldGVK, err := codecs.UniversalDeserializer().Decode(ar.Request.OldObject.Raw, nil, nil)
@@ -102,26 +102,26 @@ func prepDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview
 		return allowWarn(logger, fmt.Sprintf("unsupported type %T, allowing the change", o))
 	}
 
-	if lbls[PrepDownscaleLabelKey] != PrepDownscaleLabelValue {
+	if lbls[PrepareDownscaleLabelKey] != PrepareDownscaleLabelValue {
 		// Not labeled, nothing to do.
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
-	port := lbls[PrepDownscalePortKey]
+	port := lbls[PrepareDownscalePortKey]
 	if port == "" {
-		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepDownscalePortKey))
+		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepareDownscalePortKey))
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepDownscalePortKey,
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepareDownscalePortKey,
 		)
 	}
 
-	path := lbls[PrepDownscalePathKey]
+	path := lbls[PrepareDownscalePathKey]
 	if path == "" {
-		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepDownscalePathKey))
+		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepareDownscalePathKey))
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepDownscalePathKey,
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepareDownscalePathKey,
 		)
 	}
 
