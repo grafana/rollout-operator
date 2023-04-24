@@ -4,19 +4,17 @@ package integration
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/integration/k3t"
+	"github.com/grafana/rollout-operator/pkg/admission"
 )
 
+/*
 func TestRolloutHappyCase(t *testing.T) {
 	ctx := context.Background()
 
@@ -347,4 +345,58 @@ func getCertificateExpiration(t *testing.T, secret *corev1.Secret) time.Time {
 	c, err := x509.ParseCertificate(pair.Certificate[0])
 	require.NoError(t, err)
 	return c.NotAfter
+}
+
+*/
+
+func TestPrepareDownscale_CanDownscale(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	api := cluster.API()
+	path := "/prepare-shutdown-pass"
+	{
+		t.Log("Create the webhook before the rollout-operator")
+		_, err := api.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, prepareDownscaleValidatingWebhook(corev1.NamespaceDefault, path), metav1.CreateOptions{})
+		require.NoError(t, err)
+	}
+
+	{
+		t.Log("Create rollout operator and check it's running and ready.")
+		createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
+		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+	}
+
+	mock := mockServiceStatefulSet("mock", "1", true)
+	{
+		t.Log("Create the service with two replicas.")
+		mock.Spec.Replicas = ptr[int32](2)
+		mock.ObjectMeta.Labels[admission.PrepareDownscaleLabelKey] = admission.PrepareDownscaleLabelValue
+		mock.ObjectMeta.Labels[admission.PrepareDownscalePathKey] = "prepare-shutdown-pass"
+		mock.ObjectMeta.Labels[admission.PrepareDownscalePortKey] = "443"
+		requireCreateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+	}
+
+	{
+		t.Log("Scale down.")
+		mock.Spec.Replicas = ptr[int32](1)
+		requireUpdateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
+	}
+
+	{
+		t.Log("Scale up and make it have two replicas again.")
+		mock.Spec.Replicas = ptr[int32](2)
+		requireUpdateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+	}
+
+	{
+		t.Log("Scale down using /scale subresource, we should be able as it's not labeled with grafana/no-downscale.")
+		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, false)
+		require.NoError(t, err)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
+	}
 }

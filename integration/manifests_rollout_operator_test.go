@@ -285,6 +285,56 @@ func webhookRolloutOperatorClusterRole(namespace string) *rbacv1.ClusterRole {
 	}
 }
 
+func prepareDownscaleValidatingWebhook(namespace, path string) *admissionregistrationv1.MutatingWebhookConfiguration {
+	return &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("prepare-downscale-%s", namespace),
+			Labels: map[string]string{
+				"grafana.com/inject-rollout-operator-ca": "true",
+				"grafana.com/namespace":                  namespace,
+			},
+			Annotations:     nil,
+			OwnerReferences: nil,
+			Finalizers:      nil,
+			ManagedFields:   nil,
+		},
+		Webhooks: []admissionregistrationv1.MutatingWebhook{
+			{
+				Name: fmt.Sprintf("prepare-downscale-%s.grafana.com", namespace),
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: namespace,
+						Name:      "rollout-operator",
+						Path:      &path,
+					},
+				},
+				Rules: []admissionregistrationv1.RuleWithOperations{
+					{
+						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Update},
+						Rule: admissionregistrationv1.Rule{
+							APIGroups:   []string{"apps"},
+							APIVersions: []string{"v1"},
+							Resources: []string{
+								"statefulsets",
+								"statefulsets/scale",
+							},
+							Scope: ptr(admissionregistrationv1.NamespacedScope),
+						},
+					},
+				},
+				NamespaceSelector: &metav1.LabelSelector{
+					// This is just an example of matching changes only in a specific namespace.
+					// https://kubernetes.io/docs/reference/labels-annotations-taints/#kubernetes-io-metadata-name
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": namespace},
+				},
+				FailurePolicy:           ptr(admissionregistrationv1.Fail),
+				SideEffects:             ptr(admissionregistrationv1.SideEffectClassNoneOnDryRun),
+				AdmissionReviewVersions: []string{"v1"},
+			},
+		},
+	}
+}
+
 func noDownscaleValidatingWebhook(namespace string) *admissionregistrationv1.ValidatingWebhookConfiguration {
 	return &admissionregistrationv1.ValidatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{
