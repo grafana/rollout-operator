@@ -97,6 +97,7 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 			Labels: map[string]string{
 				"rollout-group": "mock",
 			},
+			Annotations: map[string]string{},
 		},
 		Spec: appsv1.StatefulSetSpec{
 			Replicas: ptr[int32](1),

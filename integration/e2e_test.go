@@ -354,10 +354,9 @@ func TestPrepareDownscale_CanDownscale(t *testing.T) {
 
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
-	path := "/prepare-shutdown-pass"
 	{
 		t.Log("Create the webhook before the rollout-operator")
-		_, err := api.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, prepareDownscaleValidatingWebhook(corev1.NamespaceDefault, path), metav1.CreateOptions{})
+		_, err := api.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, prepareDownscaleValidatingWebhook(corev1.NamespaceDefault, admission.PrepareDownscaleWebhookPath), metav1.CreateOptions{})
 		require.NoError(t, err)
 	}
 
@@ -373,8 +372,8 @@ func TestPrepareDownscale_CanDownscale(t *testing.T) {
 		t.Log("Create the service with two replicas.")
 		mock.Spec.Replicas = ptr[int32](2)
 		mock.ObjectMeta.Labels[admission.PrepareDownscaleLabelKey] = admission.PrepareDownscaleLabelValue
-		mock.ObjectMeta.Labels[admission.PrepareDownscalePathKey] = "prepare-shutdown-pass"
-		mock.ObjectMeta.Labels[admission.PrepareDownscalePortKey] = "443"
+		mock.ObjectMeta.Annotations[admission.PrepareDownscalePathAnnotationKey] = "/prepare-shutdown-pass"
+		mock.ObjectMeta.Annotations[admission.PrepareDownscalePortAnnotationKey] = "443"
 		requireCreateStatefulSet(ctx, t, api, mock)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
 	}
