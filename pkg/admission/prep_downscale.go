@@ -135,15 +135,9 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	path := annotations[PrepareDownscalePathAnnotationKey]
 	if path == "" {
-<<<<<<< HEAD
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", PrepareDownscalePathAnnotationKey))
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v annotation is not set or empty.",
-=======
-		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepareDownscalePathAnnotationKey))
-		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.",
->>>>>>> f441fad (Add annotations)
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepareDownscalePathAnnotationKey,
 		)
 	}
@@ -262,14 +256,10 @@ func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kube
 	switch ar.Request.Resource.Resource {
 	case "statefulsets":
 		obj, err := api.AppsV1().StatefulSets(ar.Request.Namespace).Get(ctx, ar.Request.Name, metav1.GetOptions{})
-<<<<<<< HEAD
 		if err != nil {
-				return nil, err
+			return nil, err
 		}
 		return obj.Annotations, nil
-=======
-		return obj.Annotations, err
->>>>>>> f441fad (Add annotations)
 	}
 	return nil, fmt.Errorf("unsupported resource %s", ar.Request.Resource.Resource)
 }
