@@ -33,13 +33,33 @@ func createMockServiceZone(t *testing.T, ctx context.Context, api *kubernetes.Cl
 	}
 }
 
-func mockServiceService(name string) *corev1.Service {
+func mockServiceServiceWithNoClusterIP(name string) *corev1.Service {
+	return mockServiceServiceHelper(name, false)
+}
+
+func mockServiceService(name string, noClusterIP ...bool) *corev1.Service {
+	return mockServiceServiceHelper(name, true)
+}
+
+func mockServiceServiceHelper(name string, clusterIPRequired bool) *corev1.Service {
+	var clusterIP string
+	if clusterIPRequired == false {
+		clusterIP = "None"
+	}
+
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
+			Labels: map[string]string{
+				"app": "mock",
+			},
+			Annotations: map[string]string{
+				"service.alpha.kubernetes.io/tolerate-unready-endpoints": "true",
+			},
 		},
 		Spec: corev1.ServiceSpec{
-			Type: corev1.ServiceTypeClusterIP,
+			Type:      corev1.ServiceTypeClusterIP,
+			ClusterIP: clusterIP,
 			Selector: map[string]string{
 				"name": name,
 			},

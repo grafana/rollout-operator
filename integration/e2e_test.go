@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -373,9 +374,11 @@ func TestPrepareDownscale_CanDownscale(t *testing.T) {
 		mock.Spec.Replicas = ptr[int32](2)
 		mock.ObjectMeta.Labels[admission.PrepareDownscaleLabelKey] = admission.PrepareDownscaleLabelValue
 		mock.ObjectMeta.Annotations[admission.PrepareDownscalePathAnnotationKey] = "/prepare-shutdown-pass"
-		mock.ObjectMeta.Annotations[admission.PrepareDownscalePortAnnotationKey] = "443"
+		mock.ObjectMeta.Annotations[admission.PrepareDownscalePortAnnotationKey] = "8080"
 		requireCreateStatefulSet(ctx, t, api, mock)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+		requireCreateService(ctx, t, api, corev1.NamespaceDefault, "mock")
+		time.Sleep(10 * time.Second)
 	}
 
 	{
