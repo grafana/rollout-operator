@@ -244,6 +244,9 @@ Upscaling requests or requests that don't change the number of replicas are appr
 For downscaling requests the following labels have to be present on the object:
 
 - `grafana.com/prepare-downscale`
+
+The following annotations also have to be present:
+
 - `grafana.com/prepare-downscale-http-path`
 - `grafana.com/prepare-downscale-http-port`
 

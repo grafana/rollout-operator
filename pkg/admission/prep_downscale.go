@@ -19,12 +19,12 @@ import (
 )
 
 const (
-	PrepareDownscalePathKey     = "grafana.com/prepare-downscale-http-path"
-	PrepareDownscalePortKey     = "grafana.com/prepare-downscale-http-port"
-	PrepareDownscaleLabelKey    = "grafana.com/prepare-downscale"
-	PrepareDownscaleLabelValue  = "true"
-	PrepareDownscaleWebhookPath = "/admission/prepare-downscale"
-	RolloutGroupLabelKey        = "rollout-group"
+	PrepareDownscalePathAnnotationKey = "grafana.com/prepare-downscale-http-path"
+	PrepareDownscalePortAnnotationKey = "grafana.com/prepare-downscale-http-port"
+	PrepareDownscaleLabelKey          = "grafana.com/prepare-downscale"
+	PrepareDownscaleLabelValue        = "true"
+	PrepareDownscaleWebhookPath       = "/admission/prepare-downscale"
+	RolloutGroupLabelKey              = "rollout-group"
 )
 
 func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
@@ -102,26 +102,43 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		return allowWarn(logger, fmt.Sprintf("unsupported type %T, allowing the change", o))
 	}
 
+	var annotations map[string]string
+	switch o := oldObj.(type) {
+	case *appsv1.Deployment:
+		annotations = o.Annotations
+	case *appsv1.StatefulSet:
+		annotations = o.Annotations
+	case *appsv1.ReplicaSet:
+		annotations = o.Annotations
+	case *autoscalingv1.Scale:
+		annotations, err = getResourceAnnotations(ctx, ar, api)
+		if err != nil {
+			return allowBecauseCannotGetResource(ar, logger, err)
+		}
+	default:
+		return allowWarn(logger, fmt.Sprintf("unsupported type %T, allowing the change", o))
+	}
+
 	if lbls[PrepareDownscaleLabelKey] != PrepareDownscaleLabelValue {
 		// Not labeled, nothing to do.
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
-	port := lbls[PrepareDownscalePortKey]
+	port := annotations[PrepareDownscalePortAnnotationKey]
 	if port == "" {
-		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepareDownscalePortKey))
+		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", PrepareDownscalePortAnnotationKey))
 		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepareDownscalePortKey,
+			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v annotation is not set or empty.",
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepareDownscalePortAnnotationKey,
 		)
 	}
 
-	path := lbls[PrepareDownscalePathKey]
+	path := annotations[PrepareDownscalePathAnnotationKey]
 	if path == "" {
-		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v label is not set or empty", PrepareDownscalePathKey))
+		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", PrepareDownscalePathAnnotationKey))
 		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v label is not set or empty.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepareDownscalePathKey,
+			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v annotation is not set or empty.",
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepareDownscalePathAnnotationKey,
 		)
 	}
 
@@ -233,4 +250,16 @@ func deny(msg string, args ...any) *v1.AdmissionResponse {
 			Message: fmt.Sprintf(msg, args...),
 		},
 	}
+}
+
+func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kubernetes.Interface) (map[string]string, error) {
+	switch ar.Request.Resource.Resource {
+	case "statefulsets":
+		obj, err := api.AppsV1().StatefulSets(ar.Request.Namespace).Get(ctx, ar.Request.Name, metav1.GetOptions{})
+		if err != nil {
+				return nil, err
+		}
+		return obj.Annotations, nil
+	}
+	return nil, fmt.Errorf("unsupported resource %s", ar.Request.Resource.Resource)
 }
