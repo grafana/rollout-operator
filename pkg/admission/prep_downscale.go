@@ -256,7 +256,10 @@ func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kube
 	switch ar.Request.Resource.Resource {
 	case "statefulsets":
 		obj, err := api.AppsV1().StatefulSets(ar.Request.Namespace).Get(ctx, ar.Request.Name, metav1.GetOptions{})
-		return obj.Annotations, err
+		if err != nil {
+				return nil, err
+		}
+		return obj.Annotations, nil
 	}
 	return nil, fmt.Errorf("unsupported resource %s", ar.Request.Resource.Resource)
 }
