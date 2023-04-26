@@ -4,17 +4,20 @@ package integration
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/integration/k3t"
 	"github.com/grafana/rollout-operator/pkg/admission"
 )
 
-/*
 func TestRolloutHappyCase(t *testing.T) {
 	ctx := context.Background()
 
@@ -347,8 +350,6 @@ func getCertificateExpiration(t *testing.T, secret *corev1.Secret) time.Time {
 	return c.NotAfter
 }
 
-*/
-
 func TestPrepareDownscale_CanDownscale(t *testing.T) {
 	ctx := context.Background()
 
@@ -371,13 +372,13 @@ func TestPrepareDownscale_CanDownscale(t *testing.T) {
 	{
 		t.Log("Create the service.")
 		requireCreateService(ctx, t, api, corev1.NamespaceDefault, "mock")
-		t.Log("Create the statefulset with two replicas.")
-		mock.Spec.Replicas = ptr[int32](2)
+		t.Log("Create the statefulset with three replicas.")
+		mock.Spec.Replicas = ptr[int32](3)
 		mock.ObjectMeta.Labels[admission.PrepareDownscaleLabelKey] = admission.PrepareDownscaleLabelValue
 		mock.ObjectMeta.Annotations[admission.PrepareDownscalePathAnnotationKey] = "/prepare-shutdown-pass"
 		mock.ObjectMeta.Annotations[admission.PrepareDownscalePortAnnotationKey] = "8080"
 		requireCreateStatefulSet(ctx, t, api, mock)
-		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 3)
 	}
 
 	{
@@ -388,7 +389,7 @@ func TestPrepareDownscale_CanDownscale(t *testing.T) {
 	}
 
 	{
-		t.Log("Scale up and make it have two replicas again.")
+		t.Log("Scale up and make it have two replicas.")
 		mock.Spec.Replicas = ptr[int32](2)
 		requireUpdateStatefulSet(ctx, t, api, mock)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
