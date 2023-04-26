@@ -5,7 +5,6 @@ package integration
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -370,15 +369,15 @@ func TestPrepareDownscale_CanDownscale(t *testing.T) {
 
 	mock := mockServiceStatefulSet("mock", "1", true)
 	{
-		t.Log("Create the service with two replicas.")
+		t.Log("Create the service.")
+		requireCreateService(ctx, t, api, corev1.NamespaceDefault, "mock")
+		t.Log("Create the statefulset with two replicas.")
 		mock.Spec.Replicas = ptr[int32](2)
 		mock.ObjectMeta.Labels[admission.PrepareDownscaleLabelKey] = admission.PrepareDownscaleLabelValue
 		mock.ObjectMeta.Annotations[admission.PrepareDownscalePathAnnotationKey] = "/prepare-shutdown-pass"
 		mock.ObjectMeta.Annotations[admission.PrepareDownscalePortAnnotationKey] = "8080"
 		requireCreateStatefulSet(ctx, t, api, mock)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
-		requireCreateService(ctx, t, api, corev1.NamespaceDefault, "mock")
-		time.Sleep(10 * time.Second)
 	}
 
 	{
@@ -396,9 +395,12 @@ func TestPrepareDownscale_CanDownscale(t *testing.T) {
 	}
 
 	{
-		t.Log("Scale down using /scale subresource, we should be able as it's not labeled with grafana/no-downscale.")
-		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, false)
-		require.NoError(t, err)
-		requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
+		t.Log("Failure in prepare-shutdown on node.")
+		mock.ObjectMeta.Annotations[admission.PrepareDownscalePathAnnotationKey] = "/prepare-shutdown-fail"
+		requireUpdateStatefulSet(ctx, t, api, mock)
+		t.Log("Try to scale down again. This should fail")
+		mock.Spec.Replicas = ptr[int32](1)
+		err := updateStatefulSet(ctx, t, api, mock)
+		require.Error(t, err, "Updating the stateful set didn't fail as expected")
 	}
 }

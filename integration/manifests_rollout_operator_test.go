@@ -174,7 +174,7 @@ func rolloutOperatorRole() *rbacv1.Role {
 			{
 				APIGroups: []string{"apps"},
 				Resources: []string{"statefulsets"},
-				Verbs:     []string{"list", "get", "watch"},
+				Verbs:     []string{"list", "get", "watch", "patch"},
 			},
 			{
 				APIGroups: []string{"apps"},

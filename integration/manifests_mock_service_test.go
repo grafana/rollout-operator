@@ -126,6 +126,7 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 					"name": name,
 				},
 			},
+			ServiceName: "mock",
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: name,
