@@ -379,6 +379,8 @@ func TestPrepareDownscale_CanDownscale(t *testing.T) {
 		mock.ObjectMeta.Annotations[admission.PrepareDownscalePortAnnotationKey] = "8080"
 		requireCreateStatefulSet(ctx, t, api, mock)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 3)
+		// TODO: replace this with a check that the DNS records for the mock-0, mock-1 and mock-2 pods are ready
+		time.Sleep(1 * time.Second)
 	}
 
 	{
