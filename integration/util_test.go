@@ -18,11 +18,6 @@ import (
 	"github.com/grafana/rollout-operator/integration/k3t"
 )
 
-const (
-	PASS_PATH = "/prepare-shutdown-pass"
-	FAIL_PATH = "/prepare-shutdown-fail"
-)
-
 // requireEventuallyPod runs the tests provided on the pod retrieved from the API.
 // Once a test succeeds, it's not evaluated again.
 func requireEventuallyPod(t *testing.T, api *kubernetes.Clientset, ctx context.Context, podName string, tests ...func(t *testing.T, pod *corev1.Pod) bool) {
