@@ -102,13 +102,12 @@ func NewCluster(ctx context.Context, t *testing.T, opts ...Option) Cluster {
 	_, err = k3dclient.ClusterGet(ctx, runtimes.SelectedRuntime, &clusterConfig.Cluster)
 	require.Errorf(t, err, "Cluster %s already exists, remove it running `k3d cluster delete %s`, or by just removing the corresponding docker containers.", clusterConfig.Name, clusterConfig.Name)
 
-	/*
-		// Prepare cleanup.
-		t.Cleanup(func() {
-			err := k3dclient.ClusterDelete(ctx, runtimes.SelectedRuntime, &clusterConfig.Cluster, k3d.ClusterDeleteOpts{SkipRegistryCheck: true})
-			require.NoError(t, err, "Can't delete cluster on cleanup.")
-		})
-	*/
+	// Prepare cleanup.
+	t.Cleanup(func() {
+		err := k3dclient.ClusterDelete(ctx, runtimes.SelectedRuntime, &clusterConfig.Cluster, k3d.ClusterDeleteOpts{SkipRegistryCheck: true})
+		require.NoError(t, err, "Can't delete cluster on cleanup.")
+	})
+
 	// Create the cluster.
 	err = k3dclient.ClusterRun(ctx, runtimes.SelectedRuntime, clusterConfig)
 	if err != nil && strings.Contains(err.Error(), "could not find an available, non-overlapping IPv4 address pool among the defaults to assign to the network") {
