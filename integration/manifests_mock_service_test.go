@@ -50,12 +50,6 @@ func mockServiceServiceHelper(name string, clusterIPRequired bool) *corev1.Servi
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
-			Labels: map[string]string{
-				"app": "mock",
-			},
-			Annotations: map[string]string{
-				"service.alpha.kubernetes.io/tolerate-unready-endpoints": "true",
-			},
 		},
 		Spec: corev1.ServiceSpec{
 			Type:      corev1.ServiceTypeClusterIP,
