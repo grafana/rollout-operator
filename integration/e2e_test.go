@@ -379,8 +379,8 @@ func TestPrepareDownscale_CanDownscale(t *testing.T) {
 		mock.ObjectMeta.Annotations[admission.PrepareDownscalePortAnnotationKey] = "8080"
 		requireCreateStatefulSet(ctx, t, api, mock)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 3)
-		// TODO: replace this with a check that the DNS records for the mock-0, mock-1 and mock-2 pods are ready
-		time.Sleep(1 * time.Second)
+		// TODO: find a good way to wait until the DNS propagation is done for the pods
+		time.Sleep(2 * time.Second)
 	}
 
 	{
@@ -405,5 +405,6 @@ func TestPrepareDownscale_CanDownscale(t *testing.T) {
 		mock.Spec.Replicas = ptr[int32](1)
 		err := updateStatefulSet(ctx, t, api, mock)
 		require.Error(t, err, "Updating the stateful set didn't fail as expected")
+		require.Contains(t, err.Error(), `admission webhook "prepare-downscale-default.grafana.com" denied the request: downscale of statefulsets/mock in default from 2 to 1 replicas is not allowed because one or more pods failed to prepare for shutdown`)
 	}
 }
