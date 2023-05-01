@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.5.0
+
 * [ENHANCEMENT] Add an `/admission/prepare-downscale` mutating admission webhook that prepares pods for shutdown before downscaling. #47 #52
 * [ENHANCEMENT] Update Go to `1.20.3`. #48
 * [ENHANCEMENT] Updated dependencies, including: #49
