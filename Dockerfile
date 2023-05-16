@@ -7,7 +7,7 @@ COPY . /src/rollout-operator
 WORKDIR /src/rollout-operator
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make
 
-FROM alpine:3.17
+FROM alpine:3.18
 RUN apk add --no-cache ca-certificates
 
 COPY --from=build /src/rollout-operator/rollout-operator /bin/rollout-operator
