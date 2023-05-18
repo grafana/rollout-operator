@@ -54,7 +54,7 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface,
 			continue
 		}
 
-		downscaleTime, err := time.Parse(time.RFC3339, lastDownscaleAnnotation)
+		lastDownscale, err := time.Parse(time.RFC3339, lastDownscaleAnnotation)
 		if err != nil {
 			return nil, fmt.Errorf("can't parse %v annotation of %s: %w", LastDownscaleAnnotationKey, sts.Name, err)
 		}
@@ -65,16 +65,16 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface,
 			continue
 		}
 
-		timeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscaleLabel)
+		minTimeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscaleLabel)
 		if err != nil {
 			return nil, fmt.Errorf("can't parse %v label of %s: %w", MinTimeBetweenZonesDownscaleLabelKey, sts.Name, err)
 		}
 
-		if downscaleTime.Add(timeBetweenDownscale).After(time.Now()) {
+		if time.Since(lastDownscale) < minTimeBetweenDownscale {
 			s := statefulSet{
 				name:              sts.Name,
-				waitTime:          timeBetweenDownscale,
-				lastDownscaleTime: downscaleTime,
+				waitTime:          minTimeBetweenDownscale,
+				lastDownscaleTime: lastDownscale,
 			}
 			return &s, nil
 		}
