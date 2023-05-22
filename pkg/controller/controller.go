@@ -201,6 +201,10 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	var reconcileErrs error
 	for groupName, groupSets := range groups {
 		// TODO: ???
+
+		// Sort StatefulSets to provide a deterministic behaviour.
+		sortStatefulSets(sets)
+
 		if err := c.reconcileStatefulSetsGroupReplicas(ctx, groupName, groupSets); err != nil {
 			//reconcileErrs = multierror.Append(reconcileErrs, err)
 			level.Warn(c.logger).Log("msg", "ignoring error from setting replicas", "group", groupName, "err", err)
@@ -260,28 +264,32 @@ func minimumTimeHasPassed(follower *v1.StatefulSet, leader *v1.StatefulSet, logg
 		return false, fmt.Errorf("missing label %s on follower", admission.MinTimeBetweenZonesDownscaleLabelKey)
 	}
 
-	minTime, err := time.ParseDuration(rawValue)
+	minTimeSinceDownscale, err := time.ParseDuration(rawValue)
 	if err != nil {
 		return false, fmt.Errorf("unable to parse label %s value on follower: %w", admission.MinTimeBetweenZonesDownscaleLabelKey, err)
 	}
 
+	timeSinceDownscale := time.Since(leaderLastDownscale)
+
 	level.Debug(logger).Log(
 		"msg", "determined last downscale time",
-		"min_time", minTime.String(),
 		"last_downscale", leaderLastDownscale.String(),
+		"time_since_downscale", timeSinceDownscale.String(),
+		"min_time_since_downscale", minTimeSinceDownscale.String(),
 	)
 
-	return time.Since(leaderLastDownscale) > minTime, nil
+	return timeSinceDownscale > minTimeSinceDownscale, nil
 
 }
 
 func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Context, groupName string, sets []*v1.StatefulSet) error {
-	sortStatefulSets(sets)
+	// TODO: Extract all this to a method that returns some "here's what to do" struct and have
+	//  all the mutation take place there. Then we can actually write some unit tests. Maybe worth
+	//  using the same logic for `minimumTimeHasPassed` and the prepare-downscale annotation.
 
 	for _, sts := range sets {
 		leader := getLeaderForStatefulSet(sts, sets)
 		if leader == nil {
-			// TODO: Log? This would be pretty verbose
 			continue
 		}
 
@@ -289,12 +297,18 @@ func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Conte
 		level.Debug(logger).Log("msg", "found leader statefulset")
 
 		if *leader.Spec.Replicas > *sts.Spec.Replicas {
-			// TODO: actually implement this
 			level.Debug(logger).Log(
-				"msg", "leader has more replicas than follower, would scale up",
+				"msg", "leader has more replicas than follower, scaling up",
 				"follower_replicas", *sts.Spec.Replicas,
 				"leader_replicas", *leader.Spec.Replicas,
 			)
+
+			stsCopy := sts.DeepCopy()
+			stsCopy.Spec.Replicas = leader.Spec.Replicas
+			_, err := c.kubeClient.AppsV1().StatefulSets(c.namespace).Update(ctx, stsCopy, metav1.UpdateOptions{})
+			if err != nil {
+				return err
+			}
 		} else if *leader.Spec.Replicas < *sts.Spec.Replicas {
 			level.Debug(logger).Log(
 				"msg", "leader has fewer replicas than follower, checking if we can scale down",
@@ -308,19 +322,18 @@ func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Conte
 			}
 
 			if minTimeElapsed {
-				// TODO: actually implement this
-				level.Debug(logger).Log("msg", "at least minimum amount of time has elapsed, would scale up")
-
-				// Return early after scaling down a single statefulset. We do this because we need to be sure
-				// the last-downscaled annotation on each statefulset object is up-to-date when we look at it
-				// to decide if we can scale down.
-				return nil
+				level.Debug(logger).Log("msg", "at least minimum amount of time has elapsed, scaling down")
+				stsCopy := sts.DeepCopy()
+				stsCopy.Spec.Replicas = leader.Spec.Replicas
+				_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Update(ctx, stsCopy, metav1.UpdateOptions{})
+				// Return early no matter what after scaling down a single statefulset. We do this because we
+				// need to be sure the last-downscaled annotation on each statefulset object is up-to-date when
+				// we look at it to decide if we can scale down.
+				return err
 			} else {
-				level.Debug(logger).Log("msg", "minimum amount of time has not elapsed, waiting to scale up")
+				level.Debug(logger).Log("msg", "minimum amount of time has not elapsed, waiting to scale down")
 			}
-		} /* else {
-			// TODO: Log this?
-		}*/
+		}
 	}
 
 	return nil
@@ -342,9 +355,6 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 			lastSuccess.SetToCurrentTime()
 		}
 	}()
-
-	// Sort StatefulSets to provide a deterministic behaviour.
-	sortStatefulSets(sets)
 
 	// Ensure all StatefulSets have OnDelete update strategy. If not, then we're not able to guarantee
 	// that will be updated only 1 StatefulSet at a time.
