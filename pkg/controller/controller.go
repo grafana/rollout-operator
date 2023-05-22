@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listersv1 "k8s.io/client-go/listers/apps/v1"
@@ -198,6 +199,10 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	groups := groupStatefulSetsByLabel(sets, RolloutGroupLabel)
 	var reconcileErrs error
 	for groupName, groupSets := range groups {
+		if err := c.reconcileStatefulSetsGroupReplicas(ctx, groupName, groupSets); err != nil {
+			reconcileErrs = multierror.Append(reconcileErrs, err)
+		}
+
 		if err := c.reconcileStatefulSetsGroup(ctx, groupName, groupSets); err != nil {
 			reconcileErrs = multierror.Append(reconcileErrs, err)
 		}
@@ -210,6 +215,52 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	c.deleteMetricsForDecommissionedGroups(groups)
 
 	level.Info(c.logger).Log("msg", "reconcile done")
+	return nil
+}
+
+func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Context, groupName string, sets []*v1.StatefulSet) error {
+	// Sort StatefulSets to provide a deterministic behaviour.
+	sortStatefulSets(sets)
+
+	for _, sts := range sets {
+		res, err := reconcileStsReplicas(groupName, sts, sets, c.logger)
+		if err != nil {
+			return err
+		}
+
+		switch res.action {
+		case ScaleUp:
+			level.Info(c.logger).Log(
+				"msg", "scaling up statefulset to match leader",
+				"group", groupName,
+				"name", sts.GetName(),
+				"replicas", res.replicas,
+			)
+
+			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, res.replicas)
+			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+			if err != nil {
+				return err
+			}
+		case ScaleDown:
+			level.Info(c.logger).Log(
+				"msg", "scaling down statefulset to match leader",
+				"group", groupName,
+				"name", sts.GetName(),
+				"replicas", res.replicas,
+			)
+
+			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, res.replicas)
+			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+			// Return early no matter what after scaling down a single statefulset. We do this because we
+			// need to be sure the last-downscaled annotation on each statefulset object is up-to-date when
+			// we look at it to decide if we can scale down.
+			return err
+		case NoChange:
+			// Nothing to do. Don't log because this will be the result most of the time.
+		}
+	}
+
 	return nil
 }
 
