@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	RolloutGroupLabel               = "rollout-group"
-	RolloutMaxUnavailableAnnotation = "rollout-max-unavailable"
+	RolloutGroupLabel                = "rollout-group"
+	RolloutMaxUnavailableAnnotation  = "rollout-max-unavailable"
+	RolloutDownscaleLeaderAnnotation = "grafana.com/rollout-downscale-leader"
 )
 
 // getMaxUnavailableForStatefulSet returns the number of max unavailable pods configured

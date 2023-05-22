@@ -23,6 +23,8 @@ import (
 	listersv1 "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/grafana/rollout-operator/pkg/admission"
 )
 
 const (
@@ -198,6 +200,12 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	groups := groupStatefulSetsByLabel(sets, RolloutGroupLabel)
 	var reconcileErrs error
 	for groupName, groupSets := range groups {
+		// TODO: ???
+		if err := c.reconcileStatefulSetsGroupReplicas(ctx, groupName, groupSets); err != nil {
+			//reconcileErrs = multierror.Append(reconcileErrs, err)
+			level.Warn(c.logger).Log("msg", "ignoring error from setting replicas", "group", groupName, "err", err)
+		}
+
 		if err := c.reconcileStatefulSetsGroup(ctx, groupName, groupSets); err != nil {
 			reconcileErrs = multierror.Append(reconcileErrs, err)
 		}
@@ -210,6 +218,111 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	c.deleteMetricsForDecommissionedGroups(groups)
 
 	level.Info(c.logger).Log("msg", "reconcile done")
+	return nil
+}
+
+func getLeaderForStatefulSet(sts *v1.StatefulSet, sets []*v1.StatefulSet) *v1.StatefulSet {
+	annotations := sts.GetAnnotations()
+	leaderName, ok := annotations[RolloutDownscaleLeaderAnnotation]
+	if !ok {
+		return nil
+	}
+
+	for _, set := range sets {
+		if set.GetName() == leaderName {
+			return set
+		}
+	}
+
+	return nil
+}
+
+func minimumTimeHasPassed(follower *v1.StatefulSet, leader *v1.StatefulSet, logger log.Logger) (bool, error) {
+
+	// TODO: Do we need to check all statefulsets here? Same logic as the webhook?
+
+	leaderAnnotations := leader.GetAnnotations()
+	rawValue, ok := leaderAnnotations[admission.LastDownscaleAnnotationKey]
+	if !ok {
+		// No last downscale for the leader. Should be fine to adjust the follower
+		// replica count to match.
+		return true, nil
+	}
+
+	leaderLastDownscale, err := time.Parse(time.RFC3339, rawValue)
+	if err != nil {
+		return false, fmt.Errorf("unable to parse annotation %s value on leader: %w", admission.LastDownscaleAnnotationKey, err)
+	}
+
+	followerLabels := follower.GetLabels()
+	rawValue, ok = followerLabels[admission.MinTimeBetweenZonesDownscaleLabelKey]
+	if !ok {
+		return false, fmt.Errorf("missing label %s on follower", admission.MinTimeBetweenZonesDownscaleLabelKey)
+	}
+
+	minTime, err := time.ParseDuration(rawValue)
+	if err != nil {
+		return false, fmt.Errorf("unable to parse label %s value on follower: %w", admission.MinTimeBetweenZonesDownscaleLabelKey, err)
+	}
+
+	level.Debug(logger).Log(
+		"msg", "determined last downscale time",
+		"min_time", minTime.String(),
+		"last_downscale", leaderLastDownscale.String(),
+	)
+
+	return time.Since(leaderLastDownscale) > minTime, nil
+
+}
+
+func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Context, groupName string, sets []*v1.StatefulSet) error {
+	sortStatefulSets(sets)
+
+	for _, sts := range sets {
+		leader := getLeaderForStatefulSet(sts, sets)
+		if leader == nil {
+			// TODO: Log? This would be pretty verbose
+			continue
+		}
+
+		logger := log.With(c.logger, "group", groupName, "follower", sts.GetName(), "leader", leader.GetName())
+		level.Debug(logger).Log("msg", "found leader statefulset")
+
+		if *leader.Spec.Replicas > *sts.Spec.Replicas {
+			// TODO: actually implement this
+			level.Debug(logger).Log(
+				"msg", "leader has more replicas than follower, would scale up",
+				"follower_replicas", *sts.Spec.Replicas,
+				"leader_replicas", *leader.Spec.Replicas,
+			)
+		} else if *leader.Spec.Replicas < *sts.Spec.Replicas {
+			level.Debug(logger).Log(
+				"msg", "leader has fewer replicas than follower, checking if we can scale down",
+				"follower_replicas", *sts.Spec.Replicas,
+				"leader_replicas", *leader.Spec.Replicas,
+			)
+
+			minTimeElapsed, err := minimumTimeHasPassed(sts, leader, logger)
+			if err != nil {
+				return err
+			}
+
+			if minTimeElapsed {
+				// TODO: actually implement this
+				level.Debug(logger).Log("msg", "at least minimum amount of time has elapsed, would scale up")
+
+				// Return early after scaling down a single statefulset. We do this because we need to be sure
+				// the last-downscaled annotation on each statefulset object is up-to-date when we look at it
+				// to decide if we can scale down.
+				return nil
+			} else {
+				level.Debug(logger).Log("msg", "minimum amount of time has not elapsed, waiting to scale up")
+			}
+		} else {
+			// TODO: Log this?
+		}
+	}
+
 	return nil
 }
 
