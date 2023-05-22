@@ -318,9 +318,9 @@ func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Conte
 			} else {
 				level.Debug(logger).Log("msg", "minimum amount of time has not elapsed, waiting to scale up")
 			}
-		} else {
+		} /* else {
 			// TODO: Log this?
-		}
+		}*/
 	}
 
 	return nil
