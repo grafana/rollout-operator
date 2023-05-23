@@ -414,6 +414,8 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 }
 
 func mockStatefulSet(name string, overrides ...func(sts *v1.StatefulSet)) *v1.StatefulSet {
+	replicas := int32(3)
+
 	sts := &v1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -426,6 +428,7 @@ func mockStatefulSet(name string, overrides ...func(sts *v1.StatefulSet)) *v1.St
 			},
 		},
 		Spec: v1.StatefulSetSpec{
+			Replicas: &replicas,
 			UpdateStrategy: v1.StatefulSetUpdateStrategy{
 				Type: v1.OnDeleteStatefulSetStrategyType,
 			},
@@ -492,7 +495,28 @@ func withPrevRevision() func(sts *v1.StatefulSet) {
 
 func withReplicas(totalReplicas, readyReplicas int32) func(sts *v1.StatefulSet) {
 	return func(sts *v1.StatefulSet) {
+		sts.Spec.Replicas = &totalReplicas
 		sts.Status.Replicas = totalReplicas
 		sts.Status.ReadyReplicas = readyReplicas
+	}
+}
+
+func withLabels(labels map[string]string) func(sts *v1.StatefulSet) {
+	return func(sts *v1.StatefulSet) {
+		existing := sts.GetLabels()
+		for k, v := range labels {
+			existing[k] = v
+		}
+		sts.SetLabels(labels)
+	}
+}
+
+func withAnnotations(annotations map[string]string) func(sts *v1.StatefulSet) {
+	return func(sts *v1.StatefulSet) {
+		existing := sts.GetAnnotations()
+		for k, v := range annotations {
+			existing[k] = v
+		}
+		sts.SetAnnotations(existing)
 	}
 }

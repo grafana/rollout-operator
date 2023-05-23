@@ -223,56 +223,45 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 }
 
 func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Context, groupName string, sets []*v1.StatefulSet) error {
-	// TODO: Extract all this to a method that returns some "here's what to do" struct and have
-	//  all the mutation take place there. Then we can actually write some unit tests. Maybe worth
-	//  using the same logic for `minimumTimeHasPassed` and the prepare-downscale annotation.
 	// Sort StatefulSets to provide a deterministic behaviour.
 	sortStatefulSets(sets)
 
 	for _, sts := range sets {
-		leader := getLeaderForStatefulSet(sts, sets)
-		if leader == nil {
-			continue
+		res, err := reconcileStsReplicas(groupName, sts, sets, c.logger)
+		if err != nil {
+			return err
 		}
 
-		logger := log.With(c.logger, "group", groupName, "follower", sts.GetName(), "leader", leader.GetName())
-		level.Debug(logger).Log("msg", "found leader statefulset")
-
-		if *leader.Spec.Replicas > *sts.Spec.Replicas {
-			level.Debug(logger).Log(
-				"msg", "leader has more replicas than follower, scaling up",
-				"follower_replicas", *sts.Spec.Replicas,
-				"leader_replicas", *leader.Spec.Replicas,
+		switch res.action {
+		case ScaleUp:
+			level.Debug(c.logger).Log(
+				"msg", "scaling up statefulset to match leader",
+				"group", groupName,
+				"name", sts.GetName(),
+				"replicas", res.replicas,
 			)
 
-			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, *leader.Spec.Replicas)
-			_, err := c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, res.replicas)
+			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
 			if err != nil {
 				return err
 			}
-		} else if *leader.Spec.Replicas < *sts.Spec.Replicas {
-			level.Debug(logger).Log(
-				"msg", "leader has fewer replicas than follower, checking if we can scale down",
-				"follower_replicas", *sts.Spec.Replicas,
-				"leader_replicas", *leader.Spec.Replicas,
+		case ScaleDown:
+			level.Debug(c.logger).Log(
+				"msg", "scaling down statefulset to match leader",
+				"group", groupName,
+				"name", sts.GetName(),
+				"replicas", res.replicas,
 			)
 
-			minTimeElapsed, err := minimumTimeHasPassed(sts, leader, logger)
-			if err != nil {
-				return err
-			}
-
-			if minTimeElapsed {
-				level.Debug(logger).Log("msg", "at least minimum amount of time has elapsed, scaling down")
-				patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, *leader.Spec.Replicas)
-				_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
-				// Return early no matter what after scaling down a single statefulset. We do this because we
-				// need to be sure the last-downscaled annotation on each statefulset object is up-to-date when
-				// we look at it to decide if we can scale down.
-				return err
-			} else {
-				level.Debug(logger).Log("msg", "minimum amount of time has not elapsed, waiting to scale down")
-			}
+			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, res.replicas)
+			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+			// Return early no matter what after scaling down a single statefulset. We do this because we
+			// need to be sure the last-downscaled annotation on each statefulset object is up-to-date when
+			// we look at it to decide if we can scale down.
+			return err
+		case NoChange:
+			// Nothing to do. Don't log because this will be the result most of the time.
 		}
 	}
 
