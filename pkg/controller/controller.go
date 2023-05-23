@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+
 	"strings"
 	"time"
 
@@ -18,13 +19,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listersv1 "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-
-	"github.com/grafana/rollout-operator/pkg/admission"
 )
 
 const (
@@ -222,63 +222,6 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	return nil
 }
 
-func getLeaderForStatefulSet(sts *v1.StatefulSet, sets []*v1.StatefulSet) *v1.StatefulSet {
-	annotations := sts.GetAnnotations()
-	leaderName, ok := annotations[RolloutDownscaleLeaderAnnotation]
-	if !ok {
-		return nil
-	}
-
-	for _, set := range sets {
-		if set.GetName() == leaderName {
-			return set
-		}
-	}
-
-	return nil
-}
-
-func minimumTimeHasPassed(follower *v1.StatefulSet, leader *v1.StatefulSet, logger log.Logger) (bool, error) {
-
-	// TODO: Do we need to check all statefulsets here? Same logic as the webhook?
-
-	leaderAnnotations := leader.GetAnnotations()
-	rawValue, ok := leaderAnnotations[admission.LastDownscaleAnnotationKey]
-	if !ok {
-		// No last downscale for the leader. Should be fine to adjust the follower
-		// replica count to match.
-		return true, nil
-	}
-
-	leaderLastDownscale, err := time.Parse(time.RFC3339, rawValue)
-	if err != nil {
-		return false, fmt.Errorf("unable to parse annotation %s value on leader: %w", admission.LastDownscaleAnnotationKey, err)
-	}
-
-	followerLabels := follower.GetLabels()
-	rawValue, ok = followerLabels[admission.MinTimeBetweenZonesDownscaleLabelKey]
-	if !ok {
-		return false, fmt.Errorf("missing label %s on follower", admission.MinTimeBetweenZonesDownscaleLabelKey)
-	}
-
-	minTimeSinceDownscale, err := time.ParseDuration(rawValue)
-	if err != nil {
-		return false, fmt.Errorf("unable to parse label %s value on follower: %w", admission.MinTimeBetweenZonesDownscaleLabelKey, err)
-	}
-
-	timeSinceDownscale := time.Since(leaderLastDownscale)
-
-	level.Debug(logger).Log(
-		"msg", "determined last downscale time",
-		"last_downscale", leaderLastDownscale.String(),
-		"time_since_downscale", timeSinceDownscale.String(),
-		"min_time_since_downscale", minTimeSinceDownscale.String(),
-	)
-
-	return timeSinceDownscale > minTimeSinceDownscale, nil
-
-}
-
 func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Context, groupName string, sets []*v1.StatefulSet) error {
 	// TODO: Extract all this to a method that returns some "here's what to do" struct and have
 	//  all the mutation take place there. Then we can actually write some unit tests. Maybe worth
@@ -302,9 +245,8 @@ func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Conte
 				"leader_replicas", *leader.Spec.Replicas,
 			)
 
-			stsCopy := sts.DeepCopy()
-			stsCopy.Spec.Replicas = leader.Spec.Replicas
-			_, err := c.kubeClient.AppsV1().StatefulSets(c.namespace).Update(ctx, stsCopy, metav1.UpdateOptions{})
+			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, *leader.Spec.Replicas)
+			_, err := c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
 			if err != nil {
 				return err
 			}
@@ -322,9 +264,8 @@ func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Conte
 
 			if minTimeElapsed {
 				level.Debug(logger).Log("msg", "at least minimum amount of time has elapsed, scaling down")
-				stsCopy := sts.DeepCopy()
-				stsCopy.Spec.Replicas = leader.Spec.Replicas
-				_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Update(ctx, stsCopy, metav1.UpdateOptions{})
+				patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, *leader.Spec.Replicas)
+				_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
 				// Return early no matter what after scaling down a single statefulset. We do this because we
 				// need to be sure the last-downscaled annotation on each statefulset object is up-to-date when
 				// we look at it to decide if we can scale down.
