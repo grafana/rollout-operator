@@ -202,9 +202,6 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	for groupName, groupSets := range groups {
 		// TODO: ???
 
-		// Sort StatefulSets to provide a deterministic behaviour.
-		sortStatefulSets(sets)
-
 		if err := c.reconcileStatefulSetsGroupReplicas(ctx, groupName, groupSets); err != nil {
 			//reconcileErrs = multierror.Append(reconcileErrs, err)
 			level.Warn(c.logger).Log("msg", "ignoring error from setting replicas", "group", groupName, "err", err)
@@ -286,6 +283,8 @@ func (c *RolloutController) reconcileStatefulSetsGroupReplicas(ctx context.Conte
 	// TODO: Extract all this to a method that returns some "here's what to do" struct and have
 	//  all the mutation take place there. Then we can actually write some unit tests. Maybe worth
 	//  using the same logic for `minimumTimeHasPassed` and the prepare-downscale annotation.
+	// Sort StatefulSets to provide a deterministic behaviour.
+	sortStatefulSets(sets)
 
 	for _, sts := range sets {
 		leader := getLeaderForStatefulSet(sts, sets)
@@ -355,6 +354,9 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 			lastSuccess.SetToCurrentTime()
 		}
 	}()
+
+	// Sort StatefulSets to provide a deterministic behaviour.
+	sortStatefulSets(sets)
 
 	// Ensure all StatefulSets have OnDelete update strategy. If not, then we're not able to guarantee
 	// that will be updated only 1 StatefulSet at a time.
