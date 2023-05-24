@@ -57,7 +57,7 @@ func reconcileStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulS
 		}
 
 		// Scale down is only allowed if the minimum amount of time since the
-		// last scale down by a statefulset's designated leader has elapsed.
+		// last scale down by any statefulset in this group has elapsed.
 		if minTimeElapsed {
 			return replicaChanges{action: ScaleDown, replicas: leaderReplicas}, nil
 		}

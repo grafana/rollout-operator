@@ -1,12 +1,14 @@
 package controller
 
 import (
-	"github.com/go-kit/log"
-	"github.com/grafana/rollout-operator/pkg/admission"
-	"github.com/stretchr/testify/require"
-	v1 "k8s.io/api/apps/v1"
 	"testing"
 	"time"
+
+	"github.com/go-kit/log"
+	"github.com/stretchr/testify/require"
+	v1 "k8s.io/api/apps/v1"
+
+	"github.com/grafana/rollout-operator/pkg/admission"
 )
 
 func TestGetMostRecentDownscale(t *testing.T) {
