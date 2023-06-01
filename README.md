@@ -55,7 +55,7 @@ This can be useful for automating the tedious scaling of stateful services like 
     - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
     - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
   - Annotations:
-    - `grafana.com/rollout-downscale-leader=ingester-zone-a` (zone `c` will follow zone `b`, after a delay) 
+    - `grafana.com/rollout-downscale-leader=ingester-zone-b` (zone `c` will follow zone `b`, after a delay)
     - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
     - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
 

@@ -36,6 +36,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		pods                []runtime.Object
 		expectedDeletedPods []string
 		expectedUpdatedSets []string
+		expectedPatchedSets []string
 		expectedErr         string
 	}{
 		"should return error if some StatefulSet don't have OnDelete update strategy": {
@@ -256,6 +257,57 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-b-2", testLastRevisionHash),
 			},
 		},
+		"should not update replicas within minimum time between downscales": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withReplicas(2, 2),
+					withLabels(map[string]string{
+						"grafana.com/min-time-between-zones-downscale": "12h",
+					}),
+					withAnnotations(map[string]string{
+						"grafana.com/last-downscale": time.Now().UTC().Add(-time.Hour).Format(time.RFC3339),
+					}),
+				),
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withPrevRevision(),
+					withLabels(map[string]string{
+						"grafana.com/min-time-between-zones-downscale": "12h",
+					}),
+					withAnnotations(map[string]string{
+						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
+		},
+		"should return early and not delete pods if StatefulSet replicas are adjusted": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withReplicas(2, 2), withLabels(map[string]string{
+					"grafana.com/min-time-between-zones-downscale": "12h",
+				})),
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withPrevRevision(),
+					withLabels(map[string]string{
+						"grafana.com/min-time-between-zones-downscale": "12h",
+					}),
+					withAnnotations(map[string]string{
+						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedPatchedSets: []string{"ingester-zone-b"},
+		},
 	}
 
 	for testName, testData := range tests {
@@ -273,7 +325,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				return false, nil, nil
 			})
 
-			// Inject an hook to track all updated StatefulSets.
+			// Inject a hook to track all updated StatefulSets.
 			var updatedSets []*v1.StatefulSet
 			var updatedStsNames []string
 
@@ -284,6 +336,19 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 					updatedSets = append(updatedSets, sts)
 					updatedStsNames = append(updatedStsNames, sts.Name)
+				}
+
+				return false, nil, nil
+			})
+
+			// Inject a hook to track all patched StatefulSets.
+			var patchedStsNames []string
+
+			kubeClient.PrependReactor("patch", "*", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
+				switch action.GetResource().Resource {
+				case "statefulsets":
+					name := action.(ktesting.PatchAction).GetName()
+					patchedStsNames = append(patchedStsNames, name)
 				}
 
 				return false, nil, nil
@@ -309,6 +374,10 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 			// Assert updated StatefulSets.
 			assert.Equal(t, testData.expectedUpdatedSets, updatedStsNames)
+
+			// Assert patched StatefulSets.
+			assert.Equal(t, testData.expectedPatchedSets, patchedStsNames)
+
 			for _, sts := range updatedSets {
 				// We expect the update hash to be stored as current revision when the StatefulSet is updated.
 				assert.Equal(t, testLastRevisionHash, sts.Status.CurrentRevision)
@@ -507,7 +576,7 @@ func withLabels(labels map[string]string) func(sts *v1.StatefulSet) {
 		for k, v := range labels {
 			existing[k] = v
 		}
-		sts.SetLabels(labels)
+		sts.SetLabels(existing)
 	}
 }
 

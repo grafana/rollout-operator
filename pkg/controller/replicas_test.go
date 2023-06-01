@@ -192,9 +192,9 @@ func TestReconcileStsReplicas(t *testing.T) {
 		sts2 := mockStatefulSet("test-zone-b")
 		sts3 := mockStatefulSet("test-zone-c")
 
-		result, err := reconcileStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
+		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
 		require.NoError(t, err)
-		require.Equal(t, NoChange, result.action)
+		require.Equal(t, int32(3), replicas)
 	})
 
 	t.Run("scale up", func(t *testing.T) {
@@ -206,10 +206,9 @@ func TestReconcileStsReplicas(t *testing.T) {
 			RolloutDownscaleLeaderAnnotation: "test-zone-b",
 		}))
 
-		result, err := reconcileStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
+		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
 		require.NoError(t, err)
-		require.Equal(t, ScaleUp, result.action)
-		require.Equal(t, int32(4), result.replicas)
+		require.Equal(t, int32(4), replicas)
 	})
 
 	t.Run("scale down min time error", func(t *testing.T) {
@@ -235,9 +234,9 @@ func TestReconcileStsReplicas(t *testing.T) {
 			admission.MinTimeBetweenZonesDownscaleLabelKey: "12h",
 		}))
 
-		result, err := reconcileStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
+		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
 		require.Error(t, err)
-		require.Equal(t, NoChange, result.action)
+		require.Equal(t, int32(3), replicas)
 	})
 
 	t.Run("scale down min time not passed", func(t *testing.T) {
@@ -263,9 +262,9 @@ func TestReconcileStsReplicas(t *testing.T) {
 			admission.MinTimeBetweenZonesDownscaleLabelKey: "12h",
 		}))
 
-		result, err := reconcileStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
+		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
 		require.NoError(t, err)
-		require.Equal(t, NoChange, result.action)
+		require.Equal(t, int32(3), replicas)
 	})
 
 	t.Run("scale down min time passed", func(t *testing.T) {
@@ -291,9 +290,8 @@ func TestReconcileStsReplicas(t *testing.T) {
 			admission.MinTimeBetweenZonesDownscaleLabelKey: "12h",
 		}))
 
-		result, err := reconcileStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
+		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
 		require.NoError(t, err)
-		require.Equal(t, ScaleDown, result.action)
-		require.Equal(t, int32(2), result.replicas)
+		require.Equal(t, int32(2), replicas)
 	})
 }

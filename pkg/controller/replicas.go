@@ -11,32 +11,17 @@ import (
 	"github.com/grafana/rollout-operator/pkg/admission"
 )
 
-type ScaleAction int
-
-const (
-	NoChange ScaleAction = iota
-	ScaleUp
-	ScaleDown
-)
-
-type replicaChanges struct {
-	action   ScaleAction
-	replicas int32
-}
-
-func reconcileStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulSet, logger log.Logger) (replicaChanges, error) {
+func desiredStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulSet, logger log.Logger) (int32, error) {
 	followerReplicas := *sts.Spec.Replicas
-	noReplicaChanges := replicaChanges{action: NoChange, replicas: followerReplicas}
-
 	leader, err := getLeaderForStatefulSet(sts, all)
 	if leader == nil || err != nil {
-		return noReplicaChanges, err
+		return followerReplicas, err
 	}
 
 	leaderReplicas := *leader.Spec.Replicas
 	if leaderReplicas > followerReplicas {
 		// Scale up is always allowed immediately
-		return replicaChanges{action: ScaleUp, replicas: leaderReplicas}, nil
+		return leaderReplicas, nil
 	}
 
 	if leaderReplicas < followerReplicas {
@@ -53,17 +38,17 @@ func reconcileStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulS
 
 		minTimeElapsed, err := minimumTimeHasElapsed(sts, all, logger)
 		if err != nil {
-			return noReplicaChanges, err
+			return followerReplicas, err
 		}
 
 		// Scale down is only allowed if the minimum amount of time since the
 		// last scale down by any statefulset in this group has elapsed.
 		if minTimeElapsed {
-			return replicaChanges{action: ScaleDown, replicas: leaderReplicas}, nil
+			return leaderReplicas, nil
 		}
 	}
 
-	return noReplicaChanges, nil
+	return followerReplicas, nil
 }
 
 // getLeaderForStatefulSet returns the stateful set that acts as the leader for the follower statefulset,
@@ -85,8 +70,8 @@ func getLeaderForStatefulSet(follower *v1.StatefulSet, sets []*v1.StatefulSet) (
 }
 
 // minimumTimeHasElapsed returns true if at least the configured time has elapsed since another statefulset
-// has been downscaled, false otherwise, or an error if the statefulset is not configuration correctly to
-// be downscaled.
+// has been downscaled, false otherwise, or an error if the statefulset is not configured correctly to be
+// downscaled.
 func minimumTimeHasElapsed(follower *v1.StatefulSet, all []*v1.StatefulSet, logger log.Logger) (bool, error) {
 	lastDownscale, err := getMostRecentDownscale(follower, all)
 	if err != nil {
