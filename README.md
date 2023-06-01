@@ -2,7 +2,7 @@
 
 This operator coordinates the rollout of pods between different StatefulSets within a specific namespace and can be used to manage multi-AZ deployments where pods running in each AZ are managed by a dedicated StatefulSet.
 
-## How it works
+## How updates work
 
 The operator coordinates the rollout of pods belonging to `StatefulSets` with the `rollout-group` label and updates strategy set to `OnDelete`. The label value should identify the group of StatefulSets to which the StatefulSet belongs to. Make sure the statefulset has a label `name` in its `spec.template`, the operator uses it to find pods belonging to it.
 
@@ -27,7 +27,37 @@ For each **rollout group**, the operator **guarantees**:
 1. The maximum number of not-Ready pods in a StatefulSet doesn't exceed the value configured in the `rollout-max-unavailable` annotation (if not set, it defaults to `1`). Values:
   - `<= 0`: invalid (will default to `1` and log a warning)
   - `1`: pods are rolled out sequentially
-  - `> 1`: pods are rolled out parallelly (honoring the configured number of max unavailable pods)
+  - `> 1`: pods are rolled out in parallel (honoring the configured number of max unavailable pods)
+
+## How scaling up and down works
+
+The operator can also optionally coordinate scaling up and down of `StatefulSets` that are part of the same `rollout-group` based on the `grafana.com/rollout-downscale-leader` annotation. When using this feature, the `grafana.com/min-time-between-zones-downscale` label must also be set on each `StatefulSet`.
+
+This can be useful for automating the tedious scaling of stateful services like Mimir ingesters. Making use of this feature requires adding a few annotations and labels to configure how it works. Examples for a multi-AZ ingester group are given below.
+
+- For `ingester-zone-a`, add the following:
+  - Labels:
+    - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
+    - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
+  - Annotations:
+    - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
+    - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
+- For `ingester-zone-b`, add the following:
+  - Labels:
+    - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
+    - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
+  - Annotations:
+    - `grafana.com/rollout-downscale-leader=ingester-zone-a` (zone `b` will follow zone `a`, after a delay) 
+    - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
+    - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
+- For `ingester-zone-c`, add the following:
+  - Labels:
+    - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
+    - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
+  - Annotations:
+    - `grafana.com/rollout-downscale-leader=ingester-zone-b` (zone `c` will follow zone `b`, after a delay)
+    - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
+    - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
 
 ## Operations
 
