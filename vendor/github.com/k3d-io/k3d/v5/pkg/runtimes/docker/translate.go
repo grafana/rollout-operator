@@ -89,6 +89,11 @@ func TranslateNodeToContainer(node *k3d.Node) (*NodeInDocker, error) {
 	/* Labels */
 	containerConfig.Labels = node.RuntimeLabels // has to include the role
 
+	/* Ulimits */
+	if len(node.RuntimeUlimits) > 0 {
+		hostConfig.Ulimits = node.RuntimeUlimits
+	}
+
 	/* Auto-Restart */
 	if node.Restart {
 		hostConfig.RestartPolicy = docker.RestartPolicy{
@@ -190,7 +195,6 @@ func TranslateContainerToNode(cont *types.Container) (*k3d.Node, error) {
 
 // TranslateContainerDetailsToNode translates a docker containerJSON object into a k3d node representation
 func TranslateContainerDetailsToNode(containerDetails types.ContainerJSON) (*k3d.Node, error) {
-
 	// first, make sure, that it's actually a k3d managed container by checking if it has all the default labels
 	for k, v := range k3d.DefaultRuntimeLabels {
 		l.Log().Tracef("TranslateContainerDetailsToNode: Checking for default object label %s=%s on container %s", k, v, containerDetails.Name)
