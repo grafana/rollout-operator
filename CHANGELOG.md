@@ -16,8 +16,6 @@
   * `k8s.io/apimachinery` from `v0.26.2` to `v0.27.2`
   * `k8s.io/client-go` from `v0.26.2` to `v0.27.2`
 
-
-
 ## v0.5.0
 
 * [ENHANCEMENT] Add an `/admission/prepare-downscale` mutating admission webhook that prepares pods for shutdown before downscaling. #47 #52
