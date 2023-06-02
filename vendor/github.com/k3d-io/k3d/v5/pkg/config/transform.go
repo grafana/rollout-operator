@@ -29,24 +29,25 @@ import (
 	"os"
 	"strings"
 
+	wharfie "github.com/rancher/wharfie/pkg/registries"
+
 	"github.com/docker/go-connections/nat"
 	"inet.af/netaddr"
 	"sigs.k8s.io/yaml"
 
+	dockerunits "github.com/docker/go-units"
 	cliutil "github.com/k3d-io/k3d/v5/cmd/util" // TODO: move parseapiport to pkg
 	"github.com/k3d-io/k3d/v5/pkg/client"
-	conf "github.com/k3d-io/k3d/v5/pkg/config/v1alpha4"
+	conf "github.com/k3d-io/k3d/v5/pkg/config/v1alpha5"
 	l "github.com/k3d-io/k3d/v5/pkg/logger"
 	"github.com/k3d-io/k3d/v5/pkg/runtimes"
 	k3d "github.com/k3d-io/k3d/v5/pkg/types"
-	"github.com/k3d-io/k3d/v5/pkg/types/k3s"
 	"github.com/k3d-io/k3d/v5/pkg/util"
 	"github.com/k3d-io/k3d/v5/version"
 )
 
 // TransformSimpleToClusterConfig transforms a simple configuration to a full-fledged cluster configuration
 func TransformSimpleToClusterConfig(ctx context.Context, runtime runtimes.Runtime, simpleConfig conf.SimpleConfig) (*conf.ClusterConfig, error) {
-
 	// set default cluster name
 	if simpleConfig.Name == "" {
 		simpleConfig.Name = k3d.DefaultClusterName
@@ -208,7 +209,6 @@ func TransformSimpleToClusterConfig(ctx context.Context, runtime runtimes.Runtim
 			}
 			k, v := util.SplitLabelKeyValue(k3sNodeLabelWithNodeFilters.Label)
 			node.K3sNodeLabels[k] = v
-
 		}
 	}
 
@@ -232,6 +232,23 @@ func TransformSimpleToClusterConfig(ctx context.Context, runtime runtimes.Runtim
 			cliutil.ValidateRuntimeLabelKey(k)
 
 			node.RuntimeLabels[k] = v
+		}
+	}
+
+	// -> RUNTIME ULIMITS
+	for index, runtimeUlimit := range simpleConfig.Options.Runtime.Ulimits {
+		for _, node := range nodeList {
+			if node.RuntimeUlimits == nil {
+				node.RuntimeUlimits = make([]*dockerunits.Ulimit, len(simpleConfig.Options.Runtime.Ulimits)) // ensure that the map is initialized
+			}
+
+			cliutil.ValidateRuntimeUlimitKey(runtimeUlimit.Name)
+
+			node.RuntimeUlimits[index] = &dockerunits.Ulimit{
+				Name: runtimeUlimit.Name,
+				Soft: runtimeUlimit.Soft,
+				Hard: runtimeUlimit.Hard,
+			}
 		}
 	}
 
@@ -293,7 +310,6 @@ func TransformSimpleToClusterConfig(ctx context.Context, runtime runtimes.Runtim
 	 * Registries
 	 */
 	if simpleConfig.Registries.Create != nil {
-
 		epSpecHost := "0.0.0.0"
 		epSpecPort := "random"
 
@@ -341,7 +357,7 @@ func TransformSimpleToClusterConfig(ctx context.Context, runtime runtimes.Runtim
 	}
 
 	if simpleConfig.Registries.Config != "" {
-		var k3sRegistry *k3s.Registry
+		var k3sRegistry *wharfie.Registry
 
 		if strings.Contains(simpleConfig.Registries.Config, "\n") { // CASE 1: embedded registries.yaml (multiline string)
 			l.Log().Debugf("Found multiline registries config embedded in SimpleConfig:\n%s", simpleConfig.Registries.Config)

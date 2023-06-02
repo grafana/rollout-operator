@@ -14,14 +14,13 @@ import (
 	k3dclient "github.com/k3d-io/k3d/v5/pkg/client"
 	"github.com/k3d-io/k3d/v5/pkg/config"
 	configtypes "github.com/k3d-io/k3d/v5/pkg/config/types"
+	"github.com/k3d-io/k3d/v5/pkg/config/v1alpha5"
 	"github.com/k3d-io/k3d/v5/pkg/runtimes"
 	k3d "github.com/k3d-io/k3d/v5/pkg/types"
 	"github.com/k3d-io/k3d/v5/version"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-
-	"github.com/k3d-io/k3d/v5/pkg/config/v1alpha4"
 )
 
 func init() {
@@ -68,22 +67,22 @@ func NewCluster(ctx context.Context, t *testing.T, opts ...Option) Cluster {
 	}
 
 	// Prepare the cluster config.
-	simpleCfg := v1alpha4.SimpleConfig{
+	simpleCfg := v1alpha5.SimpleConfig{
 		TypeMeta: configtypes.TypeMeta{},
 		ObjectMeta: configtypes.ObjectMeta{
 			Name: opt.clusterName,
 		},
 		Servers: 1,
 		Agents:  0,
-		ExposeAPI: v1alpha4.SimpleExposureOpts{
+		ExposeAPI: v1alpha5.SimpleExposureOpts{
 			HostPort: opt.apiPort,
 		},
-		Ports: []v1alpha4.PortWithNodeFilters{
+		Ports: []v1alpha5.PortWithNodeFilters{
 			{Port: fmt.Sprintf("%s:80", opt.lbPort), NodeFilters: []string{"loadbalancer"}},
 		},
 		Image: fmt.Sprintf("%s:%s", k3d.DefaultK3sImageRepo, version.K3sVersion),
-		Options: v1alpha4.SimpleConfigOptions{
-			K3dOptions: v1alpha4.SimpleConfigOptionsK3d{
+		Options: v1alpha5.SimpleConfigOptions{
+			K3dOptions: v1alpha5.SimpleConfigOptionsK3d{
 				Wait: true, // Wait for server node.
 			},
 		},
@@ -166,7 +165,7 @@ func getFreePort(t *testing.T, defaultPort string) string {
 }
 
 type Cluster struct {
-	clusterConfig *v1alpha4.ClusterConfig
+	clusterConfig *v1alpha5.ClusterConfig
 	k             *kubernetes.Clientset
 	lbPort        string
 }

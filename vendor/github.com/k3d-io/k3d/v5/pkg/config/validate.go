@@ -27,7 +27,7 @@ import (
 	"time"
 
 	k3dc "github.com/k3d-io/k3d/v5/pkg/client"
-	conf "github.com/k3d-io/k3d/v5/pkg/config/v1alpha4"
+	conf "github.com/k3d-io/k3d/v5/pkg/config/v1alpha5"
 	"github.com/k3d-io/k3d/v5/pkg/runtimes"
 	runtimeutil "github.com/k3d-io/k3d/v5/pkg/runtimes/util"
 	k3d "github.com/k3d-io/k3d/v5/pkg/types"
@@ -68,7 +68,6 @@ func ValidateClusterConfig(ctx context.Context, runtime runtimes.Runtime, config
 		if _, err := dockerunits.RAMInBytes(config.ClusterCreateOpts.ServersMemory); err != nil {
 			return fmt.Errorf("provided servers memory limit value is invalid: %w", err)
 		}
-
 	}
 
 	if config.ClusterCreateOpts.AgentsMemory != "" {
@@ -99,15 +98,12 @@ func ValidateClusterConfig(ctx context.Context, runtime runtimes.Runtime, config
 				}
 			}
 		}
-
 	}
 
 	// validate nodes one by one
 	for _, node := range config.Cluster.Nodes {
-
 		// volumes have to be either an existing path on the host or a named runtime volume
 		for _, volume := range node.Volumes {
-
 			if err := runtimeutil.ValidateVolumeMount(ctx, runtime, volume, &config.Cluster); err != nil {
 				return fmt.Errorf("failed to validate volume mount '%s': %w", volume, err)
 			}

@@ -26,7 +26,7 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
-	conf "github.com/k3d-io/k3d/v5/pkg/config/v1alpha4"
+	conf "github.com/k3d-io/k3d/v5/pkg/config/v1alpha5"
 	l "github.com/k3d-io/k3d/v5/pkg/logger"
 )
 
@@ -35,7 +35,6 @@ func MergeSimple(dest, src conf.SimpleConfig) (*conf.SimpleConfig, error) {
 	l.Log().Debugf("Merging %+v into %+v", src, dest)
 
 	if err := mergo.Merge(&dest, src); err != nil {
-
 		return nil, fmt.Errorf("failed to merge configs: %w", err)
 	}
 
