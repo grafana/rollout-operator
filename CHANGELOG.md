@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.6.0
+
 * [ENHANCEMENT] Update Go to `1.20.4`. #55
 * [ENHANCEMENT] Update Docker base image to `alpine:3.18`. #56
 * [ENHANCEMENT] Add the ability to scale statefulsets up and down based on the number of replicas in a "leader" statefulset. #62
