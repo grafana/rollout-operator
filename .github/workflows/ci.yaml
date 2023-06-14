@@ -8,27 +8,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v4
         with:
-          go-version: '^1.20.4'
+          go-version: '1.20'
+          check-latest: true
       - run: make rollout-operator
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v4
         with:
-          go-version: '^1.20.4'
+          go-version: '1.20'
+          check-latest: true
       - run: make test
 
   integration:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v4
         with:
-          go-version: '^1.20.4'
+          go-version: '1.20'
+          check-latest: true
       - run: make build-image
       - run: make integration
 
@@ -36,9 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v4
         with:
-          go-version: '^1.20.4'
+          go-version: '1.20'
+          check-latest: true
       - uses: golangci/golangci-lint-action@v3
         with:
           args: --timeout=5m
