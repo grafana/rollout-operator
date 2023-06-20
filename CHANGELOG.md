@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Update the intermediate build container for the Docker image to `golang:1.20-bookworm`. #66 #67
+
 ## v0.6.0
 
 * [ENHANCEMENT] Update Go to `1.20.4`. #55
