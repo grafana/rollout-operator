@@ -14,11 +14,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 const (
-	NoDownscaleLabelKey    = "grafana.com/no-downscale"
-	NoDownscaleLabelValue  = "true"
 	NoDownscaleWebhookPath = "/admission/no-downscale"
 )
 
@@ -87,11 +87,11 @@ func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, 
 	}
 
 	// Check resource label.
-	if val, ok := lbls[NoDownscaleLabelKey]; !ok {
-		level.Info(logger).Log("msg", fmt.Sprintf("downscale allowed because resource does not have the label %q", NoDownscaleLabelKey))
+	if val, ok := lbls[config.NoDownscaleLabelKey]; !ok {
+		level.Info(logger).Log("msg", fmt.Sprintf("downscale allowed because resource does not have the label %q", config.NoDownscaleLabelKey))
 		return &v1.AdmissionResponse{Allowed: true}
-	} else if val != NoDownscaleLabelValue {
-		level.Info(logger).Log("msg", fmt.Sprintf("downscale allowed because resouce's label %q value is not %q", NoDownscaleLabelKey, NoDownscaleLabelValue), "label_value", val)
+	} else if val != config.NoDownscaleLabelValue {
+		level.Info(logger).Log("msg", fmt.Sprintf("downscale allowed because resouce's label %q value is not %q", config.NoDownscaleLabelKey, config.NoDownscaleLabelValue), "label_value", val)
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
@@ -99,7 +99,7 @@ func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, 
 	reviewResponse := v1.AdmissionResponse{
 		Allowed: false,
 		Result: &metav1.Status{
-			Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because it has the label '%s=%s'", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, NoDownscaleLabelKey, NoDownscaleLabelValue),
+			Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because it has the label '%s=%s'", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, config.NoDownscaleLabelKey, config.NoDownscaleLabelValue),
 		},
 	}
 	level.Warn(logger).Log("msg", "downscale not allowed")
