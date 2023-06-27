@@ -308,6 +308,7 @@ func noDownscaleValidatingWebhook(namespace string) *admissionregistrationv1.Val
 						Path:      ptr("/admission/no-downscale"),
 					},
 				},
+				//FailurePolicy: &admissionregistrationv1.Ignore,
 				Rules: []admissionregistrationv1.RuleWithOperations{
 					{
 						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Update},
@@ -316,10 +317,8 @@ func noDownscaleValidatingWebhook(namespace string) *admissionregistrationv1.Val
 							APIVersions: []string{"v1"},
 							Resources: []string{
 								"statefulsets",
-								"deployments",
 								"replicasets",
 								"statefulsets/scale",
-								"deployments/scale",
 								"replicasets/scale",
 							},
 							Scope: ptr(admissionregistrationv1.NamespacedScope),
