@@ -313,6 +313,15 @@ func TestExpiringCertificate(t *testing.T) {
 			currentSecretCertExpiration := getCertificateExpirationFromSecret(t, api, ctx)
 			// Check that expiration is within 6 and 8 days, that's enough.
 			t.Logf("Checking cert expiration. Now: %s, expires: %s", time.Now().Format(time.RFC3339), currentSecretCertExpiration.Format(time.RFC3339))
+
+			d, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Get(ctx, deployment, metav1.GetOptions{})
+			if err != nil {
+				t.Log("Failed getting rollout-operaetor deployment: %v", err)
+				return false
+			}
+
+			t.Logf("DEPLOYMENT: %+v\n", d)
+
 			return currentSecretCertExpiration.After(time.Now().Add(24*6*time.Hour)) && currentSecretCertExpiration.Before(time.Now().Add(24*8*time.Hour))
 		}, 45*time.Second, 1*time.Second, "certificate should be renewed and expiration date should be in a week")
 	}
