@@ -121,7 +121,7 @@ func main() {
 	// startTLS server if enabled.
 	maybeStartTLSServer(cfg, logger, kubeClient, restart)
 
-	fmt.Printf("!!! TLS cert duration: %s\n", cfg.serverSelfSignedCertExpiration.String())
+	fmt.Fprintf(os.Stderr, "!!! TLS cert duration: %s\n", cfg.serverSelfSignedCertExpiration.String())
 
 	// Init the controller.
 	c := controller.NewRolloutController(kubeClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
