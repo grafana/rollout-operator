@@ -316,7 +316,7 @@ func TestExpiringCertificate(t *testing.T) {
 
 			d, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Get(ctx, deployment.ObjectMeta.Name, metav1.GetOptions{})
 			if err != nil {
-				t.Log("Failed getting rollout-operaetor deployment: %v", err)
+				t.Logf("Failed getting rollout-operaetor deployment: %v", err)
 				return false
 			}
 
