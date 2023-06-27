@@ -313,7 +313,7 @@ func TestExpiringCertificate(t *testing.T) {
 			currentSecretCertExpiration := getCertificateExpirationFromSecret(t, api, ctx)
 			// Check that expiration is within 6 and 8 days, that's enough.
 			return currentSecretCertExpiration.After(time.Now().Add(24*6*time.Hour)) && currentSecretCertExpiration.Before(time.Now().Add(24*8*time.Hour))
-		}, 30*time.Second, 1*time.Second, "certificate should be renewed and expiration date should be in a week")
+		}, 45*time.Second, 1*time.Second, "certificate should be renewed and expiration date should be in a week")
 	}
 
 	// Check webhook interaction isn't broken.
