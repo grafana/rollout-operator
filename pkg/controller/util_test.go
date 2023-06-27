@@ -7,6 +7,8 @@ import (
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 func TestSortStatefulSets(t *testing.T) {
@@ -159,28 +161,28 @@ func TestMoveStatefulSetToFront(t *testing.T) {
 
 func TestGroupStatefulSetsByLabel(t *testing.T) {
 	input := []*v1.StatefulSet{
-		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{RolloutGroupLabel: "ingester"}}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{RolloutGroupLabel: "ingester"}}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{RolloutGroupLabel: "compactor"}}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{RolloutGroupLabel: "compactor"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor"}}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "store-gateway"}},
 	}
 
 	expected := map[string][]*v1.StatefulSet{
 		"ingester": {
-			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{RolloutGroupLabel: "ingester"}}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{RolloutGroupLabel: "ingester"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester"}}},
 		},
 		"compactor": {
-			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{RolloutGroupLabel: "compactor"}}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{RolloutGroupLabel: "compactor"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor"}}},
 		},
 		"": {
 			{ObjectMeta: metav1.ObjectMeta{Name: "store-gateway"}},
 		},
 	}
 
-	assert.Equal(t, expected, groupStatefulSetsByLabel(input, RolloutGroupLabel))
+	assert.Equal(t, expected, groupStatefulSetsByLabel(input, config.RolloutGroupLabelKey))
 }
 
 func TestMax(t *testing.T) {

@@ -24,6 +24,8 @@ import (
 	listersv1 "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 const (
@@ -66,7 +68,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
 	// having the rollout group label. Only these StatefulSets are managed by this operator.
-	statefulSetsSel := labels.NewSelector().Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil)).String()
+	statefulSetsSel := labels.NewSelector().Add(mustNewLabelsRequirement(config.RolloutGroupLabelKey, selection.Exists, nil)).String()
 	statefulSetsSelOpt := informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 		options.LabelSelector = statefulSetsSel
 	})
@@ -196,7 +198,7 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	}
 
 	// Group statefulsets by the rollout group label. Each group will be reconciled independently.
-	groups := groupStatefulSetsByLabel(sets, RolloutGroupLabel)
+	groups := groupStatefulSetsByLabel(sets, config.RolloutGroupLabelKey)
 	var reconcileErrs error
 	for groupName, groupSets := range groups {
 		if err := c.reconcileStatefulSetsGroup(ctx, groupName, groupSets); err != nil {
