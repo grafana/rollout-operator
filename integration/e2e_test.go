@@ -314,13 +314,22 @@ func TestExpiringCertificate(t *testing.T) {
 			// Check that expiration is within 6 and 8 days, that's enough.
 			t.Logf("Checking cert expiration. Now: %s, expires: %s", time.Now().Format(time.RFC3339), currentSecretCertExpiration.Format(time.RFC3339))
 
-			d, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Get(ctx, deployment.ObjectMeta.Name, metav1.GetOptions{})
+			//d, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Get(ctx, deployment.ObjectMeta.Name, metav1.GetOptions{})
+			//if err != nil {
+			//	t.Logf("Failed getting rollout-operaetor deployment: %v\n", err)
+			//	return false
+			//}
+
+			rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+			logs := api.CoreV1().Pods(corev1.NamespaceDefault).GetLogs(rolloutOperatorPod, &corev1.PodLogOptions{}).Do(ctx)
+			body, err := logs.Raw()
 			if err != nil {
-				t.Logf("Failed getting rollout-operaetor deployment: %v", err)
+				t.Logf("FAILED to get logs raw: %v\n", err)
 				return false
 			}
 
-			t.Logf("DEPLOYMENT: %+v\n", d)
+			t.Logf("LOGS: %s\n", string(body))
+			//t.Logf("DEPLOYMENT: %+v\n", d)
 
 			return currentSecretCertExpiration.After(time.Now().Add(24*6*time.Hour)) && currentSecretCertExpiration.Before(time.Now().Add(24*8*time.Hour))
 		}, 45*time.Second, 1*time.Second, "certificate should be renewed and expiration date should be in a week")
