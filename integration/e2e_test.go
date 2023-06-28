@@ -293,7 +293,7 @@ func TestExpiringCertificate(t *testing.T) {
 		t.Log("Certificate was renewed.")
 
 		t.Log("Restarting rollout-operator with a configuration to create certificates that expire in a week")
-		deployment.Spec.Template.Spec.Containers[0].Arg = filter(deployment.Spec.Template.Spec.Containers[0].Arg, "-server-tls.self-signed-cert.expiration=10s")
+		deployment.Spec.Template.Spec.Containers[0].Args = filter(deployment.Spec.Template.Spec.Containers[0].Args, "-server-tls.self-signed-cert.expiration=10s")
 		deployment.Spec.Template.Spec.Containers[0].Args = append(deployment.Spec.Template.Spec.Containers[0].Args, "-server-tls.self-signed-cert.expiration=1w")
 
 		// Since our webhook also catches the deployment changes, we might call the API in that small window while the certificate
