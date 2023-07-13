@@ -13,13 +13,17 @@ GO_FILES := $(shell find . $(DONT_FIND) -o -type f -name '*.go' -print)
 rollout-operator: $(GO_FILES)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
+rollout-operator-boringcrypto: $(GO_FILES)
+	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
+
 .PHONY: build-image
 build-image: clean
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
-.PHONY: publish-image
-publish-image: clean
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
+.PHONY: publish-images
+publish-images: clean
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
 
 .PHONY: test
 test:

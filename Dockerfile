@@ -2,10 +2,11 @@ FROM --platform=$BUILDPLATFORM golang:1.20-bookworm AS build
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG BUILDTARGET=rollout-operator
 
 COPY . /src/rollout-operator
 WORKDIR /src/rollout-operator
-RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make ${BUILDTARGET}
 
 FROM alpine:3.18
 RUN apk add --no-cache ca-certificates
