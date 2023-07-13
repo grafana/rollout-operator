@@ -3,6 +3,13 @@
 ## main / unreleased
 
 * [ENHANCEMENT] Update the intermediate build container for the Docker image to `golang:1.20-bookworm`. #66 #67
+* [ENHANCEMENT] Updated dependencies, including: #70
+  * `github.com/prometheus/client_golang` from `v1.15.1` to `v1.16.0`
+  * `github.com/sirupsen/logrus` from `v1.9.2` to `v1.9.3`
+  * `golang.org/x/sync` from `v0.2.0` to `v0.3.0`
+  * `k8s.io/api` from `v0.27.2` to `v0.27.3`
+  * `k8s.io/apimachinery` from `v0.27.2` to `v0.27.3`
+  * `k8s.io/client-go` from `v0.27.2` to `v0.27.3`
 
 ## v0.6.0
 
