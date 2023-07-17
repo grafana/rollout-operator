@@ -41,8 +41,7 @@ integration: integration/mock-service/.uptodate
 
 .PHONY: integration
 integration-boringcrypto: integration/mock-service/.uptodate
-	go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
-
+	GOEXPERIMENT=boringcrypto go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
 
 integration/mock-service/.uptodate:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
