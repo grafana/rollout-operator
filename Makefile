@@ -29,6 +29,10 @@ publish-images: clean
 test:
 	go test ./...
 
+test-boringcrypto:
+	GOEXPERIMENT=boringcrypto go test ./...
+
+
 .PHONY: integration
 integration: integration/mock-service/.uptodate
 	go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
