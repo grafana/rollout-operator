@@ -9,7 +9,7 @@ WORKDIR /src/rollout-operator
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make ${BUILDTARGET}
 
 FROM alpine:3.18.2
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates libc6-compat gcompat
 
 COPY --from=build /src/rollout-operator/rollout-operator /bin/rollout-operator
 ENTRYPOINT [ "/bin/rollout-operator" ]
