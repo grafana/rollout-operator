@@ -39,7 +39,7 @@ test-boringcrypto:
 integration: integration/mock-service/.uptodate
 	go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
 
-.PHONY: integration
+.PHONY: integration-boringcrypto
 integration-boringcrypto: integration/mock-service/.uptodate
 	GOEXPERIMENT=boringcrypto go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
 
