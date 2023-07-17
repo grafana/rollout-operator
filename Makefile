@@ -18,12 +18,12 @@ rollout-operator-boringcrypto: $(GO_FILES)
 
 .PHONY: build-image
 build-image: clean
-	$(SUDO) docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: publish-images
 publish-images: clean
-	$(SUDO) docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
-	$(SUDO) docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
 
 .PHONY: test
 test:
