@@ -1,8 +1,8 @@
 # Generate the default image tag based on the git branch and revision.
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 GIT_REVISION := $(shell git rev-parse --short HEAD)
-IMAGE_PREFIX ?= grafana
-IMAGE_TAG ?= $(GIT_BRANCH)-$(GIT_REVISION)
+IMAGE_PREFIX ?= us.gcr.io/kubernetes-dev
+IMAGE_TAG ?= $(subst /,-,$(GIT_BRANCH))-$(GIT_REVISION)
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -26,7 +26,7 @@ build-image-boringcrypto: clean ## Build the rollout-operator image with boringc
 .PHONY: publish-images
 publish-images: clean
 	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
-	docker buildx build --push --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
 
 .PHONY: test
 test:
