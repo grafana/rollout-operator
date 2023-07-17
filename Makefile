@@ -1,7 +1,7 @@
 # Generate the default image tag based on the git branch and revision.
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 GIT_REVISION := $(shell git rev-parse --short HEAD)
-IMAGE_PREFIX ?= us.gcr.io/kubernetes-dev
+IMAGE_PREFIX ?= grafana
 IMAGE_TAG ?= $(subst /,-,$(GIT_BRANCH))-$(GIT_REVISION)
 
 GOOS ?= $(shell go env GOOS)
