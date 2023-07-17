@@ -20,6 +20,10 @@ rollout-operator-boringcrypto: $(GO_FILES)
 build-image: clean
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
+.PHONY: build-image
+build-image-boringcrypto: clean
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+
 .PHONY: publish-images
 publish-images: clean
 	docker buildx build --push --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
@@ -32,10 +36,14 @@ test:
 test-boringcrypto:
 	GOEXPERIMENT=boringcrypto go test ./...
 
-
 .PHONY: integration
 integration: integration/mock-service/.uptodate
 	go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
+
+.PHONY: integration
+integration-boringcrypto: integration/mock-service/.uptodate
+	go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
+
 
 integration/mock-service/.uptodate:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
