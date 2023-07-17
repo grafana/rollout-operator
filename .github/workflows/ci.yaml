@@ -36,7 +36,6 @@ jobs:
       - run: make build-image
       - run: make integration
 
-
   integration-boringcrypto:
     runs-on: ubuntu-latest
     steps:
@@ -47,7 +46,6 @@ jobs:
           check-latest: true
       - run: make build-image-boringcrypto
       - run: make integration
-
 
   lint:
     runs-on: ubuntu-latest
