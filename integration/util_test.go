@@ -45,7 +45,7 @@ func expectPodPhase(expectedPhase corev1.PodPhase) func(t *testing.T, pod *corev
 			t.Logf("Pod %q phase is the expected %q", pod.Name, phase)
 			return true
 		}
-		t.Logf("Pod %q phase %q is not the expected %q.", pod.Name, phase, expectedPhase)
+		t.Logf("Pod %q phase %q is not the expected %q. %s", pod.Name, phase, expectedPhase, pod.Status.String())
 		return false
 	}
 }
