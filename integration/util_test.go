@@ -30,8 +30,6 @@ func requireEventuallyPod(t *testing.T, api *kubernetes.Clientset, ctx context.C
 		}
 		for _, test := range tests[ok:] {
 			if !test(t, pod) {
-				logsB, err := api.CoreV1().Pods(corev1.NamespaceDefault).GetLogs(podName, &corev1.PodLogOptions{}).Do(ctx).Raw()
-				t.Log("pod logs", podName, err, string(logsB))
 				return false
 			}
 			ok++
@@ -47,7 +45,7 @@ func expectPodPhase(expectedPhase corev1.PodPhase) func(t *testing.T, pod *corev
 			t.Logf("Pod %q phase is the expected %q", pod.Name, phase)
 			return true
 		}
-		t.Logf("Pod %q phase %q is not the expected %q. %s", pod.Name, phase, expectedPhase, pod.Status.String())
+		t.Logf("Pod %q phase %q is not the expected %q.", pod.Name, phase, expectedPhase)
 		return false
 	}
 }
@@ -90,7 +88,7 @@ func expectedPodReadyState(expectedReady bool) func(t *testing.T, pod *corev1.Po
 			t.Logf("Pod %s container %s is ready=%t as expected.", pod.Name, s.Name, s.Ready)
 			return true
 		}
-		t.Logf("Pod %s container %s is ready=%t, but expected %t. %s", pod.Name, s.Name, s.Ready, expectedReady, pod.Status.String())
+		t.Logf("Pod %s container %s is ready=%t, but expected %t.", pod.Name, s.Name, s.Ready, expectedReady)
 		return false
 	}
 }
