@@ -10,9 +10,11 @@ GOARCH ?= $(shell go env GOARCH)
 DONT_FIND := -name vendor -prune -o -name .git -prune -o -name .cache -prune -o -name .pkg -prune
 GO_FILES := $(shell find . $(DONT_FIND) -o -type f -name '*.go' -print)
 
+.PHONY: rollout-operator
 rollout-operator: $(GO_FILES)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
+.PHONY: rollout-operator-boringcrypto
 rollout-operator-boringcrypto: $(GO_FILES)
 	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -tags netgo ./cmd/rollout-operator
 
@@ -20,6 +22,7 @@ rollout-operator-boringcrypto: $(GO_FILES)
 build-image: clean
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
+.PHONY: build-image-boringcrypto
 build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto and tag with the regular image repo, so that it can be used in integration tests.
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
@@ -38,6 +41,7 @@ publish-boringcrypto-image: clean
 test:
 	go test ./...
 
+.PHONY: test-boringcrypto
 test-boringcrypto:
 	GOEXPERIMENT=boringcrypto go test ./...
 
