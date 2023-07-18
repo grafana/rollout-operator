@@ -11,8 +11,7 @@ WORKDIR /src/rollout-operator
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make ${BUILDTARGET}
 
 FROM alpine:3.18
-# need gcompat for glibc compatibility of the boringcrypto image
-RUN apk add --no-cache ca-certificates gcompat
+RUN apk add --no-cache ca-certificates
 
 COPY --from=build /src/rollout-operator/rollout-operator /bin/rollout-operator
 ENTRYPOINT [ "/bin/rollout-operator" ]
