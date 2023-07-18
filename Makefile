@@ -10,7 +10,6 @@ GOARCH ?= $(shell go env GOARCH)
 DONT_FIND := -name vendor -prune -o -name .git -prune -o -name .cache -prune -o -name .pkg -prune
 GO_FILES := $(shell find . $(DONT_FIND) -o -type f -name '*.go' -print)
 
-.PHONY: rollout-operator
 rollout-operator: $(GO_FILES)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
