@@ -14,7 +14,7 @@ rollout-operator: $(GO_FILES)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
 rollout-operator-boringcrypto: $(GO_FILES)
-	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -tags netgo ./cmd/rollout-operator
+	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -tags netgo -ldflags '-extldflags "-static" -linkmode=external' ./cmd/rollout-operator
 
 .PHONY: build-image
 build-image: clean

@@ -1,8 +1,10 @@
-FROM golang:1.20-bookworm AS build
+FROM golang:1.20-alpine AS build
 
 ARG TARGETOS
 ARG TARGETARCH
 ARG BUILDTARGET=rollout-operator
+
+RUN apk add --no-cache build-base git
 
 COPY . /src/rollout-operator
 WORKDIR /src/rollout-operator
