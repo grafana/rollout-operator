@@ -2,7 +2,8 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Update the intermediate build container for the Docker image to `golang:1.20-bookworm`. #66 #67
+* [FEATURE] Publish an additional boringcrypto image for linux/amd64,linux/arm64. #71
+* [ENHANCEMENT] Update the intermediate build container for the Docker image to `golang:1.20-alpine3.18`. #66 #67 #71
 
 ## v0.6.0
 
