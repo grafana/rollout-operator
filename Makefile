@@ -26,7 +26,7 @@ build-image-boringcrypto: clean ## Build the rollout-operator image with boringc
 .PHONY: publish-images
 publish-images: publish-standard-image publish-boringcrypto-image
 
-.PHONY: publish-standard image
+.PHONY: publish-standard-image
 publish-standard-image: clean
 	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
 
