@@ -2,7 +2,8 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Update the intermediate build container for the Docker image to `golang:1.20-bookworm`. #66 #67
+* [FEATURE] Publish an additional boringcrypto image for linux/amd64,linux/arm64. #71
+* [ENHANCEMENT] Update the intermediate build container for the Docker image to `golang:1.20-alpine3.18`. #66 #67 #71
 * [ENHANCEMENT] Updated dependencies, including: #70
   * `github.com/prometheus/client_golang` from `v1.15.1` to `v1.16.0`
   * `github.com/sirupsen/logrus` from `v1.9.2` to `v1.9.3`

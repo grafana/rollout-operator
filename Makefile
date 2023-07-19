@@ -2,7 +2,7 @@
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 GIT_REVISION := $(shell git rev-parse --short HEAD)
 IMAGE_PREFIX ?= grafana
-IMAGE_TAG ?= $(GIT_BRANCH)-$(GIT_REVISION)
+IMAGE_TAG ?= $(subst /,-,$(GIT_BRANCH))-$(GIT_REVISION)
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -13,17 +13,36 @@ GO_FILES := $(shell find . $(DONT_FIND) -o -type f -name '*.go' -print)
 rollout-operator: $(GO_FILES)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
+.PHONY: rollout-operator-boringcrypto
+rollout-operator-boringcrypto: $(GO_FILES)
+	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -tags netgo ./cmd/rollout-operator
+
 .PHONY: build-image
 build-image: clean
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
-.PHONY: publish-image
-publish-image: clean
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
+.PHONY: build-image-boringcrypto
+build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto and tag with the regular image repo, so that it can be used in integration tests.
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+
+.PHONY: publish-images
+publish-images: publish-standard-image publish-boringcrypto-image
+
+.PHONY: publish-standard-image
+publish-standard-image: clean
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
+
+.PHONY: publish-boringcrypto-image
+publish-boringcrypto-image: clean
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
 
 .PHONY: test
 test:
 	go test ./...
+
+.PHONY: test-boringcrypto
+test-boringcrypto:
+	GOEXPERIMENT=boringcrypto go test ./...
 
 .PHONY: integration
 integration: integration/mock-service/.uptodate

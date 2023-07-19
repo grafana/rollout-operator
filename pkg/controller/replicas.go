@@ -8,7 +8,7 @@ import (
 	"github.com/go-kit/log/level"
 	v1 "k8s.io/api/apps/v1"
 
-	"github.com/grafana/rollout-operator/pkg/admission"
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 func desiredStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulSet, logger log.Logger) (int32, error) {
@@ -55,7 +55,7 @@ func desiredStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulSet
 // nil if there is no configured leader for the follower, or an error if the configured leader does not exist.
 func getLeaderForStatefulSet(follower *v1.StatefulSet, sets []*v1.StatefulSet) (*v1.StatefulSet, error) {
 	annotations := follower.GetAnnotations()
-	leaderName, ok := annotations[RolloutDownscaleLeaderAnnotation]
+	leaderName, ok := annotations[config.RolloutDownscaleLeaderAnnotationKey]
 	if !ok {
 		return nil, nil
 	}
@@ -66,7 +66,7 @@ func getLeaderForStatefulSet(follower *v1.StatefulSet, sets []*v1.StatefulSet) (
 		}
 	}
 
-	return nil, fmt.Errorf("could not find leader for %s using %s", follower.GetName(), RolloutDownscaleLeaderAnnotation)
+	return nil, fmt.Errorf("could not find leader for %s using %s", follower.GetName(), config.RolloutDownscaleLeaderAnnotationKey)
 }
 
 // minimumTimeHasElapsed returns true if at least the configured time has elapsed since another statefulset
@@ -86,14 +86,14 @@ func minimumTimeHasElapsed(follower *v1.StatefulSet, all []*v1.StatefulSet, logg
 	}
 
 	followerLabels := follower.GetLabels()
-	rawValue, ok := followerLabels[admission.MinTimeBetweenZonesDownscaleLabelKey]
+	rawValue, ok := followerLabels[config.MinTimeBetweenZonesDownscaleLabelKey]
 	if !ok {
-		return false, fmt.Errorf("missing label %s on follower", admission.MinTimeBetweenZonesDownscaleLabelKey)
+		return false, fmt.Errorf("missing label %s on follower", config.MinTimeBetweenZonesDownscaleLabelKey)
 	}
 
 	minTimeSinceDownscale, err := time.ParseDuration(rawValue)
 	if err != nil {
-		return false, fmt.Errorf("unable to parse label %s value on follower: %w", admission.MinTimeBetweenZonesDownscaleLabelKey, err)
+		return false, fmt.Errorf("unable to parse label %s value on follower: %w", config.MinTimeBetweenZonesDownscaleLabelKey, err)
 	}
 
 	timeSinceDownscale := time.Since(lastDownscale)
@@ -123,7 +123,7 @@ func getMostRecentDownscale(follower *v1.StatefulSet, all []*v1.StatefulSet) (ti
 		}
 
 		annotations := sts.GetAnnotations()
-		rawValue, ok := annotations[admission.LastDownscaleAnnotationKey]
+		rawValue, ok := annotations[config.LastDownscaleAnnotationKey]
 		if !ok {
 			// No last downscale time, skip this statefulset. Maybe we'll find
 			// an annotation on another one. If not, we just return the time zero
@@ -133,7 +133,7 @@ func getMostRecentDownscale(follower *v1.StatefulSet, all []*v1.StatefulSet) (ti
 
 		lastDownscale, err := time.Parse(time.RFC3339, rawValue)
 		if err != nil {
-			return time.Time{}, fmt.Errorf("can't parse %v annotation of %s: %w", admission.LastDownscaleAnnotationKey, sts.GetName(), err)
+			return time.Time{}, fmt.Errorf("can't parse %v annotation of %s: %w", config.LastDownscaleAnnotationKey, sts.GetName(), err)
 		}
 
 		if lastDownscale.After(mostRecent) {

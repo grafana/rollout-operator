@@ -21,6 +21,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 func TestUpscale(t *testing.T) {
@@ -146,20 +148,20 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	path := "/prepare-downscale"
 	oldParams := templateParams{
 		Replicas:          oldReplicas,
-		DownScalePathKey:  PrepareDownscalePathAnnotationKey,
+		DownScalePathKey:  config.PrepareDownscalePathAnnotationKey,
 		DownScalePath:     path,
-		DownScalePortKey:  PrepareDownscalePortAnnotationKey,
+		DownScalePortKey:  config.PrepareDownscalePortAnnotationKey,
 		DownScalePort:     u.Port(),
-		DownScaleLabelKey: PrepareDownscaleLabelKey,
+		DownScaleLabelKey: config.PrepareDownscaleLabelKey,
 	}
 
 	newParams := templateParams{
 		Replicas:          newReplicas,
-		DownScalePathKey:  PrepareDownscalePathAnnotationKey,
+		DownScalePathKey:  config.PrepareDownscalePathAnnotationKey,
 		DownScalePath:     path,
-		DownScalePortKey:  PrepareDownscalePortAnnotationKey,
+		DownScalePortKey:  config.PrepareDownscalePortAnnotationKey,
 		DownScalePort:     u.Port(),
-		DownScaleLabelKey: PrepareDownscaleLabelKey,
+		DownScaleLabelKey: config.PrepareDownscaleLabelKey,
 	}
 
 	rawObject, err := statefulSetTemplate(newParams)
@@ -203,7 +205,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 				Name:      stsName,
 				Namespace: namespace,
 				UID:       types.UID(stsName),
-				Labels:    map[string]string{RolloutGroupLabelKey: "ingester"},
+				Labels:    map[string]string{config.RolloutGroupLabelKey: "ingester"},
 			},
 		},
 		&apps.StatefulSet{
@@ -215,7 +217,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 				Name:      stsName + "-1",
 				Namespace: namespace,
 				UID:       types.UID(stsName),
-				Labels:    map[string]string{RolloutGroupLabelKey: "ingester"},
+				Labels:    map[string]string{config.RolloutGroupLabelKey: "ingester"},
 			},
 		},
 	}
@@ -231,11 +233,11 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 					Namespace: namespace,
 					UID:       types.UID(stsName),
 					Labels: map[string]string{
-						RolloutGroupLabelKey:                 "ingester",
-						MinTimeBetweenZonesDownscaleLabelKey: "12h",
+						config.RolloutGroupLabelKey:                 "ingester",
+						config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
 					},
 					Annotations: map[string]string{
-						LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339),
+						config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339),
 					},
 				},
 			},
@@ -252,7 +254,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
 		require.NoError(t, err)
 		require.NotNil(t, updatedSts.Annotations)
-		require.NotNil(t, updatedSts.Annotations[LastDownscaleAnnotationKey])
+		require.NotNil(t, updatedSts.Annotations[config.LastDownscaleAnnotationKey])
 	}
 }
 

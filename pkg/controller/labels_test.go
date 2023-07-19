@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 func TestGetMaxUnavailableForStatefulSet(t *testing.T) {
@@ -22,7 +24,7 @@ func TestGetMaxUnavailableForStatefulSet(t *testing.T) {
 			sts: &v1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						RolloutMaxUnavailableAnnotation: "3",
+						config.RolloutMaxUnavailableAnnotationKey: "3",
 					},
 				},
 			},
@@ -32,7 +34,7 @@ func TestGetMaxUnavailableForStatefulSet(t *testing.T) {
 			sts: &v1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						RolloutMaxUnavailableAnnotation: "xxx",
+						config.RolloutMaxUnavailableAnnotationKey: "xxx",
 					},
 				},
 			},
@@ -42,7 +44,7 @@ func TestGetMaxUnavailableForStatefulSet(t *testing.T) {
 			sts: &v1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						RolloutMaxUnavailableAnnotation: "0",
+						config.RolloutMaxUnavailableAnnotationKey: "0",
 					},
 				},
 			},
@@ -52,7 +54,7 @@ func TestGetMaxUnavailableForStatefulSet(t *testing.T) {
 			sts: &v1.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						RolloutMaxUnavailableAnnotation: "-1",
+						config.RolloutMaxUnavailableAnnotationKey: "-1",
 					},
 				},
 			},

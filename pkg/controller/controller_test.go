@@ -21,6 +21,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 const (
@@ -128,7 +130,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		"should default max unavailable to 1 if set to an invalid value": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision(), func(sts *v1.StatefulSet) {
-					sts.Annotations[RolloutMaxUnavailableAnnotation] = "xxx"
+					sts.Annotations[config.RolloutMaxUnavailableAnnotationKey] = "xxx"
 				}),
 			},
 			pods: []runtime.Object{
@@ -241,7 +243,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		"should ignore any StatefulSet without the rollout group label": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("compactor", func(sts *v1.StatefulSet) {
-					delete(sts.Labels, RolloutGroupLabel)
+					delete(sts.Labels, config.RolloutGroupLabelKey)
 				}),
 				mockStatefulSet("ingester-zone-a"),
 				mockStatefulSet("ingester-zone-b"),
@@ -407,8 +409,8 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutGroups(t *testing.T) {
 	ingesters := []runtime.Object{
-		mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[RolloutGroupLabel] = "ingester" }),
-		mockStatefulSet("ingester-zone-b", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[RolloutGroupLabel] = "ingester" }),
+		mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[config.RolloutGroupLabelKey] = "ingester" }),
+		mockStatefulSet("ingester-zone-b", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[config.RolloutGroupLabelKey] = "ingester" }),
 		mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
 		mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
 		mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash),
@@ -416,8 +418,8 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 	}
 
 	storeGateways := []runtime.Object{
-		mockStatefulSet("store-gateway-zone-a", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[RolloutGroupLabel] = "store-gateway" }),
-		mockStatefulSet("store-gateway-zone-b", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[RolloutGroupLabel] = "store-gateway" }),
+		mockStatefulSet("store-gateway-zone-a", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[config.RolloutGroupLabelKey] = "store-gateway" }),
+		mockStatefulSet("store-gateway-zone-b", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[config.RolloutGroupLabelKey] = "store-gateway" }),
 		mockStatefulSetPod("store-gateway-zone-a-0", testLastRevisionHash),
 		mockStatefulSetPod("store-gateway-zone-a-1", testLastRevisionHash),
 		mockStatefulSetPod("store-gateway-zone-b-0", testLastRevisionHash),
@@ -490,10 +492,10 @@ func mockStatefulSet(name string, overrides ...func(sts *v1.StatefulSet)) *v1.St
 			Name:      name,
 			Namespace: testNamespace,
 			Labels: map[string]string{
-				RolloutGroupLabel: "ingester",
+				config.RolloutGroupLabelKey: "ingester",
 			},
 			Annotations: map[string]string{
-				RolloutMaxUnavailableAnnotation: strconv.Itoa(testMaxUnavailable),
+				config.RolloutMaxUnavailableAnnotationKey: strconv.Itoa(testMaxUnavailable),
 			},
 		},
 		Spec: v1.StatefulSetSpec{
