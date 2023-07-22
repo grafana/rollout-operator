@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+## v0.6.1
+
+* [FEATURE] Publish an additional boringcrypto image for linux/amd64,linux/arm64. #71
+
 ## v0.6.0
 
 * [ENHANCEMENT] Update Go to `1.20.4`. #55
