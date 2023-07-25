@@ -2,8 +2,6 @@
 
 ## main / unreleased
 
-* [FEATURE] Publish an additional boringcrypto image for linux/amd64,linux/arm64. #71
-* [ENHANCEMENT] Update the intermediate build container for the Docker image to `golang:1.20-alpine3.18`. #66 #67 #71
 * [ENHANCEMENT] Updated dependencies, including: #70
   * `github.com/prometheus/client_golang` from `v1.15.1` to `v1.16.0`
   * `github.com/sirupsen/logrus` from `v1.9.2` to `v1.9.3`
@@ -11,6 +9,11 @@
   * `k8s.io/api` from `v0.27.2` to `v0.27.3`
   * `k8s.io/apimachinery` from `v0.27.2` to `v0.27.3`
   * `k8s.io/client-go` from `v0.27.2` to `v0.27.3`
+
+## v0.6.1
+
+* [FEATURE] Publish an additional boringcrypto image for linux/amd64,linux/arm64. #71
+* [ENHANCEMENT] Update the intermediate build container for the Docker image to `golang:1.20-alpine3.18`. #71
 
 ## v0.6.0
 
