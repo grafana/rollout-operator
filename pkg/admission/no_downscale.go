@@ -142,7 +142,7 @@ func allowErr(logger log.Logger, msg string, err error) *v1.AdmissionResponse {
 func getResourceLabels(ctx context.Context, ar v1.AdmissionReview, api kubernetes.Interface) (map[string]string, error) {
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("context cancelled")
+		return nil, ctx.Err()
 	default:
 	}
 

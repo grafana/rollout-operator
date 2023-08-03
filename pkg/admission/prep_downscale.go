@@ -41,7 +41,7 @@ type httpClient interface {
 func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
 	select {
 	case <-ctx.Done():
-		return deny("context cancelled")
+		return deny(ctx.Err().Error())
 	default:
 	}
 
@@ -261,7 +261,7 @@ func deny(msg string, args ...any) *v1.AdmissionResponse {
 func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kubernetes.Interface) (map[string]string, error) {
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("context cancelled")
+		return nil, ctx.Err()
 	default:
 	}
 
