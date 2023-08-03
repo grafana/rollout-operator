@@ -2,6 +2,15 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #70
+  * `github.com/k3d-io/k3d/v5` from `v5.5.1` to `v5.5.2` 
+  * `github.com/prometheus/client_golang` from `v1.15.1` to `v1.16.0`
+  * `github.com/sirupsen/logrus` from `v1.9.2` to `v1.9.3`
+  * `golang.org/x/sync` from `v0.2.0` to `v0.3.0`
+  * `k8s.io/api` from `v0.27.2` to `v0.27.4`
+  * `k8s.io/apimachinery` from `v0.27.2` to `v0.27.4`
+  * `k8s.io/client-go` from `v0.27.2` to `v0.27.4`
+
 ## v0.6.1
 
 * [FEATURE] Publish an additional boringcrypto image for linux/amd64,linux/arm64. #71
