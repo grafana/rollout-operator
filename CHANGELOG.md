@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.7.0
+
 * [ENHANCEMENT] Updated dependencies, including: #70
   * `github.com/k3d-io/k3d/v5` from `v5.5.1` to `v5.5.2` 
   * `github.com/prometheus/client_golang` from `v1.15.1` to `v1.16.0`
