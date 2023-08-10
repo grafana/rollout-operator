@@ -1,6 +1,6 @@
 module github.com/grafana/rollout-operator
 
-go 1.20
+go 1.21
 
 require (
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
