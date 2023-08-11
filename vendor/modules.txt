@@ -463,7 +463,7 @@ go.uber.org/multierr
 # go4.org/intern v0.0.0-20220617035311-6925f38cc365
 ## explicit; go 1.13
 go4.org/intern
-# go4.org/unsafe/assume-no-moving-gc v0.0.0-20230221090011-e4bae7ad2296
+# go4.org/unsafe/assume-no-moving-gc v0.0.0-20230525183740-e7c30c78aeb2
 ## explicit; go 1.11
 go4.org/unsafe/assume-no-moving-gc
 # golang.org/x/crypto v0.9.0

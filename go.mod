@@ -1,6 +1,6 @@
 module github.com/grafana/rollout-operator
 
-go 1.19
+go 1.20
 
 require (
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
@@ -103,7 +103,7 @@ require (
 	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
 	go4.org/intern v0.0.0-20220617035311-6925f38cc365 // indirect
-	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230221090011-e4bae7ad2296 // indirect
+	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230525183740-e7c30c78aeb2 // indirect
 	golang.org/x/crypto v0.9.0 // indirect
 	golang.org/x/mod v0.10.0 // indirect
 	golang.org/x/net v0.10.0 // indirect

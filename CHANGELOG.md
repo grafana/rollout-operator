@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Update Go to `1.21`. #77
+
 ## v0.7.0
 
 * [ENHANCEMENT] Updated dependencies, including: #70
