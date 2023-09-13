@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.8.0
+
 * [ENHANCEMENT] Update Go to `1.21`. #77
 * [ENHANCEMENT] Updated dependencies, including: #78
   * `github.com/k3d-io/k3d/v5` from `v5.5.2` to `v5.6.0` 
