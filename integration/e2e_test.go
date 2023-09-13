@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/integration/k3t"
+	"github.com/grafana/rollout-operator/pkg/admission"
 )
 
 func TestRolloutHappyCase(t *testing.T) {
@@ -347,4 +348,63 @@ func getCertificateExpiration(t *testing.T, secret *corev1.Secret) time.Time {
 	c, err := x509.ParseCertificate(pair.Certificate[0])
 	require.NoError(t, err)
 	return c.NotAfter
+}
+
+func TestPrepareDownscale_CanDownscale(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	api := cluster.API()
+	{
+		t.Log("Create the webhook before the rollout-operator")
+		_, err := api.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, prepareDownscaleValidatingWebhook(corev1.NamespaceDefault, admission.PrepareDownscaleWebhookPath), metav1.CreateOptions{})
+		require.NoError(t, err)
+	}
+
+	{
+		t.Log("Create rollout operator and check it's running and ready.")
+		createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
+		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+	}
+
+	mock := mockServiceStatefulSet("mock", "1", true)
+	{
+		t.Log("Create the service.")
+		requireCreateService(ctx, t, api, corev1.NamespaceDefault, "mock")
+		t.Log("Create the statefulset with three replicas.")
+		mock.Spec.Replicas = ptr[int32](3)
+		mock.ObjectMeta.Labels[admission.PrepareDownscaleLabelKey] = admission.PrepareDownscaleLabelValue
+		mock.ObjectMeta.Annotations[admission.PrepareDownscalePathAnnotationKey] = "/prepare-shutdown-pass"
+		mock.ObjectMeta.Annotations[admission.PrepareDownscalePortAnnotationKey] = "8080"
+		requireCreateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 3)
+		// TODO: find a good way to wait until the DNS propagation is done for the pods
+		time.Sleep(2 * time.Second)
+	}
+
+	{
+		t.Log("Scale down.")
+		mock.Spec.Replicas = ptr[int32](1)
+		requireUpdateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
+	}
+
+	{
+		t.Log("Scale up and make it have two replicas.")
+		mock.Spec.Replicas = ptr[int32](2)
+		requireUpdateStatefulSet(ctx, t, api, mock)
+		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
+	}
+
+	{
+		t.Log("Failure in prepare-shutdown on node.")
+		mock.ObjectMeta.Annotations[admission.PrepareDownscalePathAnnotationKey] = "/prepare-shutdown-fail"
+		requireUpdateStatefulSet(ctx, t, api, mock)
+		t.Log("Try to scale down again. This should fail")
+		mock.Spec.Replicas = ptr[int32](1)
+		err := updateStatefulSet(ctx, t, api, mock)
+		require.Error(t, err, "Updating the stateful set didn't fail as expected")
+		require.Contains(t, err.Error(), `admission webhook "prepare-downscale-default.grafana.com" denied the request: downscale of statefulsets/mock in default from 2 to 1 replicas is not allowed because one or more pods failed to prepare for shutdown`)
+	}
 }

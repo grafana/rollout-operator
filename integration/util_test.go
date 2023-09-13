@@ -165,6 +165,12 @@ func requireUpdateStatefulSet(ctx context.Context, t *testing.T, api *kubernetes
 	require.NoError(t, err, "Can't update StatefulSet")
 }
 
+func updateStatefulSet(ctx context.Context, t *testing.T, api *kubernetes.Clientset, sts *appsv1.StatefulSet) error {
+	t.Helper()
+	_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, sts, metav1.UpdateOptions{})
+	return err
+}
+
 func getAndUpdateStatefulSetScale(ctx context.Context, t *testing.T, api *kubernetes.Clientset, name string, replicas int32, dryrun bool) error {
 	s, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).GetScale(ctx, name, metav1.GetOptions{})
 	require.NoError(t, err)
@@ -175,4 +181,12 @@ func getAndUpdateStatefulSetScale(ctx context.Context, t *testing.T, api *kubern
 	}
 	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).UpdateScale(ctx, name, s, opts)
 	return err
+}
+
+func requireCreateService(ctx context.Context, t *testing.T, api *kubernetes.Clientset, namespace, name string) {
+	t.Helper()
+	_, err := api.CoreV1().Services(namespace).Create(ctx, mockServiceServiceWithNoClusterIP(name), metav1.CreateOptions{})
+	require.NoError(t, err, "Can't create Service")
+	_, err = api.NetworkingV1().Ingresses(namespace).Create(ctx, mockServiceIngress(name), metav1.CreateOptions{})
+	require.NoError(t, err, "Can't create Ingress")
 }

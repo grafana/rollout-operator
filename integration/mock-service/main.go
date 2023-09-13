@@ -10,6 +10,18 @@ import (
 	"syscall"
 )
 
+type behaviour int
+
+const (
+	PASS behaviour = iota
+	FAIL
+)
+
+const (
+	PASS_PATH = "/prepare-shutdown-pass"
+	FAIL_PATH = "/prepare-shutdown-fail"
+)
+
 func main() {
 	alive := &atomic.Int64{}
 	alive.Store(1)
@@ -21,6 +33,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/ready", probeHandler(ready))
 	mux.Handle("/alive", probeHandler(alive))
+	mux.Handle(PASS_PATH, shutdownHandler(PASS))
+	mux.Handle(FAIL_PATH, shutdownHandler(FAIL))
 
 	if prefix := os.Getenv("PREFIX"); prefix != "" {
 		log.Printf("prefix=%s", prefix)
@@ -45,6 +59,19 @@ func main() {
 		log.Printf("Can't ListenAndServe: %v", err)
 	}
 	<-closed
+}
+
+func shutdownHandler(expected behaviour) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		switch expected {
+		case PASS:
+			w.WriteHeader(http.StatusOK)
+		case FAIL:
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}
 }
 
 func probeHandler(probe *atomic.Int64) http.HandlerFunc {

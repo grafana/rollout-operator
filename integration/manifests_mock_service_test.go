@@ -33,13 +33,27 @@ func createMockServiceZone(t *testing.T, ctx context.Context, api *kubernetes.Cl
 	}
 }
 
-func mockServiceService(name string) *corev1.Service {
+func mockServiceServiceWithNoClusterIP(name string) *corev1.Service {
+	return mockServiceServiceHelper(name, false)
+}
+
+func mockServiceService(name string, noClusterIP ...bool) *corev1.Service {
+	return mockServiceServiceHelper(name, true)
+}
+
+func mockServiceServiceHelper(name string, clusterIPRequired bool) *corev1.Service {
+	var clusterIP string
+	if clusterIPRequired == false {
+		clusterIP = "None"
+	}
+
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 		Spec: corev1.ServiceSpec{
-			Type: corev1.ServiceTypeClusterIP,
+			Type:      corev1.ServiceTypeClusterIP,
+			ClusterIP: clusterIP,
 			Selector: map[string]string{
 				"name": name,
 			},
@@ -97,6 +111,7 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 			Labels: map[string]string{
 				"rollout-group": "mock",
 			},
+			Annotations: map[string]string{},
 		},
 		Spec: appsv1.StatefulSetSpec{
 			Replicas: ptr[int32](1),
@@ -105,6 +120,7 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 					"name": name,
 				},
 			},
+			ServiceName: "mock",
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: name,
