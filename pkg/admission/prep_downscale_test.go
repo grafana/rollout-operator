@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/admission/v1"
 	apps "k8s.io/api/apps/v1"
@@ -256,6 +257,44 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		require.NotNil(t, updatedSts.Annotations)
 		require.NotNil(t, updatedSts.Annotations[config.LastDownscaleAnnotationKey])
 	}
+}
+
+func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
+	namespace := "test"
+	rolloutGroup := "ingester"
+	labels := map[string]string{config.RolloutGroupLabelKey: rolloutGroup}
+	objects := []runtime.Object{
+		&apps.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "zone-a",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Status: apps.StatefulSetStatus{
+				Replicas:        10,
+				ReadyReplicas:   10,
+				UpdatedReplicas: 10,
+			},
+		},
+		&apps.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "zone-b",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Status: apps.StatefulSetStatus{
+				Replicas:        10,
+				ReadyReplicas:   4,
+				UpdatedReplicas: 6,
+			},
+		},
+	}
+	api := fake.NewSimpleClientset(objects...)
+
+	sts, err := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, rolloutGroup)
+	assert.Nil(t, err)
+	assert.NotNil(t, sts)
+	assert.Equal(t, uint(4), sts.nonUpdatedReplicas)
 }
 
 func statefulSetTemplate(params templateParams) ([]byte, error) {
