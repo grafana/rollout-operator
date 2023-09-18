@@ -223,22 +223,16 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		)
 	}
 
-	err = addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name)
-	if err != nil {
-		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
-		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
-		)
-	}
-
-	// Down-scale operation is allowed because all pods successfully prepared for shutdown
+	// Down-scale operation is allowed because all pods successfully prepared for shutdown. A patch is included for last-downscale.
 	level.Info(logger).Log("msg", "downscale allowed")
+	pt := v1.PatchTypeJSONPatch
 	return &v1.AdmissionResponse{
 		Allowed: true,
 		Result: &metav1.Status{
 			Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is allowed -- all pods successfully prepared for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
 		},
+		Patch:     []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))),
+		PatchType: &pt,
 	}
 }
 
@@ -257,7 +251,7 @@ func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kube
 	case "statefulsets":
 		obj, err := api.AppsV1().StatefulSets(ar.Request.Namespace).Get(ctx, ar.Request.Name, metav1.GetOptions{})
 		if err != nil {
-				return nil, err
+			return nil, err
 		}
 		return obj.Annotations, nil
 	}
