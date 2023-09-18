@@ -2,7 +2,47 @@
 
 ## main / unreleased
 
+## v0.8.0
+
+* [ENHANCEMENT] Update Go to `1.21`. #77
+* [ENHANCEMENT] Updated dependencies, including: #78
+  * `github.com/k3d-io/k3d/v5` from `v5.5.2` to `v5.6.0` 
+  * `k8s.io/api` from `v0.27.4` to `v0.28.1`
+  * `k8s.io/apimachinery` from `v0.27.4` to `v0.28.1`
+  * `k8s.io/client-go` from `v0.27.4` to `v0.28.1`
+
+## v0.7.0
+
+* [ENHANCEMENT] Updated dependencies, including: #70
+  * `github.com/k3d-io/k3d/v5` from `v5.5.1` to `v5.5.2` 
+  * `github.com/prometheus/client_golang` from `v1.15.1` to `v1.16.0`
+  * `github.com/sirupsen/logrus` from `v1.9.2` to `v1.9.3`
+  * `golang.org/x/sync` from `v0.2.0` to `v0.3.0`
+  * `k8s.io/api` from `v0.27.2` to `v0.27.4`
+  * `k8s.io/apimachinery` from `v0.27.2` to `v0.27.4`
+  * `k8s.io/client-go` from `v0.27.2` to `v0.27.4`
+
+## v0.6.1
+
+* [FEATURE] Publish an additional boringcrypto image for linux/amd64,linux/arm64. #71
+* [ENHANCEMENT] Update the intermediate build container for the Docker image to `golang:1.20-alpine3.18`. #71
+
+## v0.6.0
+
 * [ENHANCEMENT] Update Go to `1.20.4`. #55
+* [ENHANCEMENT] Update Docker base image to `alpine:3.18`. #56
+* [ENHANCEMENT] Add the ability to scale statefulsets up and down based on the number of replicas in a "leader" statefulset. #62
+* [ENHANCEMENT] Updated dependencies, including: #63
+  * `github.com/k3d-io/k3d/v5` from `v5.4.9` to `v5.5.1`
+  * `github.com/prometheus/client_golang` from `v1.15.0` to `v1.15.1`
+  * `github.com/prometheus/common` from `v0.42.0` to `v0.44.0`
+  * `github.com/sirupsen/logrus` from `v1.9.0` to `v1.9.2`
+  * `github.com/stretchr/testify` from `v1.8.2` to `v1.8.4`
+  * `go.uber.org/atomic` from `v1.10.0` to `v1.11.0`
+  * `golang.org/x/sync` from `v0.1.0` to `v0.2.0`
+  * `k8s.io/api` from `v0.26.2` to `v0.27.2`
+  * `k8s.io/apimachinery` from `v0.26.2` to `v0.27.2`
+  * `k8s.io/client-go` from `v0.26.2` to `v0.27.2`
 
 ## v0.5.0
 
@@ -37,7 +77,7 @@
 ## v0.3.0
 
 * [ENHANCEMENT] Update Go to `1.19.4`. #29
-* [ENHANCEMENT] Added `-reconcile.interval` option to configure the minimum reconciliation interval. #30  
+* [ENHANCEMENT] Added `-reconcile.interval` option to configure the minimum reconciliation interval. #30
 * [ENHANCEMENT] Update dependencies to address CVEs, including: #34
   * `github.com/containerd/containerd` from `v1.6.8` to `v1.6.15` for CVE-2022-23471
   * `golang.org/x/net` from `v0.1.0` to `v0.5.0` for CVE-2022-41717
@@ -48,7 +88,7 @@
 * [ENHANCEMENT] Update Docker base image to `alpine:3.16`. #23
 * [ENHANCEMENT] Update the minimum go version to `1.18`. #23
 * [ENHANCEMENT] Update dependencies to address CVEs, including: #23
-  * `github.com/gogo/protobuf` from `v1.3.1` to `v1.3.2` 
+  * `github.com/gogo/protobuf` from `v1.3.1` to `v1.3.2`
   * `github.com/prometheus/client_golang` from `v1.11.0` to `v1.13.0`
   * `golang.org/x/crypto` from `v0.0.0-20200622213623-75b288015ac9` to `v0.1.0`
   * `k8s.io/client-go` from `v0.18.17` to `v0.25.3`

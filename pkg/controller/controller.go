@@ -18,11 +18,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listersv1 "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 const (
@@ -65,7 +68,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
 	// having the rollout group label. Only these StatefulSets are managed by this operator.
-	statefulSetsSel := labels.NewSelector().Add(mustNewLabelsRequirement(RolloutGroupLabel, selection.Exists, nil)).String()
+	statefulSetsSel := labels.NewSelector().Add(mustNewLabelsRequirement(config.RolloutGroupLabelKey, selection.Exists, nil)).String()
 	statefulSetsSelOpt := informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 		options.LabelSelector = statefulSetsSel
 	})
@@ -195,7 +198,7 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	}
 
 	// Group statefulsets by the rollout group label. Each group will be reconciled independently.
-	groups := groupStatefulSetsByLabel(sets, RolloutGroupLabel)
+	groups := groupStatefulSetsByLabel(sets, config.RolloutGroupLabelKey)
 	var reconcileErrs error
 	for groupName, groupSets := range groups {
 		if err := c.reconcileStatefulSetsGroup(ctx, groupName, groupSets); err != nil {
@@ -232,6 +235,17 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 
 	// Sort StatefulSets to provide a deterministic behaviour.
 	sortStatefulSets(sets)
+
+	// Adjust the number of replicas for each StatefulSet in the group if desired. If the number of
+	// replicas of any StatefulSet was adjusted, return early in order to guarantee each STS model is
+	// up-to-date.
+	if updated, err := c.adjustStatefulSetsGroupReplicas(ctx, groupName, sets); updated || err != nil {
+		if err != nil {
+			return fmt.Errorf("unable to adjust desired replicas of StatefulSet in group %s: %w", groupName, err)
+		}
+
+		return nil
+	}
 
 	// Ensure all StatefulSets have OnDelete update strategy. If not, then we're not able to guarantee
 	// that will be updated only 1 StatefulSet at a time.
@@ -286,6 +300,49 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	}
 
 	return nil
+}
+
+// adjustStatefulSetsGroupReplicas examines each StatefulSet and adjusts the number of replicas
+// if desired. The method returns "true" early if the number of replicas in any StatefulSet was adjusted.
+func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context, groupName string, sets []*v1.StatefulSet) (bool, error) {
+	// Return early no matter what after scaling up or down a single StatefulSet. We do this because
+	// we need to be sure the number of replicas or any relevant annotations (like last downscale time)
+	// are up-to-date on the models. If we modify the StatefulSet, they no longer are.
+	for _, sts := range sets {
+		currentReplicas := *sts.Spec.Replicas
+		desiredReplicas, err := desiredStsReplicas(groupName, sts, sets, c.logger)
+		if err != nil {
+			return false, err
+		}
+
+		if desiredReplicas > currentReplicas {
+			level.Info(c.logger).Log(
+				"msg", "scaling up statefulset to match leader",
+				"group", groupName,
+				"name", sts.GetName(),
+				"replicas", desiredReplicas,
+			)
+
+			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, desiredReplicas)
+			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+			return true, err
+		} else if desiredReplicas < currentReplicas {
+			level.Info(c.logger).Log(
+				"msg", "scaling down statefulset to match leader",
+				"group", groupName,
+				"name", sts.GetName(),
+				"replicas", desiredReplicas,
+			)
+
+			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, desiredReplicas)
+			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+			return true, err
+		}
+
+		// No change in the number of replicas: don't log because this will be the result most of the time.
+	}
+
+	return false, nil
 }
 
 func (c *RolloutController) listStatefulSetsWithRolloutGroup() ([]*v1.StatefulSet, error) {

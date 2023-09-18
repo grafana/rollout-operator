@@ -23,14 +23,14 @@ package types
 
 import (
 	"context"
-	"net"
+	"net/netip"
 	"time"
 
 	"github.com/docker/go-connections/nat"
-	"inet.af/netaddr"
 
+	dockerunits "github.com/docker/go-units"
 	runtimeTypes "github.com/k3d-io/k3d/v5/pkg/runtimes/types"
-	"github.com/k3d-io/k3d/v5/pkg/types/k3s"
+	wharfie "github.com/rancher/wharfie/pkg/registries"
 )
 
 // NodeStatusRestarting defines the status string that signals the node container is restarting
@@ -123,9 +123,9 @@ type ClusterCreateOpts struct {
 	GlobalEnv           []string          `json:"globalEnv,omitempty"`
 	HostAliases         []HostAlias       `json:"hostAliases,omitempty"`
 	Registries          struct {
-		Create *Registry     `json:"create,omitempty"`
-		Use    []*Registry   `json:"use,omitempty"`
-		Config *k3s.Registry `json:"config,omitempty"` // registries.yaml (k3s config for containerd registry override)
+		Create *Registry         `json:"create,omitempty"`
+		Use    []*Registry       `json:"use,omitempty"`
+		Config *wharfie.Registry `json:"config,omitempty"` // registries.yaml (k3s config for containerd registry override)
 	} `json:"registries,omitempty"`
 }
 
@@ -214,14 +214,14 @@ type ImageImportOpts struct {
 }
 
 type IPAM struct {
-	IPPrefix netaddr.IPPrefix `json:"ipPrefix,omitempty"`
-	IPsUsed  []netaddr.IP     `json:"ipsUsed,omitempty"`
-	Managed  bool             // IPAM is done by k3d
+	IPPrefix netip.Prefix `json:"ipPrefix,omitempty"`
+	IPsUsed  []netip.Addr `json:"ipsUsed,omitempty"`
+	Managed  bool         // IPAM is done by k3d
 }
 
 type NetworkMember struct {
 	Name string
-	IP   netaddr.IP
+	IP   netip.Addr
 }
 
 // ClusterNetwork describes a network which a cluster is running in
@@ -278,34 +278,35 @@ func (c *Cluster) AgentCountRunning() (int, int) {
 }
 
 type NodeIP struct {
-	IP     netaddr.IP
+	IP     netip.Addr
 	Static bool
 }
 
 // Node describes a k3d node
 type Node struct {
-	Name          string            `json:"name,omitempty"`
-	Role          Role              `json:"role,omitempty"`
-	Image         string            `json:"image,omitempty"`
-	Volumes       []string          `json:"volumes,omitempty"`
-	Env           []string          `json:"env,omitempty"`
-	Cmd           []string          // filled automatically based on role
-	Args          []string          `json:"extraArgs,omitempty"`
-	Ports         nat.PortMap       `json:"portMappings,omitempty"`
-	Restart       bool              `json:"restart,omitempty"`
-	Created       string            `json:"created,omitempty"`
-	HostPidMode   bool              `json:"hostPidMode,omitempty"`
-	RuntimeLabels map[string]string `json:"runtimeLabels,omitempty"`
-	K3sNodeLabels map[string]string `json:"k3sNodeLabels,omitempty"`
-	Networks      []string          // filled automatically
-	ExtraHosts    []string          // filled automatically (docker specific?)
-	ServerOpts    ServerOpts        `json:"serverOpts,omitempty"`
-	AgentOpts     AgentOpts         `json:"agentOpts,omitempty"`
-	GPURequest    string            // filled automatically
-	Memory        string            // filled automatically
-	State         NodeState         // filled automatically
-	IP            NodeIP            // filled automatically -> refers solely to the cluster network
-	HookActions   []NodeHook        `json:"hooks,omitempty"`
+	Name           string                `json:"name,omitempty"`
+	Role           Role                  `json:"role,omitempty"`
+	Image          string                `json:"image,omitempty"`
+	Volumes        []string              `json:"volumes,omitempty"`
+	Env            []string              `json:"env,omitempty"`
+	Cmd            []string              // filled automatically based on role
+	Args           []string              `json:"extraArgs,omitempty"`
+	Ports          nat.PortMap           `json:"portMappings,omitempty"`
+	Restart        bool                  `json:"restart,omitempty"`
+	Created        string                `json:"created,omitempty"`
+	HostPidMode    bool                  `json:"hostPidMode,omitempty"`
+	RuntimeLabels  map[string]string     `json:"runtimeLabels,omitempty"`
+	RuntimeUlimits []*dockerunits.Ulimit `json:"runtimeUlimits,omitempty"`
+	K3sNodeLabels  map[string]string     `json:"k3sNodeLabels,omitempty"`
+	Networks       []string              // filled automatically
+	ExtraHosts     []string              // filled automatically (docker specific?)
+	ServerOpts     ServerOpts            `json:"serverOpts,omitempty"`
+	AgentOpts      AgentOpts             `json:"agentOpts,omitempty"`
+	GPURequest     string                // filled automatically
+	Memory         string                // filled automatically
+	State          NodeState             // filled automatically
+	IP             NodeIP                // filled automatically -> refers solely to the cluster network
+	HookActions    []NodeHook            `json:"hooks,omitempty"`
 }
 
 // ServerOpts describes some additional server role specific opts
@@ -340,6 +341,6 @@ type NodeState struct {
 }
 
 type EnvironmentInfo struct {
-	HostGateway net.IP
+	HostGateway netip.Addr
 	RuntimeInfo runtimeTypes.RuntimeInfo
 }

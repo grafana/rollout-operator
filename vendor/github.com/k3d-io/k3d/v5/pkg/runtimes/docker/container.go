@@ -39,7 +39,6 @@ import (
 
 // createContainer creates a new docker container from translated specs
 func createContainer(ctx context.Context, dockerNode *NodeInDocker, name string) (string, error) {
-
 	l.Log().Tracef("Creating docker container with translated config\n%+v\n", dockerNode)
 
 	// initialize docker client
@@ -50,7 +49,7 @@ func createContainer(ctx context.Context, dockerNode *NodeInDocker, name string)
 	defer docker.Close()
 
 	// create container
-	var resp container.ContainerCreateCreatedBody
+	var resp container.CreateResponse
 	for {
 		resp, err = docker.ContainerCreate(ctx, &dockerNode.ContainerConfig, &dockerNode.HostConfig, &dockerNode.NetworkingConfig, nil, name)
 		if err != nil {
@@ -82,7 +81,6 @@ func startContainer(ctx context.Context, ID string) error {
 
 // removeContainer deletes a running container (like docker rm -f)
 func removeContainer(ctx context.Context, ID string) error {
-
 	// (0) create docker client
 	docker, err := GetDockerClient()
 	if err != nil {
@@ -108,7 +106,6 @@ func removeContainer(ctx context.Context, ID string) error {
 
 // pullImage pulls a container image and outputs progress if --verbose flag is set
 func pullImage(ctx context.Context, docker client.APIClient, image string) error {
-
 	resp, err := docker.ImagePull(ctx, image, types.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("docker failed to pull the image '%s': %w", image, err)
@@ -128,11 +125,9 @@ func pullImage(ctx context.Context, docker client.APIClient, image string) error
 	}
 
 	return nil
-
 }
 
 func getNodeContainer(ctx context.Context, node *k3d.Node) (*types.Container, error) {
-
 	// (0) create docker client
 	docker, err := GetDockerClient()
 	if err != nil {
@@ -169,7 +164,6 @@ func getNodeContainer(ctx context.Context, node *k3d.Node) (*types.Container, er
 	}
 
 	return &containers[0], nil
-
 }
 
 // executes an arbitrary command in a container while returning its exit code.
@@ -182,7 +176,7 @@ func executeCheckInContainer(ctx context.Context, image string, cmd []string) (i
 	defer docker.Close()
 
 	// create container
-	var resp container.ContainerCreateCreatedBody
+	var resp container.CreateResponse
 	for {
 		resp, err = docker.ContainerCreate(ctx, &container.Config{
 			Image:      image,

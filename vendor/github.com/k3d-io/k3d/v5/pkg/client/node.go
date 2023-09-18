@@ -197,15 +197,7 @@ func NodeAddToCluster(ctx context.Context, runtime runtimes.Runtime, node *k3d.N
 		}
 	}
 
-	if checkK3SURLIsActive(cluster.Nodes, node.Env[k3sURLEnvIndex]) {
-		if !k3sURLEnvFound {
-			if url, ok := node.RuntimeLabels[k3d.LabelClusterURL]; ok {
-				node.Env = append(node.Env, fmt.Sprintf("%s=%s", k3s.EnvClusterConnectURL, url))
-			} else {
-				l.Log().Warnln("Failed to find K3S_URL value!")
-			}
-		}
-	} else {
+	if !k3sURLEnvFound || !checkK3SURLIsActive(cluster.Nodes, node.Env[k3sURLEnvIndex]) {
 		// Use LB if available as registration url for nodes
 		// otherwise fallback to server node
 		var registrationNode *k3d.Node
@@ -429,7 +421,6 @@ func NodeRun(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, node
 
 // NodeStart starts an existing node
 func NodeStart(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, nodeStartOpts *k3d.NodeStartOpts) error {
-
 	// return early, if the node is already running
 	if node.State.Running {
 		l.Log().Infof("Node %s is already running", node.Name)
@@ -497,9 +488,7 @@ func NodeStart(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, no
 }
 
 func enableFixes(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, nodeStartOpts *k3d.NodeStartOpts) error {
-
 	if node.Role == k3d.ServerRole || node.Role == k3d.AgentRole {
-
 		// FIXME: FixCgroupV2 - to be removed when fixed upstream
 		// auto-enable, if needed
 		EnableCgroupV2FixIfNeeded(runtime)
@@ -537,7 +526,7 @@ func enableFixes(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, 
 				}
 			}
 
-			if nodeStartOpts.EnvironmentInfo == nil || nodeStartOpts.EnvironmentInfo.HostGateway == nil {
+			if nodeStartOpts.EnvironmentInfo == nil || !nodeStartOpts.EnvironmentInfo.HostGateway.IsValid() {
 				return fmt.Errorf("Cannot enable DNS fix, as Host Gateway IP is missing!")
 			}
 
@@ -571,6 +560,25 @@ func enableFixes(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, 
 					Dest:        "/bin/k3d-entrypoint-cgroupv2.sh",
 					Mode:        0744,
 					Description: "Write entrypoint script for CGroupV2 fix",
+				},
+			})
+		}
+
+		if fixes.FixEnabled(fixes.EnvFixMounts) {
+			l.Log().Debugf(">>> enabling mounts magic")
+
+			if nodeStartOpts.NodeHooks == nil {
+				nodeStartOpts.NodeHooks = []k3d.NodeHook{}
+			}
+
+			nodeStartOpts.NodeHooks = append(nodeStartOpts.NodeHooks, k3d.NodeHook{
+				Stage: k3d.LifecycleStagePreStart,
+				Action: actions.WriteFileAction{
+					Runtime:     runtime,
+					Content:     fixes.MountsEntrypoint,
+					Dest:        "/bin/k3d-entrypoint-mounts.sh",
+					Mode:        0744,
+					Description: "Write entrypoint script for mounts fix",
 				},
 			})
 		}
@@ -765,6 +773,8 @@ func NodeGet(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node) (*k3
 func NodeWaitForLogMessage(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, message string, since time.Time) error {
 	l.Log().Tracef("NodeWaitForLogMessage: Node '%s' waiting for log message '%s' since '%+v'", node.Name, message, since)
 
+	message = strings.ToLower(message)
+
 	// specify max number of retries if container is in crashloop (as defined by last seen message being a fatal log)
 	backOffLimit := k3d.DefaultNodeWaitForLogMessageCrashLoopBackOffLimit
 	if l, ok := os.LookupEnv(k3d.K3dEnvDebugNodeWaitBackOffLimit); ok {
@@ -788,12 +798,11 @@ func NodeWaitForLogMessage(ctx context.Context, runtime runtimes.Runtime, node *
 			}
 			// check if the container is restarting
 			running, status, _ := runtime.GetNodeStatus(ctx, node)
-			if running && status == k3d.NodeStatusRestarting && time.Now().Sub(since) > k3d.NodeWaitForLogMessageRestartWarnTime {
+			if running && status == k3d.NodeStatusRestarting && time.Since(since) > k3d.NodeWaitForLogMessageRestartWarnTime {
 				l.Log().Warnf("Node '%s' is restarting for more than %s now. Possibly it will recover soon (e.g. when it's waiting to join). Consider using a creation timeout to avoid waiting forever in a Restart Loop.", node.Name, k3d.NodeWaitForLogMessageRestartWarnTime)
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
-
 	}(ctx, runtime, node, since, donechan)
 
 	// pre-building error message in case the node stops returning logs for some reason: to be enriched with scanner error
@@ -804,7 +813,6 @@ func NodeWaitForLogMessage(ctx context.Context, runtime runtimes.Runtime, node *
 	// e.g. when a new server is joining an existing cluster and has to wait for another member to finish learning.
 	// The logstream returned by docker ends everytime the container restarts, so we have to start from the beginning.
 	for i := 0; i < backOffLimit; i++ {
-
 		// get the log stream (reader is following the logstream)
 		out, err := runtime.GetNodeLogs(ctx, node, since, &runtimeTypes.NodeLogsOpts{Follow: true})
 		if out != nil {
@@ -836,14 +844,13 @@ func NodeWaitForLogMessage(ctx context.Context, runtime runtimes.Runtime, node *
 				l.Log().Tracef(">>> Parsing log line: `%s`", scanner.Text())
 			}
 			// check if we can find the specified line in the log
-			if strings.Contains(scanner.Text(), message) {
+			if strings.Contains(strings.ToLower(scanner.Text()), message) {
 				l.Log().Tracef("Found target message `%s` in log line `%s`", message, scanner.Text())
 				l.Log().Debugf("Finished waiting for log message '%s' from node '%s'", message, node.Name)
 				return nil
 			}
 
 			previousline = scanner.Text()
-
 		}
 
 		if e := scanner.Err(); e != nil {
@@ -910,7 +917,6 @@ nodeLoop:
 
 // NodeEdit let's you update an existing node
 func NodeEdit(ctx context.Context, runtime runtimes.Runtime, existingNode, changeset *k3d.Node) error {
-
 	/*
 	 * Make a deep copy of the existing node
 	 */
@@ -931,7 +937,6 @@ func NodeEdit(ctx context.Context, runtime runtimes.Runtime, existingNode, chang
 	for port, portbindings := range changeset.Ports {
 	loopChangesetPortbindings:
 		for _, portbinding := range portbindings {
-
 			// loop over existing portbindings to avoid port collisions (docker doesn't check for it)
 			for _, existingPB := range result.Ports[port] {
 				if util.IsPortBindingEqual(portbinding, existingPB) { // also matches on "equal" HostIPs (127.0.0.1, "", 0.0.0.0)
@@ -984,7 +989,6 @@ func NodeEdit(ctx context.Context, runtime runtimes.Runtime, existingNode, chang
 }
 
 func NodeReplace(ctx context.Context, runtime runtimes.Runtime, old, new *k3d.Node) error {
-
 	// rename existing node
 	oldNameTemp := fmt.Sprintf("%s-%s", old.Name, util.GenerateRandomString(5))
 	oldNameOriginal := old.Name
@@ -1040,7 +1044,6 @@ type CopyNodeOpts struct {
 }
 
 func CopyNode(ctx context.Context, src *k3d.Node, opts CopyNodeOpts) (*k3d.Node, error) {
-
 	targetCopy, err := copystruct.Copy(src)
 	if err != nil {
 		return nil, fmt.Errorf("failed to copy node struct: %w", err)

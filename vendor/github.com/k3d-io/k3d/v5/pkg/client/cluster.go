@@ -41,16 +41,17 @@ import (
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/yaml"
 
+	wharfie "github.com/rancher/wharfie/pkg/registries"
+
 	"github.com/k3d-io/k3d/v5/pkg/actions"
-	config "github.com/k3d-io/k3d/v5/pkg/config/v1alpha4"
+	config "github.com/k3d-io/k3d/v5/pkg/config/v1alpha5"
 	l "github.com/k3d-io/k3d/v5/pkg/logger"
-	"github.com/k3d-io/k3d/v5/pkg/runtimes"
 	k3drt "github.com/k3d-io/k3d/v5/pkg/runtimes"
 	runtimeErr "github.com/k3d-io/k3d/v5/pkg/runtimes/errors"
-	"github.com/k3d-io/k3d/v5/pkg/types"
 	k3d "github.com/k3d-io/k3d/v5/pkg/types"
 	"github.com/k3d-io/k3d/v5/pkg/types/k3s"
 	"github.com/k3d-io/k3d/v5/pkg/util"
+	goyaml "gopkg.in/yaml.v2"
 )
 
 // ClusterRun orchestrates the steps of cluster creation, configuration and starting
@@ -179,7 +180,7 @@ func ClusterPrep(ctx context.Context, runtime k3drt.Runtime, clusterConfig *conf
 	// Use existing registries (including the new one, if created)
 	l.Log().Tracef("Using Registries: %+v", clusterConfig.ClusterCreateOpts.Registries.Use)
 
-	var registryConfig *k3s.Registry
+	var registryConfig *wharfie.Registry
 
 	if len(clusterConfig.ClusterCreateOpts.Registries.Use) > 0 {
 		// ensure that all selected registries exist and connect them to the cluster network
@@ -217,7 +218,6 @@ func ClusterPrep(ctx context.Context, runtime k3drt.Runtime, clusterConfig *conf
 		})
 
 		registryConfig = regConf
-
 	}
 	// merge with pre-existing, referenced registries.yaml
 	if clusterConfig.ClusterCreateOpts.Registries.Config != nil {
@@ -231,7 +231,7 @@ func ClusterPrep(ctx context.Context, runtime k3drt.Runtime, clusterConfig *conf
 		}
 	}
 	if registryConfig != nil {
-		regConfBytes, err := yaml.Marshal(&registryConfig)
+		regConfBytes, err := goyaml.Marshal(&registryConfig)
 		if err != nil {
 			return fmt.Errorf("Failed to marshal registry configuration: %+v", err)
 		}
@@ -248,7 +248,6 @@ func ClusterPrep(ctx context.Context, runtime k3drt.Runtime, clusterConfig *conf
 	}
 
 	return nil
-
 }
 
 // ClusterPrepNetwork creates a new cluster network, if needed or sets everything up to re-use an existing network
@@ -260,7 +259,7 @@ func ClusterPrepNetwork(ctx context.Context, runtime k3drt.Runtime, cluster *k3d
 		return fmt.Errorf("Failed to use external network because no name was specified")
 	}
 
-	if cluster.Network.Name != "" && cluster.Network.External && !cluster.Network.IPAM.IPPrefix.IsZero() {
+	if cluster.Network.Name != "" && cluster.Network.External && cluster.Network.IPAM.IPPrefix.IsValid() {
 		return fmt.Errorf("cannot specify subnet for exiting network")
 	}
 
@@ -329,7 +328,6 @@ func ClusterPrepImageVolume(ctx context.Context, runtime k3drt.Runtime, cluster 
 // - some containerized k3s nodes
 // - a docker network
 func ClusterCreate(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Cluster, clusterCreateOpts *k3d.ClusterCreateOpts) error {
-
 	l.Log().Tracef(`
 ===== Creating Cluster =====
 
@@ -361,7 +359,7 @@ ClusterCreatOpts:
 	 */
 	if cluster.KubeAPI.Host == k3d.DefaultAPIHost && runtime == k3drt.Docker {
 		// If the runtime is docker, attempt to use the docker host
-		if runtime == runtimes.Docker {
+		if runtime == k3drt.Docker {
 			dockerHost := runtime.GetHost()
 			if dockerHost != "" {
 				dockerHost = strings.Split(dockerHost, ":")[0] // remove the port
@@ -428,7 +426,6 @@ ClusterCreatOpts:
 
 		// node role specific settings
 		if node.Role == k3d.ServerRole {
-
 			if cluster.Network.IPAM.Managed {
 				ip, err := GetIP(ctx, runtime, &cluster.Network)
 				if err != nil {
@@ -447,7 +444,6 @@ ClusterCreatOpts:
 				node.Env = append(node.Env, fmt.Sprintf("%s=%s", k3s.EnvClusterConnectURL, connectionURL))
 				node.RuntimeLabels[k3d.LabelServerIsInit] = "false" // set label, that this server node is not the init server
 			}
-
 		} else if node.Role == k3d.AgentRole {
 			node.Env = append(node.Env, fmt.Sprintf("%s=%s", k3s.EnvClusterConnectURL, connectionURL))
 		}
@@ -489,13 +485,11 @@ ClusterCreatOpts:
 			return fmt.Errorf("failed init node setup: %w", err)
 		}
 		serverCount++
-
 	}
 
 	// create all other nodes, but skip the init node
 	for _, node := range cluster.Nodes {
 		if node.Role == k3d.ServerRole {
-
 			// skip the init node here
 			if node == cluster.InitNode {
 				continue
@@ -510,7 +504,6 @@ ClusterCreatOpts:
 			time.Sleep(1 * time.Second) // FIXME: arbitrary wait for one second to avoid race conditions of servers registering
 
 			serverCount++
-
 		}
 		if node.Role == k3d.ServerRole || node.Role == k3d.AgentRole {
 			if err := nodeSetup(node); err != nil {
@@ -586,7 +579,6 @@ ClusterCreatOpts:
 
 // ClusterDelete deletes an existing cluster
 func ClusterDelete(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Cluster, opts k3d.ClusterDeleteOpts) error {
-
 	l.Log().Infof("Deleting cluster '%s'", cluster.Name)
 	cluster, err := ClusterGet(ctx, runtime, cluster)
 	if err != nil {
@@ -638,7 +630,6 @@ func ClusterDelete(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Clus
 			l.Log().Infof("Deleting cluster network '%s'", cluster.Network.Name)
 			if err := runtime.DeleteNetwork(ctx, cluster.Network.Name); err != nil {
 				if errors.Is(err, runtimeErr.ErrRuntimeNetworkNotEmpty) { // there are still containers connected to that network
-
 					connectedNodes, err := runtime.GetNodesInNetwork(ctx, cluster.Network.Name) // check, if there are any k3d nodes connected to the cluster
 					if err != nil {
 						l.Log().Warningf("Failed to check cluster network for connected nodes: %+v", err)
@@ -748,7 +739,6 @@ func populateClusterFieldsFromLabels(cluster *k3d.Cluster) error {
 	networkExternalSet := false
 
 	for _, node := range cluster.Nodes {
-
 		// get the name of the cluster network
 		if cluster.Network.Name == "" {
 			if networkName, ok := node.RuntimeLabels[k3d.LabelNetwork]; ok {
@@ -817,11 +807,9 @@ func ClusterGet(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Cluster
 
 	// append nodes
 	for _, node := range nodes {
-
 		// check if there's already a node in the struct
 		overwroteExisting := false
 		for _, existingNode := range cluster.Nodes {
-
 			// overwrite existing node
 			if existingNode.Name == node.Name {
 				mergo.MergeWithOverwrite(existingNode, node)
@@ -833,7 +821,6 @@ func ClusterGet(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Cluster
 		if !overwroteExisting {
 			cluster.Nodes = append(cluster.Nodes, node)
 		}
-
 	}
 
 	// Loadbalancer
@@ -855,7 +842,7 @@ func ClusterGet(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Cluster
 		}
 	}
 
-	vols, err := runtime.GetVolumesByLabel(ctx, map[string]string{types.LabelClusterName: cluster.Name})
+	vols, err := runtime.GetVolumesByLabel(ctx, map[string]string{k3d.LabelClusterName: cluster.Name})
 	if err != nil {
 		return nil, err
 	}
@@ -882,7 +869,7 @@ func GenerateNodeName(cluster string, role k3d.Role, suffix int) string {
 }
 
 // ClusterStart starts a whole cluster (i.e. all nodes of the cluster)
-func ClusterStart(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Cluster, clusterStartOpts types.ClusterStartOpts) error {
+func ClusterStart(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Cluster, clusterStartOpts k3d.ClusterStartOpts) error {
 	l.Log().Infof("Starting cluster '%s'", cluster.Name)
 
 	if clusterStartOpts.Intent == "" {
@@ -931,7 +918,7 @@ func ClusterStart(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Clust
 		if err := NodeStart(ctx, runtime, initNode, &k3d.NodeStartOpts{
 			Wait:            true, // always wait for the init node
 			NodeHooks:       clusterStartOpts.NodeHooks,
-			ReadyLogMessage: types.GetReadyLogMessage(initNode, clusterStartOpts.Intent), // initNode means, that we're using etcd -> this will need quorum, so "k3s is up and running" won't happen right now
+			ReadyLogMessage: k3d.GetReadyLogMessage(initNode, clusterStartOpts.Intent), // initNode means, that we're using etcd -> this will need quorum, so "k3s is up and running" won't happen right now
 			EnvironmentInfo: clusterStartOpts.EnvironmentInfo,
 		}); err != nil {
 			return fmt.Errorf("Failed to start initializing server node: %+v", err)
@@ -1015,7 +1002,6 @@ func ClusterStart(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Clust
 	 */
 
 	if len(servers) > 0 || len(agents) > 0 { // TODO: make checks for required cluster start actions cleaner
-
 		postStartErrgrp, postStartErrgrpCtx := errgroup.WithContext(ctx)
 
 		/*** DNS ***/
@@ -1041,7 +1027,6 @@ func ClusterStart(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Clust
 			// -> inject hostAliases and network members into CoreDNS configmap
 			if len(servers) > 0 {
 				postStartErrgrp.Go(func() error {
-
 					hosts := ""
 
 					// hosts: hostAliases (including host.k3d.internal)
@@ -1098,7 +1083,6 @@ func ClusterStart(ctx context.Context, runtime k3drt.Runtime, cluster *k3d.Clust
 
 					// get the first server in the list and run action on it once it's ready for it
 					for _, n := range servers {
-
 						// do not try to run the action, if CoreDNS is disabled on K3s level
 						for _, flag := range n.Args {
 							if strings.HasPrefix(flag, "--disable") && strings.Contains(flag, "coredns") {
@@ -1170,7 +1154,7 @@ func prepCreateLocalRegistryHostingConfigMap(ctx context.Context, runtime k3drt.
 			}
 		}
 	}
-	if success == false {
+	if !success {
 		l.Log().Warnf("Failed to create LocalRegistryHosting ConfigMap")
 	}
 	return nil

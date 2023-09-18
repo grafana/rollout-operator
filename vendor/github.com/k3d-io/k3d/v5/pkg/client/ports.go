@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/k3d-io/k3d/v5/pkg/config/types"
-	config "github.com/k3d-io/k3d/v5/pkg/config/v1alpha4"
+	config "github.com/k3d-io/k3d/v5/pkg/config/v1alpha5"
 	l "github.com/k3d-io/k3d/v5/pkg/logger"
 	"github.com/k3d-io/k3d/v5/pkg/runtimes"
 	k3d "github.com/k3d-io/k3d/v5/pkg/types"
@@ -102,7 +102,6 @@ func TransformPorts(ctx context.Context, runtime runtimes.Runtime, cluster *k3d.
 				return fmt.Errorf("error adding port mappings: unknown suffix %s", suffix)
 			}
 		}
-
 	}
 
 	// print generated loadbalancer config if exists
@@ -119,7 +118,6 @@ func TransformPorts(ctx context.Context, runtime runtimes.Runtime, cluster *k3d.
 }
 
 func addPortMappings(node *k3d.Node, portmappings []nat.PortMapping) error {
-
 	if node.Ports == nil {
 		node.Ports = nat.PortMap{}
 	}

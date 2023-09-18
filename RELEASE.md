@@ -10,5 +10,5 @@
     ```
 1. Publish the updated Docker image
     ```bash
-    $ IMAGE_TAG="${tag}" make publish-image
+    $ IMAGE_TAG="${tag}" make publish-images
     ```

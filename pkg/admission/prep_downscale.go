@@ -15,16 +15,16 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 const (
-	PrepareDownscalePathAnnotationKey = "grafana.com/prepare-downscale-http-path"
-	PrepareDownscalePortAnnotationKey = "grafana.com/prepare-downscale-http-port"
-	PrepareDownscaleLabelKey          = "grafana.com/prepare-downscale"
-	PrepareDownscaleLabelValue        = "true"
-	PrepareDownscaleWebhookPath       = "/admission/prepare-downscale"
-	RolloutGroupLabelKey              = "rollout-group"
+	PrepareDownscaleWebhookPath = "/admission/prepare-downscale"
 )
 
 func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
@@ -119,30 +119,30 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		return allowWarn(logger, fmt.Sprintf("unsupported type %T, allowing the change", o))
 	}
 
-	if lbls[PrepareDownscaleLabelKey] != PrepareDownscaleLabelValue {
+	if lbls[config.PrepareDownscaleLabelKey] != config.PrepareDownscaleLabelValue {
 		// Not labeled, nothing to do.
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
-	port := annotations[PrepareDownscalePortAnnotationKey]
+	port := annotations[config.PrepareDownscalePortAnnotationKey]
 	if port == "" {
-		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", PrepareDownscalePortAnnotationKey))
+		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePortAnnotationKey))
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v annotation is not set or empty.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepareDownscalePortAnnotationKey,
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, config.PrepareDownscalePortAnnotationKey,
 		)
 	}
 
-	path := annotations[PrepareDownscalePathAnnotationKey]
+	path := annotations[config.PrepareDownscalePathAnnotationKey]
 	if path == "" {
-		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", PrepareDownscalePathAnnotationKey))
+		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePathAnnotationKey))
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v annotation is not set or empty.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, PrepareDownscalePathAnnotationKey,
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, config.PrepareDownscalePathAnnotationKey,
 		)
 	}
 
-	rolloutGroup := lbls[RolloutGroupLabelKey]
+	rolloutGroup := lbls[config.RolloutGroupLabelKey]
 	if rolloutGroup != "" {
 		foundSts, err := findDownscalesDoneMinTimeAgo(ctx, api, ar.Request.Namespace, ar.Request.Name, rolloutGroup)
 		if err != nil {
@@ -257,4 +257,70 @@ func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kube
 		return obj.Annotations, nil
 	}
 	return nil, fmt.Errorf("unsupported resource %s", ar.Request.Resource.Resource)
+}
+
+func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
+	client := api.AppsV1().StatefulSets(namespace)
+	patch := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, config.LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))
+	_, err := client.Patch(ctx, stsName, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+	return err
+}
+
+type statefulSetDownscale struct {
+	name              string
+	waitTime          time.Duration
+	lastDownscaleTime time.Time
+}
+
+func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface, namespace, stsName, rolloutGroup string) (*statefulSetDownscale, error) {
+	client := api.AppsV1().StatefulSets(namespace)
+	groupReq, err := labels.NewRequirement(config.RolloutGroupLabelKey, selection.Equals, []string{rolloutGroup})
+	if err != nil {
+		return nil, err
+	}
+	sel := labels.NewSelector().Add(*groupReq)
+	list, err := client.List(ctx, metav1.ListOptions{
+		LabelSelector: sel.String(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sts := range list.Items {
+		if sts.Name == stsName {
+			continue
+		}
+		lastDownscaleAnnotation, ok := sts.Annotations[config.LastDownscaleAnnotationKey]
+		if !ok {
+			// No last downscale label set on the statefulset, we can continue
+			continue
+		}
+
+		lastDownscale, err := time.Parse(time.RFC3339, lastDownscaleAnnotation)
+		if err != nil {
+			return nil, fmt.Errorf("can't parse %v annotation of %s: %w", config.LastDownscaleAnnotationKey, sts.Name, err)
+		}
+
+		timeBetweenDownscaleLabel, ok := sts.Labels[config.MinTimeBetweenZonesDownscaleLabelKey]
+		if !ok {
+			// No time between downscale label set on the statefulset, we can continue
+			continue
+		}
+
+		minTimeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscaleLabel)
+		if err != nil {
+			return nil, fmt.Errorf("can't parse %v label of %s: %w", config.MinTimeBetweenZonesDownscaleLabelKey, sts.Name, err)
+		}
+
+		if time.Since(lastDownscale) < minTimeBetweenDownscale {
+			s := statefulSetDownscale{
+				name:              sts.Name,
+				waitTime:          minTimeBetweenDownscale,
+				lastDownscaleTime: lastDownscale,
+			}
+			return &s, nil
+		}
+
+	}
+	return nil, nil
 }
