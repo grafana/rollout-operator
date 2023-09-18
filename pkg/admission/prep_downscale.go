@@ -225,7 +225,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 	// Down-scale operation is allowed because all pods successfully prepared for shutdown. A patch is included for last-downscale.
 	level.Info(logger).Log("msg", "downscale allowed")
 	pt := v1.PatchTypeJSONPatch
-	patch := fmt.Sprintf(`[{"op": "add", "path": "/metadata/annotations/%v", "value": "%v"}]`, config.LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))
+	patch := fmt.Sprintf(`[{"op": "add", "path": "/metadata/annotations/grafana.com~1last-downscale", "value": "%s"}]`, time.Now().UTC().Format(time.RFC3339))
 	return &v1.AdmissionResponse{
 		Allowed: true,
 		Result: &metav1.Status{
