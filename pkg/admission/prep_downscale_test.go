@@ -253,7 +253,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	if params.stsAnnotated {
 		// Check that the admission response includes the patch for the last-downscale annotation
 		require.NotNil(t, admissionResponse.Patch)
-		require.Equal(t, admissionResponse.Patch, []byte(fmt.Sprintf(`[{"op": "add", "path": "/metadata/annotations/grafana.com~1last-downscale", "value": "%s"}]`, time.Now().UTC().Format(time.RFC3339))))
+		require.Equal(t, admissionResponse.Patch, []byte(fmt.Sprintf(`[{"op": "add", "path": "/metadata/annotations", "value": {"/grafana.com/last-downscale", "%s"}}]`, time.Now().UTC().Format(time.RFC3339))))
 	}
 }
 
