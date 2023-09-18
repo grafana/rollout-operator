@@ -248,11 +248,8 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
 	if params.stsAnnotated {
-		// Check that the statefulset now has the last-downscale annotation
-		updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
-		require.NoError(t, err)
-		require.NotNil(t, updatedSts.Annotations)
-		require.NotNil(t, updatedSts.Annotations[LastDownscaleAnnotationKey])
+		// Check that the admission response includes the patch for the last-downscale annotation
+		require.NotNil(t, admissionResponse.Patch)
 	}
 }
 

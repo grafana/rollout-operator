@@ -225,13 +225,14 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	// Down-scale operation is allowed because all pods successfully prepared for shutdown. A patch is included for last-downscale.
 	level.Info(logger).Log("msg", "downscale allowed")
+	patch := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))
 	pt := v1.PatchTypeJSONPatch
 	return &v1.AdmissionResponse{
 		Allowed: true,
 		Result: &metav1.Status{
 			Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is allowed -- all pods successfully prepared for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
 		},
-		Patch:     []byte(fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))),
+		Patch:     []byte(patch),
 		PatchType: &pt,
 	}
 }
