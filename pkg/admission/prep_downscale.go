@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/pkg/config"
@@ -257,13 +256,6 @@ func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kube
 		return obj.Annotations, nil
 	}
 	return nil, fmt.Errorf("unsupported resource %s", ar.Request.Resource.Resource)
-}
-
-func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
-	client := api.AppsV1().StatefulSets(namespace)
-	patch := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, config.LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))
-	_, err := client.Patch(ctx, stsName, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
-	return err
 }
 
 type statefulSetDownscale struct {
