@@ -3,6 +3,7 @@ package admission
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -252,6 +253,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	if params.stsAnnotated {
 		// Check that the admission response includes the patch for the last-downscale annotation
 		require.NotNil(t, admissionResponse.Patch)
+		require.Equal(t, admissionResponse.Patch, []byte(fmt.Sprintf(`[{"op": "add", "path": "/metadata/annotations/%v", "value": "%v"}]`, config.LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))))
 	}
 }
 
