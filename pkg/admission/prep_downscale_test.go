@@ -3,6 +3,7 @@ package admission
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"testing"
 	"text/template"
-	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -119,6 +119,10 @@ func (f *fakeHttpClient) Post(url, contentType string, body io.Reader) (resp *ht
 		StatusCode: f.statusCode,
 		Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
 	}, nil
+}
+
+func (f *fakeHttpClient) Get(url string) (resp *http.Response, err error) {
+	return nil, errors.New("Unimplemented GET method")
 }
 
 func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, options ...optionFunc) {
@@ -236,9 +240,6 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 						config.RolloutGroupLabelKey:                 "ingester",
 						config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
 					},
-					Annotations: map[string]string{
-						config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339),
-					},
 				},
 			},
 		)
@@ -248,14 +249,6 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 
 	admissionResponse := prepareDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
-
-	if params.stsAnnotated {
-		// Check that the statefulset now has the last-downscale annotation
-		updatedSts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
-		require.NoError(t, err)
-		require.NotNil(t, updatedSts.Annotations)
-		require.NotNil(t, updatedSts.Annotations[config.LastDownscaleAnnotationKey])
-	}
 }
 
 func statefulSetTemplate(params templateParams) ([]byte, error) {
