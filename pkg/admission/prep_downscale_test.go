@@ -3,7 +3,6 @@ package admission
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +10,7 @@ import (
 	"os"
 	"testing"
 	"text/template"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -111,18 +111,22 @@ type templateParams struct {
 }
 
 type fakeHttpClient struct {
-	statusCode int
+	statusCode     int
+	lastSuccesfull time.Time
 }
 
 func (f *fakeHttpClient) Post(url, contentType string, body io.Reader) (resp *http.Response, err error) {
 	return &http.Response{
 		StatusCode: f.statusCode,
-		Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
+		Body:       io.NopCloser(bytes.NewBuffer([]byte("set "))),
 	}, nil
 }
 
 func (f *fakeHttpClient) Get(url string) (resp *http.Response, err error) {
-	return nil, errors.New("Unimplemented GET method")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewBuffer([]byte("set " + f.lastSuccesfull.Format(time.RFC3339)))),
+	}, nil
 }
 
 func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, options ...optionFunc) {
@@ -211,6 +215,12 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 				UID:       types.UID(stsName),
 				Labels:    map[string]string{config.RolloutGroupLabelKey: "ingester"},
 			},
+			Spec: apps.StatefulSetSpec{
+				Replicas: func() *int32 {
+					var i int32 = 1
+					return &i
+				}(),
+			},
 		},
 		&apps.StatefulSet{
 			TypeMeta: metav1.TypeMeta{
@@ -222,6 +232,12 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 				Namespace: namespace,
 				UID:       types.UID(stsName),
 				Labels:    map[string]string{config.RolloutGroupLabelKey: "ingester"},
+			},
+			Spec: apps.StatefulSetSpec{
+				Replicas: func() *int32 {
+					var i int32 = 1
+					return &i
+				}(),
 			},
 		},
 	}
@@ -241,11 +257,24 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 						config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
 					},
 				},
+				Spec: apps.StatefulSetSpec{
+					Replicas: func() *int32 {
+						var i int32 = 1
+						return &i
+					}(),
+				},
 			},
 		)
 	}
+	timestamp := time.Now()
+	if params.downscaleInProgress {
+		timestamp = timestamp.Add(-15 * time.Hour)
+	}
 	api := fake.NewSimpleClientset(objects...)
-	f := &fakeHttpClient{statusCode: params.statusCode}
+	f := &fakeHttpClient{
+		statusCode:     params.statusCode,
+		lastSuccesfull: timestamp,
+	}
 
 	admissionResponse := prepareDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)

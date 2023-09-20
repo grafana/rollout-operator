@@ -169,28 +169,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
-	type endpoint struct {
-		url   string
-		index int
-	}
-	eps := make([]endpoint, diff)
-
-	// The DNS entry for a pod of a stateful set is
-	// ingester-zone-a-0.$(servicename).$(namespace).svc.cluster.local
-	// The service in this case is ingester-zone-a as well.
-	// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
-	for i := 0; i < int(diff); i++ {
-		index := int(*oldReplicas) - i - 1 // nr in statefulset
-		eps[i].url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
-			ar.Request.Name, // pod name
-			index,
-			ar.Request.Name, // svc name
-			ar.Request.Namespace,
-			port,
-			path,
-		)
-		eps[i].index = index
-	}
+	eps := changedEndpoints(*oldReplicas, diff, ar, ar.Request.Name, port, path)
 
 	g, _ := errgroup.WithContext(ctx)
 	for _, ep := range eps {
@@ -276,81 +255,61 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 		return nil, err
 	}
 
-	timeStamps := make(chan time.Time)
-
 	for _, sts := range list.Items {
 		if sts.Name == ar.Request.Name {
 			continue
 		}
+		replicas := *sts.Spec.Replicas
+		level.Info(logger).Log("msg", "replicas for STS "+sts.Name, "replicas", replicas)
+
 		// Get time of last prepare_shutdown using the endpoint
-		eps := changedEndpoints(oldReplicas, diff, ar, sts.Name, port, path)
-		g, ctx := errgroup.WithContext(ctx)
-		for _, ep := range eps {
-			ep := ep // https://golang.org/doc/faq#closures_and_goroutines
-			g.Go(func() error {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
+		var ep endpoint
+		ep.url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
+			sts.Name, // pod name
+			replicas-1,
+			sts.Name, // svc name
+			ar.Request.Namespace,
+			port,
+			path,
+		)
 
-				logger := log.With(logger, "url", ep.url, "index", ep.index)
-
-				resp, err := httpClient.Get("http://" + ep.url)
-				if err != nil {
-					level.Error(logger).Log("msg", "error sending HTTP get request", "err", err)
-					return nil
-				}
-				defer resp.Body.Close()
-				if resp.StatusCode/100 != 2 {
-					err := errors.New("HTTP get request returned non-2xx status code")
-					body, readError := io.ReadAll(resp.Body)
-					defer resp.Body.Close()
-					level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", errors.Join(err, readError), "status", resp.StatusCode, "response_body", body)
-					return nil
-				}
-
-				bts, err := io.ReadAll(resp.Body)
-				if err != nil {
-					level.Error(logger).Log("msg", "error reading body of HTTP get request", "err", err)
-					return nil
-				}
-
-				splits := strings.SplitN(string(bts), " ", 2)
-				if len(splits) != 2 {
-					level.Error(logger).Log("msg", "error splitting body of HTTP get request", "err", err, "body", string(bts))
-					return nil
-				}
-
-				t, err := time.Parse(time.RFC3339, splits[1])
-				if err != nil {
-					level.Error(logger).Log("msg", "error parsing timestamp", "err", err, "timestamp", splits[1])
-					return nil
-				}
-
-				timeStamps <- t
-				return nil
-			})
-		}
-		err = g.Wait()
+		logger := log.With(logger, "url", ep.url)
+		resp, err := httpClient.Get("http://" + ep.url)
 		if err != nil {
-			level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
+			level.Error(logger).Log("msg", "error sending HTTP get request", "err", err)
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode/100 != 2 {
+			level.Info(logger).Log("msg", "returning early due to non 200")
+			return nil, nil
+			/*
+				err := errors.New("HTTP get request returned non-2xx status code")
+				body, readError := io.ReadAll(resp.Body)
+				defer resp.Body.Close()
+				level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", errors.Join(err, readError), "status", resp.StatusCode, "response_body", body)
+				return nil, errors.Join(err, readError)
+			*/
+		}
+
+		bts, err := io.ReadAll(resp.Body)
+		if err != nil {
+			level.Error(logger).Log("msg", "error reading body of HTTP get request", "err", err)
 			return nil, err
 		}
 
-		var lastDownscale time.Time
-		for ts := range timeStamps {
-			if lastDownscale.IsZero() {
-				lastDownscale = ts
-			} else if ts.After(lastDownscale) {
-				lastDownscale = ts
-			}
+		splits := strings.SplitN(string(bts), " ", 2)
+		if len(splits) != 2 {
+			level.Error(logger).Log("msg", "error splitting body of HTTP get request", "err", err, "body", string(bts))
+			return nil, fmt.Errorf("error splitting body (%v) of HTTP get request: %w", string(bts), err)
 		}
-		if lastDownscale.IsZero() {
-			// TODO: check this is correct
-			// If there is no downscale label yet, continue
-			continue
+
+		lastDownscale, err := time.Parse(time.RFC3339, splits[1])
+		if err != nil {
+			level.Error(logger).Log("msg", "error parsing timestamp", "err", err, "timestamp", splits[1])
+			return nil, err
 		}
+		level.Info(logger).Log("msg", "last downscale time received", "time", lastDownscale.String())
 
 		timeBetweenDownscaleLabel, ok := sts.Labels[config.MinTimeBetweenZonesDownscaleLabelKey]
 		if !ok {
@@ -363,7 +322,8 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 			return nil, fmt.Errorf("can't parse %v label of %s: %w", config.MinTimeBetweenZonesDownscaleLabelKey, sts.Name, err)
 		}
 
-		if time.Since(lastDownscale) < minTimeBetweenDownscale {
+		level.Info(logger).Log("msg", "checking time ", "minTimeBetween", minTimeBetweenDownscale.String(), "timeSince", time.Since(lastDownscale).String())
+		if time.Since(lastDownscale) > minTimeBetweenDownscale {
 			s := statefulSetDownscale{
 				name:              sts.Name,
 				waitTime:          minTimeBetweenDownscale,
@@ -371,7 +331,6 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 			}
 			return &s, nil
 		}
-
 	}
 	return nil, nil
 }
