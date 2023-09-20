@@ -144,11 +144,20 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	rolloutGroup := lbls[config.RolloutGroupLabelKey]
 	if rolloutGroup != "" {
-		foundSts, err := findDownscalesDoneMinTimeAgo(ctx, api, ar.Request.Namespace, ar.Request.Name, rolloutGroup)
+		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, rolloutGroup)
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
 			return deny(
 				"downscale of %s/%s in %s from %d to %d replicas is not allowed because finding other statefulsets failed.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
+			)
+		}
+
+		foundSts, err := findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name)
+		if err != nil {
+			level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale annotations", "err", err)
+			return deny(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because parsing downscale annotations failed.",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
 			)
 		}
@@ -160,19 +169,12 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 			)
 		}
 
-		foundSts, err = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, rolloutGroup)
-		if err != nil {
-			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
-			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because finding other statefulsets failed.",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
-			)
-		}
+		foundSts = findStatefulSetWithNonUpdatedReplicas(stsList)
 		if foundSts != nil {
-			level.Warn(logger).Log("msg", "downscale not allowed because another statefulset with non-updated replicas", "err", err)
+			level.Warn(logger).Log("msg", "downscale not allowed because another statefulset with non-updated replicas")
 			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was has %d non-updated replicas",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.nonUpdatedReplicas,
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas,
 			)
 		}
 	}
@@ -291,16 +293,13 @@ type statefulSetDownscale struct {
 	name               string
 	waitTime           time.Duration
 	lastDownscaleTime  time.Time
+	nonReadyReplicas   uint
 	nonUpdatedReplicas uint
 }
 
-func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface, namespace, stsName, rolloutGroup string) (*statefulSetDownscale, error) {
-	list, err := findStatefulSetsForRolloutGroup(ctx, api, namespace, rolloutGroup)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, sts := range list.Items {
+// findDownscalesDoneMinTimeAgo returns an error if downscale annotations cannot be parsed.
+func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, stsName string) (*statefulSetDownscale, error) {
+	for _, sts := range stsList.Items {
 		if sts.Name == stsName {
 			continue
 		}
@@ -341,22 +340,18 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface,
 
 // findStatefulSetWithNonUpdatedReplicas returns any statefulset that has non-updated replicas, indicating that the statefulset
 // may be in the process of being rolled.
-func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace, rolloutGroup string) (*statefulSetDownscale, error) {
-	stsList, err := findStatefulSetsForRolloutGroup(ctx, api, namespace, rolloutGroup)
-	if err != nil {
-		return nil, err
-	}
-
+func findStatefulSetWithNonUpdatedReplicas(stsList *appsv1.StatefulSetList) *statefulSetDownscale {
 	for _, sts := range stsList.Items {
 		status := sts.Status
 		if !(status.Replicas == status.ReadyReplicas && status.ReadyReplicas == status.UpdatedReplicas) {
 			return &statefulSetDownscale{
 				name:               sts.Name,
+				nonReadyReplicas:   uint(status.Replicas - status.ReadyReplicas),
 				nonUpdatedReplicas: uint(status.Replicas - status.UpdatedReplicas),
-			}, nil
+			}
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interface, namespace, rolloutGroup string) (*appsv1.StatefulSetList, error) {

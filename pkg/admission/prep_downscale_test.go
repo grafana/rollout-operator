@@ -291,9 +291,10 @@ func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
 	}
 	api := fake.NewSimpleClientset(objects...)
 
-	sts, err := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, rolloutGroup)
+	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup)
+	sts := findStatefulSetWithNonUpdatedReplicas(stsList)
 	assert.Nil(t, err)
-	assert.NotNil(t, sts)
+	require.NotNil(t, sts)
 	assert.Equal(t, uint(4), sts.nonUpdatedReplicas)
 }
 
