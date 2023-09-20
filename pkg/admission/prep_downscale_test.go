@@ -3,7 +3,6 @@ package admission
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -253,7 +252,10 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	if params.stsAnnotated {
 		// Check that the admission response includes the patch for the last-downscale annotation
 		require.NotNil(t, admissionResponse.Patch)
-		require.Equal(t, admissionResponse.Patch, []byte(fmt.Sprintf(`[{"op": "add", "path": "/metadata/annotations", "value": {"grafana.com/last-downscale": "%s"}}]`, time.Now().UTC().Format(time.RFC3339))))
+		// Check that the patch is correct
+		patchBytes, err := createLastDownscalePatch(objects[0].(*apps.StatefulSet).Annotations, map[string]string{config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339)})
+		require.NoError(t, err)
+		require.Equal(t, admissionResponse.Patch, patchBytes)
 	}
 }
 
