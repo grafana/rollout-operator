@@ -14,6 +14,7 @@ import (
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
@@ -361,13 +362,7 @@ func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.I
 
 // countRunningAndReadyPods counts running and ready pods for a StatefulSet.
 func countRunningAndReadyPods(ctx context.Context, api kubernetes.Interface, namespace string, sts *appsv1.StatefulSet) (int, error) {
-	// Select all pods belonging to the StatefulSet
-	podsSelector := labels.NewSelector().Add(
-		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
-	)
-	pods, err := api.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: podsSelector.String(),
-	})
+	pods, err := findPodsForStatefulSet(ctx, api, namespace, sts)
 	if err != nil {
 		return 0, err
 	}
@@ -380,6 +375,15 @@ func countRunningAndReadyPods(ctx context.Context, api kubernetes.Interface, nam
 	}
 
 	return result, nil
+}
+
+func findPodsForStatefulSet(ctx context.Context, api kubernetes.Interface, namespace string, sts *appsv1.StatefulSet) (*corev1.PodList, error) {
+	podsSelector := labels.NewSelector().Add(
+		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
+	)
+	return api.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: podsSelector.String(),
+	})
 }
 
 func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interface, namespace, rolloutGroup string) (*appsv1.StatefulSetList, error) {

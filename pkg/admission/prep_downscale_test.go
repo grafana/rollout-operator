@@ -319,7 +319,7 @@ func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
 	assert.Equal(t, sts.name, "zone-b")
 }
 
-func TestCountRunningAndReadyPods(t *testing.T) {
+func TestFindPodsForStatefulSet(t *testing.T) {
 	namespace := "test"
 	labels := map[string]string{"name": "sts"}
 	stsMeta := metav1.ObjectMeta{
@@ -335,55 +335,27 @@ func TestCountRunningAndReadyPods(t *testing.T) {
 			},
 		},
 	}
-	podMeta := metav1.ObjectMeta{
-		Name:      "pod1",
-		Namespace: namespace,
-		Labels:    labels,
-	}
-
-	type test struct {
-		input          []runtime.Object
-		expectedResult int
-	}
-	tests := []test{
-		// Ready pod
-		{input: []runtime.Object{
-			sts,
-			&corev1.Pod{
-				ObjectMeta: podMeta,
-				Status: corev1.PodStatus{
-					Phase: corev1.PodRunning,
-					ContainerStatuses: []corev1.ContainerStatus{{
-						Ready: true,
-						State: corev1.ContainerState{
-							Running: &corev1.ContainerStateRunning{},
-						},
-					}},
-				},
+	objects := []runtime.Object{
+		sts,
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: namespace,
+				Labels:    labels,
 			},
-		}, expectedResult: 1},
-
-		// Non-running pod
-		{input: []runtime.Object{
-			sts,
-			&corev1.Pod{
-				ObjectMeta: podMeta,
-				Status: corev1.PodStatus{
-					Phase: corev1.PodPending,
-					ContainerStatuses: []corev1.ContainerStatus{{
-						Ready: true,
-					}},
-				},
+		}, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod2",
+				Namespace: namespace,
 			},
-		}, expectedResult: 0},
+		},
 	}
 
-	for _, tc := range tests {
-		api := fake.NewSimpleClientset(tc.input...)
-		res, err := countRunningAndReadyPods(context.Background(), api, namespace, sts)
-		assert.Equal(t, res, tc.expectedResult)
-		assert.Nil(t, err)
-	}
+	api := fake.NewSimpleClientset(objects...)
+	res, err := findPodsForStatefulSet(context.Background(), api, namespace, sts)
+	assert.Nil(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, 1, len(res.Items))
 }
 
 func statefulSetTemplate(params templateParams) ([]byte, error) {
