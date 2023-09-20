@@ -23,6 +23,7 @@ import (
 	ktesting "k8s.io/client-go/testing"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 const (
@@ -71,14 +72,14 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			pods: []runtime.Object{
 				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash, func(pod *corev1.Pod) {
-					pod.DeletionTimestamp = now()
+					pod.DeletionTimestamp = util.Now()
 				}),
 				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash, func(pod *corev1.Pod) {
-					pod.DeletionTimestamp = now()
+					pod.DeletionTimestamp = util.Now()
 				}),
 			},
 		},
@@ -94,7 +95,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash, func(pod *corev1.Pod) {
-					pod.DeletionTimestamp = now()
+					pod.DeletionTimestamp = util.Now()
 				}),
 			},
 		},
@@ -182,7 +183,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			pods: []runtime.Object{
 				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash, func(pod *corev1.Pod) {
-					pod.DeletionTimestamp = now()
+					pod.DeletionTimestamp = util.Now()
 				}),
 				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
@@ -233,7 +234,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash, func(pod *corev1.Pod) {
-					pod.DeletionTimestamp = now()
+					pod.DeletionTimestamp = util.Now()
 				}),
 				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),

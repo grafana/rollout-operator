@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 const (
@@ -169,7 +170,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 			)
 		}
 
-		foundSts = findStatefulSetWithNonUpdatedReplicas(stsList)
+		foundSts = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList)
 		if foundSts != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed because another statefulset with non-updated replicas")
 			return deny(
@@ -293,8 +294,8 @@ type statefulSetDownscale struct {
 	name               string
 	waitTime           time.Duration
 	lastDownscaleTime  time.Time
-	nonReadyReplicas   uint
-	nonUpdatedReplicas uint
+	nonReadyReplicas   int
+	nonUpdatedReplicas int
 }
 
 // findDownscalesDoneMinTimeAgo returns an error if downscale annotations cannot be parsed.
@@ -338,30 +339,56 @@ func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, stsName strin
 	return nil, nil
 }
 
-// findStatefulSetWithNonUpdatedReplicas returns any statefulset that has non-updated replicas, indicating that the statefulset
+// findStatefulSetWithNonUpdatedReplicas returns any statefulset that has non-updated replicas, indicating that the countRunningAndReadyPods
 // may be in the process of being rolled.
-func findStatefulSetWithNonUpdatedReplicas(stsList *appsv1.StatefulSetList) *statefulSetDownscale {
+func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace string, stsList *appsv1.StatefulSetList) *statefulSetDownscale {
 	for _, sts := range stsList.Items {
+		readyPods, err := countRunningAndReadyPods(ctx, api, namespace, &sts)
+		if err != nil {
+			return nil
+		}
 		status := sts.Status
-		if !(status.Replicas == status.ReadyReplicas && status.ReadyReplicas == status.UpdatedReplicas) {
+		if int(status.Replicas) != readyPods || int(status.UpdatedReplicas) != readyPods {
 			return &statefulSetDownscale{
 				name:               sts.Name,
-				nonReadyReplicas:   uint(status.Replicas - status.ReadyReplicas),
-				nonUpdatedReplicas: uint(status.Replicas - status.UpdatedReplicas),
+				nonReadyReplicas:   int(status.Replicas) - readyPods,
+				nonUpdatedReplicas: int(status.Replicas - status.UpdatedReplicas),
 			}
 		}
 	}
 	return nil
 }
 
+// countRunningAndReadyPods counts running and ready pods for a StatefulSet.
+func countRunningAndReadyPods(ctx context.Context, api kubernetes.Interface, namespace string, sts *appsv1.StatefulSet) (int, error) {
+	// Select all pods belonging to the StatefulSet
+	podsSelector := labels.NewSelector().Add(
+		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
+	)
+	pods, err := api.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: podsSelector.String(),
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	result := 0
+	for _, pod := range pods.Items {
+		if util.IsPodRunningAndReady(&pod) {
+			result++
+		}
+	}
+
+	return result, nil
+}
+
 func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interface, namespace, rolloutGroup string) (*appsv1.StatefulSetList, error) {
-	client := api.AppsV1().StatefulSets(namespace)
 	groupReq, err := labels.NewRequirement(config.RolloutGroupLabelKey, selection.Equals, []string{rolloutGroup})
 	if err != nil {
 		return nil, err
 	}
 	sel := labels.NewSelector().Add(*groupReq)
-	return client.List(ctx, metav1.ListOptions{
+	return api.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: sel.String(),
 	})
 }

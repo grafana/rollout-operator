@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/admission/v1"
 	apps "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -262,18 +263,23 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
 	namespace := "test"
 	rolloutGroup := "ingester"
-	labels := map[string]string{config.RolloutGroupLabelKey: rolloutGroup}
+	labels := map[string]string{config.RolloutGroupLabelKey: rolloutGroup, "name": "zone-a"}
+	stsMeta := metav1.ObjectMeta{
+		Name:      "zone-a",
+		Namespace: namespace,
+		Labels:    labels,
+	}
 	objects := []runtime.Object{
 		&apps.StatefulSet{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "zone-a",
-				Namespace: namespace,
-				Labels:    labels,
+			ObjectMeta: stsMeta,
+			Spec: apps.StatefulSetSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: stsMeta,
+				},
 			},
 			Status: apps.StatefulSetStatus{
-				Replicas:        10,
-				ReadyReplicas:   10,
-				UpdatedReplicas: 10,
+				Replicas:        1,
+				UpdatedReplicas: 1,
 			},
 		},
 		&apps.StatefulSet{
@@ -283,19 +289,101 @@ func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
 				Labels:    labels,
 			},
 			Status: apps.StatefulSetStatus{
-				Replicas:        10,
-				ReadyReplicas:   4,
-				UpdatedReplicas: 6,
+				Replicas:        1,
+				UpdatedReplicas: 1,
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Ready: true,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+				}},
 			},
 		},
 	}
 	api := fake.NewSimpleClientset(objects...)
 
 	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup)
-	sts := findStatefulSetWithNonUpdatedReplicas(stsList)
+	sts := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, stsList)
 	assert.Nil(t, err)
 	require.NotNil(t, sts)
-	assert.Equal(t, uint(4), sts.nonUpdatedReplicas)
+	assert.Equal(t, sts.name, "zone-b")
+}
+
+func TestCountRunningAndReadyPods(t *testing.T) {
+	namespace := "test"
+	labels := map[string]string{"name": "sts"}
+	stsMeta := metav1.ObjectMeta{
+		Name:      "sts",
+		Namespace: namespace,
+		Labels:    labels,
+	}
+	sts := &apps.StatefulSet{
+		ObjectMeta: stsMeta,
+		Spec: apps.StatefulSetSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: stsMeta,
+			},
+		},
+	}
+	podMeta := metav1.ObjectMeta{
+		Name:      "pod1",
+		Namespace: namespace,
+		Labels:    labels,
+	}
+
+	type test struct {
+		input          []runtime.Object
+		expectedResult int
+	}
+	tests := []test{
+		// Ready pod
+		{input: []runtime.Object{
+			sts,
+			&corev1.Pod{
+				ObjectMeta: podMeta,
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+					ContainerStatuses: []corev1.ContainerStatus{{
+						Ready: true,
+						State: corev1.ContainerState{
+							Running: &corev1.ContainerStateRunning{},
+						},
+					}},
+				},
+			},
+		}, expectedResult: 1},
+
+		// Non-running pod
+		{input: []runtime.Object{
+			sts,
+			&corev1.Pod{
+				ObjectMeta: podMeta,
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+					ContainerStatuses: []corev1.ContainerStatus{{
+						Ready: true,
+					}},
+				},
+			},
+		}, expectedResult: 0},
+	}
+
+	for _, tc := range tests {
+		api := fake.NewSimpleClientset(tc.input...)
+		res, err := countRunningAndReadyPods(context.Background(), api, namespace, sts)
+		assert.Equal(t, res, tc.expectedResult)
+		assert.Nil(t, err)
+	}
 }
 
 func statefulSetTemplate(params templateParams) ([]byte, error) {
