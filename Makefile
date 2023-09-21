@@ -10,6 +10,13 @@ GOARCH ?= $(shell go env GOARCH)
 DONT_FIND := -name vendor -prune -o -name .git -prune -o -name .cache -prune -o -name .pkg -prune
 GO_FILES := $(shell find . $(DONT_FIND) -o -type f -name '*.go' -print)
 
+.DEFAULT_GOAL := help
+
+# Adapted from https://www.thapaliya.com/en/writings/well-documented-makefiles/
+.PHONY: help
+help: ## Display this help and any documented user-facing targets
+	@awk 'BEGIN {FS = ": ##"; printf "Usage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_\.\-\/%]+: ##/ { printf "  %-45s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+
 rollout-operator: $(GO_FILES)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
@@ -17,7 +24,7 @@ rollout-operator: $(GO_FILES)
 rollout-operator-boringcrypto: $(GO_FILES)
 	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -tags netgo ./cmd/rollout-operator
 
-.PHONY: build-image
+.PHONY: build-image ## Build a rollout-operator image
 build-image: clean
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
@@ -37,7 +44,7 @@ publish-boringcrypto-image: clean
 	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
 
 .PHONY: test
-test:
+test: ## Run tests
 	go test ./...
 
 .PHONY: test-boringcrypto
@@ -45,6 +52,7 @@ test-boringcrypto:
 	GOEXPERIMENT=boringcrypto go test ./...
 
 .PHONY: integration
+integration: ## Run integration tests
 integration: integration/mock-service/.uptodate
 	go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
 
@@ -53,10 +61,10 @@ integration/mock-service/.uptodate:
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
 
 .PHONY: lint
-lint:
+lint: ## Run golangci-lint
 	golangci-lint run --timeout=5m
 
 .PHONY: clean
-clean:
+clean: ## Run go clean and remove the rollout-operator
 	rm -f rollout-operator
 	go clean ./...
