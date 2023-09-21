@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Update the prepare-downscale webhook to check that a rollout is not in progress in the rollout-group, else deny.
+
 ## v0.8.0
 
 * [ENHANCEMENT] Update Go to `1.21`. #77

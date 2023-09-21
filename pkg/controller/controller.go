@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 const (
@@ -68,7 +69,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
 	// having the rollout group label. Only these StatefulSets are managed by this operator.
-	statefulSetsSel := labels.NewSelector().Add(mustNewLabelsRequirement(config.RolloutGroupLabelKey, selection.Exists, nil)).String()
+	statefulSetsSel := labels.NewSelector().Add(util.MustNewLabelsRequirement(config.RolloutGroupLabelKey, selection.Exists, nil)).String()
 	statefulSetsSelOpt := informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 		options.LabelSelector = statefulSetsSel
 	})
@@ -198,7 +199,7 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	}
 
 	// Group statefulsets by the rollout group label. Each group will be reconciled independently.
-	groups := groupStatefulSetsByLabel(sets, config.RolloutGroupLabelKey)
+	groups := util.GroupStatefulSetsByLabel(sets, config.RolloutGroupLabelKey)
 	var reconcileErrs error
 	for groupName, groupSets := range groups {
 		if err := c.reconcileStatefulSetsGroup(ctx, groupName, groupSets); err != nil {
@@ -234,7 +235,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	}()
 
 	// Sort StatefulSets to provide a deterministic behaviour.
-	sortStatefulSets(sets)
+	util.SortStatefulSets(sets)
 
 	// Adjust the number of replicas for each StatefulSet in the group if desired. If the number of
 	// replicas of any StatefulSet was adjusted, return early in order to guarantee each STS model is
@@ -281,7 +282,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// If there's a StatefulSet with not-Ready pods we also want that one to be the first one to reconcile.
 	if len(notReadySets) == 1 {
 		level.Info(c.logger).Log("msg", "a StatefulSet has some not-Ready pods, reconcile it first", "statefulset", notReadySets[0].Name)
-		sets = moveStatefulSetToFront(sets, notReadySets[0])
+		sets = util.MoveStatefulSetToFront(sets, notReadySets[0])
 	}
 
 	for _, sts := range sets {
@@ -390,7 +391,7 @@ func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (boo
 	level.Info(c.logger).Log(
 		"msg", "StatefulSet status is reporting all pods ready, but the rollout operator has found some not-Ready pods",
 		"statefulset", sts.Name,
-		"not_ready_pods", strings.Join(podNames(notReadyPods), " "))
+		"not_ready_pods", strings.Join(util.PodNames(notReadyPods), " "))
 
 	return true, nil
 }
@@ -398,7 +399,7 @@ func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (boo
 func (c *RolloutController) listNotReadyPodsByStatefulSet(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
 	// Select all pods belonging to the input StatefulSet.
 	podsSelector := labels.NewSelector().Add(
-		mustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
+		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
 
 	all, err := c.listPods(podsSelector)
@@ -411,13 +412,13 @@ func (c *RolloutController) listNotReadyPodsByStatefulSet(sts *v1.StatefulSet) (
 	var notReady []*corev1.Pod
 
 	for _, pod := range all {
-		if !isPodRunningAndReady(pod) {
+		if !util.IsPodRunningAndReady(pod) {
 			notReady = append(notReady, pod)
 		}
 	}
 
 	// Sort pods in order to provide a deterministic behaviour.
-	sortPods(notReady)
+	util.SortPods(notReady)
 
 	return notReady, nil
 }
@@ -528,8 +529,8 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 	// Get any pods whose revision doesn't match the StatefulSet's updateRevision
 	// and so it means they still need to be updated.
 	podsSelector := labels.NewSelector().Add(
-		mustNewLabelsRequirement(v1.ControllerRevisionHashLabelKey, selection.NotEquals, []string{updateRev}),
-		mustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
+		util.MustNewLabelsRequirement(v1.ControllerRevisionHashLabelKey, selection.NotEquals, []string{updateRev}),
+		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
 
 	pods, err := c.listPods(podsSelector)
@@ -538,7 +539,7 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 	}
 
 	// Sort pods in order to provide a deterministic behaviour.
-	sortPods(pods)
+	util.SortPods(pods)
 
 	return pods, nil
 }

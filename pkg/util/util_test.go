@@ -1,4 +1,4 @@
-package controller
+package util
 
 import (
 	"testing"
@@ -24,7 +24,7 @@ func TestSortStatefulSets(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-c"}},
 	}
 
-	sortStatefulSets(input)
+	SortStatefulSets(input)
 	assert.Equal(t, expected, input)
 }
 
@@ -45,7 +45,7 @@ func TestSortPods(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-20"}},
 	}
 
-	sortPods(input)
+	SortPods(input)
 	assert.Equal(t, expected, input)
 }
 
@@ -56,7 +56,7 @@ func TestPodNames(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-10"}},
 	}
 
-	assert.Equal(t, []string{"ingester-11", "ingester-0", "ingester-10"}, podNames(input))
+	assert.Equal(t, []string{"ingester-11", "ingester-0", "ingester-10"}, PodNames(input))
 }
 
 func TestIsPodRunningAndReady(t *testing.T) {
@@ -120,7 +120,7 @@ func TestIsPodRunningAndReady(t *testing.T) {
 		"should return false if the pod is terminating": {
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
-					DeletionTimestamp: now(),
+					DeletionTimestamp: Now(),
 				},
 				Status: corev1.PodStatus{
 					Phase: corev1.PodRunning,
@@ -137,7 +137,7 @@ func TestIsPodRunningAndReady(t *testing.T) {
 
 	for testName, testData := range tests {
 		t.Run(testName, func(t *testing.T) {
-			assert.Equal(t, testData.expected, isPodRunningAndReady(testData.pod))
+			assert.Equal(t, testData.expected, IsPodRunningAndReady(testData.pod))
 		})
 	}
 }
@@ -155,7 +155,7 @@ func TestMoveStatefulSetToFront(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-c"}},
 	}
 
-	actual := moveStatefulSetToFront(input, input[1])
+	actual := MoveStatefulSetToFront(input, input[1])
 	assert.Equal(t, expected, actual)
 }
 
@@ -182,7 +182,7 @@ func TestGroupStatefulSetsByLabel(t *testing.T) {
 		},
 	}
 
-	assert.Equal(t, expected, groupStatefulSetsByLabel(input, config.RolloutGroupLabelKey))
+	assert.Equal(t, expected, GroupStatefulSetsByLabel(input, config.RolloutGroupLabelKey))
 }
 
 func TestMax(t *testing.T) {
@@ -193,9 +193,4 @@ func TestMax(t *testing.T) {
 func TestMin(t *testing.T) {
 	assert.Equal(t, 1, min(1))
 	assert.Equal(t, 3, min(4, 3, 5))
-}
-
-func now() *metav1.Time {
-	ts := metav1.Now()
-	return &ts
 }

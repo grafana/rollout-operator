@@ -14,9 +14,11 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/admission/v1"
 	apps "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -256,6 +258,104 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		require.NotNil(t, updatedSts.Annotations)
 		require.NotNil(t, updatedSts.Annotations[config.LastDownscaleAnnotationKey])
 	}
+}
+
+func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
+	namespace := "test"
+	rolloutGroup := "ingester"
+	labels := map[string]string{config.RolloutGroupLabelKey: rolloutGroup, "name": "zone-a"}
+	stsMeta := metav1.ObjectMeta{
+		Name:      "zone-a",
+		Namespace: namespace,
+		Labels:    labels,
+	}
+	objects := []runtime.Object{
+		&apps.StatefulSet{
+			ObjectMeta: stsMeta,
+			Spec: apps.StatefulSetSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: stsMeta,
+				},
+			},
+			Status: apps.StatefulSetStatus{
+				Replicas:        1,
+				UpdatedReplicas: 1,
+			},
+		},
+		&apps.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "zone-b",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Status: apps.StatefulSetStatus{
+				Replicas:        1,
+				UpdatedReplicas: 1,
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Ready: true,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+				}},
+			},
+		},
+	}
+	api := fake.NewSimpleClientset(objects...)
+
+	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup)
+	sts := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, stsList)
+	assert.Nil(t, err)
+	require.NotNil(t, sts)
+	assert.Equal(t, sts.name, "zone-b")
+}
+
+func TestFindPodsForStatefulSet(t *testing.T) {
+	namespace := "test"
+	labels := map[string]string{"name": "sts"}
+	stsMeta := metav1.ObjectMeta{
+		Name:      "sts",
+		Namespace: namespace,
+		Labels:    labels,
+	}
+	sts := &apps.StatefulSet{
+		ObjectMeta: stsMeta,
+		Spec: apps.StatefulSetSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: stsMeta,
+			},
+		},
+	}
+	objects := []runtime.Object{
+		sts,
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+		}, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod2",
+				Namespace: namespace,
+			},
+		},
+	}
+
+	api := fake.NewSimpleClientset(objects...)
+	res, err := findPodsForStatefulSet(context.Background(), api, namespace, sts)
+	assert.Nil(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, 1, len(res.Items))
 }
 
 func statefulSetTemplate(params templateParams) ([]byte, error) {

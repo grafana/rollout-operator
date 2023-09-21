@@ -14,6 +14,7 @@ import (
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
@@ -21,6 +22,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 const (
@@ -144,7 +146,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	rolloutGroup := lbls[config.RolloutGroupLabelKey]
 	if rolloutGroup != "" {
-		foundSts, err := findDownscalesDoneMinTimeAgo(ctx, api, ar.Request.Namespace, ar.Request.Name, rolloutGroup)
+		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, rolloutGroup)
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
 			return deny(
@@ -152,12 +154,28 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
 			)
 		}
-		if foundSts != nil {
-			level.Warn(logger).Log("msg", "downscale not allowed because another statefulset was downscaled recently", "err", err)
+
+		foundSts, err := findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name)
+		if err != nil {
+			level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale annotations", "err", err)
 			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime,
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because parsing downscale annotations failed.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
 			)
+		}
+		if foundSts != nil {
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
+			level.Warn(logger).Log("msg", msg, "err", err)
+			return deny(msg)
+		}
+
+		foundSts = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList)
+		if foundSts != nil {
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
+			level.Warn(logger).Log("msg", msg)
+			return deny(msg)
 		}
 	}
 
@@ -272,26 +290,16 @@ func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.In
 }
 
 type statefulSetDownscale struct {
-	name              string
-	waitTime          time.Duration
-	lastDownscaleTime time.Time
+	name               string
+	waitTime           time.Duration
+	lastDownscaleTime  time.Time
+	nonReadyReplicas   int
+	nonUpdatedReplicas int
 }
 
-func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface, namespace, stsName, rolloutGroup string) (*statefulSetDownscale, error) {
-	client := api.AppsV1().StatefulSets(namespace)
-	groupReq, err := labels.NewRequirement(config.RolloutGroupLabelKey, selection.Equals, []string{rolloutGroup})
-	if err != nil {
-		return nil, err
-	}
-	sel := labels.NewSelector().Add(*groupReq)
-	list, err := client.List(ctx, metav1.ListOptions{
-		LabelSelector: sel.String(),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, sts := range list.Items {
+// findDownscalesDoneMinTimeAgo returns an error if downscale annotations cannot be parsed.
+func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, stsName string) (*statefulSetDownscale, error) {
+	for _, sts := range stsList.Items {
 		if sts.Name == stsName {
 			continue
 		}
@@ -328,4 +336,61 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface,
 
 	}
 	return nil, nil
+}
+
+// findStatefulSetWithNonUpdatedReplicas returns any statefulset that has non-updated replicas, indicating that the countRunningAndReadyPods
+// may be in the process of being rolled.
+func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace string, stsList *appsv1.StatefulSetList) *statefulSetDownscale {
+	for _, sts := range stsList.Items {
+		readyPods, err := countRunningAndReadyPods(ctx, api, namespace, &sts)
+		if err != nil {
+			return nil
+		}
+		status := sts.Status
+		if int(status.Replicas) != readyPods || int(status.UpdatedReplicas) != readyPods {
+			return &statefulSetDownscale{
+				name:               sts.Name,
+				nonReadyReplicas:   int(status.Replicas) - readyPods,
+				nonUpdatedReplicas: int(status.Replicas - status.UpdatedReplicas),
+			}
+		}
+	}
+	return nil
+}
+
+// countRunningAndReadyPods counts running and ready pods for a StatefulSet.
+func countRunningAndReadyPods(ctx context.Context, api kubernetes.Interface, namespace string, sts *appsv1.StatefulSet) (int, error) {
+	pods, err := findPodsForStatefulSet(ctx, api, namespace, sts)
+	if err != nil {
+		return 0, err
+	}
+
+	result := 0
+	for _, pod := range pods.Items {
+		if util.IsPodRunningAndReady(&pod) {
+			result++
+		}
+	}
+
+	return result, nil
+}
+
+func findPodsForStatefulSet(ctx context.Context, api kubernetes.Interface, namespace string, sts *appsv1.StatefulSet) (*corev1.PodList, error) {
+	podsSelector := labels.NewSelector().Add(
+		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
+	)
+	return api.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: podsSelector.String(),
+	})
+}
+
+func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interface, namespace, rolloutGroup string) (*appsv1.StatefulSetList, error) {
+	groupReq, err := labels.NewRequirement(config.RolloutGroupLabelKey, selection.Equals, []string{rolloutGroup})
+	if err != nil {
+		return nil, err
+	}
+	sel := labels.NewSelector().Add(*groupReq)
+	return api.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: sel.String(),
+	})
 }
