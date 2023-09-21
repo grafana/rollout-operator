@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/pkg/config"
@@ -223,22 +223,27 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		)
 	}
 
-	err = addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name)
-	if err != nil {
-		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
+	// Down-scale operation is allowed because all pods successfully prepared for shutdown. A patch is included to update the last-downscale annotation.
+	level.Info(logger).Log("msg", "downscale allowed")
+	patchBytes, patchErr := createLastDownscalePatch(annotations, map[string]string{config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339)})
+	if patchErr != nil {
+		level.Error(logger).Log("msg", "error creating patch for last-downscale annotation", "err", patchErr)
 		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
+			"downscale of %s/%s in %s from %d to %d replicas is not allowed because an error occurred while creating a patch for the %v annotation.",
+			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, config.LastDownscaleAnnotationKey,
 		)
 	}
 
-	// Down-scale operation is allowed because all pods successfully prepared for shutdown
-	level.Info(logger).Log("msg", "downscale allowed")
 	return &v1.AdmissionResponse{
 		Allowed: true,
 		Result: &metav1.Status{
 			Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is allowed -- all pods successfully prepared for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
 		},
+		Patch: patchBytes,
+		PatchType: func() *v1.PatchType {
+			pt := v1.PatchTypeJSONPatch
+			return &pt
+		}(),
 	}
 }
 
@@ -264,17 +269,43 @@ func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kube
 	return nil, fmt.Errorf("unsupported resource %s", ar.Request.Resource.Resource)
 }
 
-func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
-	client := api.AppsV1().StatefulSets(namespace)
-	patch := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, config.LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))
-	_, err := client.Patch(ctx, stsName, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
-	return err
-}
-
 type statefulSetDownscale struct {
 	name              string
 	waitTime          time.Duration
 	lastDownscaleTime time.Time
+}
+
+// https://datatracker.ietf.org/doc/html/rfc6902
+type lastDownscalePatch struct {
+	Op    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value,omitempty"`
+}
+
+func updateLastDownscaleAnnotation(target map[string]string, added map[string]string) (patch []lastDownscalePatch) {
+	for k, v := range added {
+		if target == nil || target[k] == "" {
+			target = map[string]string{}
+			patch = append(patch, lastDownscalePatch{
+				Op:    "add",
+				Path:  "/metadata/annotations",
+				Value: map[string]string{k: v},
+			})
+		} else {
+			patch = append(patch, lastDownscalePatch{
+				Op:    "replace",
+				Path:  fmt.Sprintf("/metadata/annotations/%s", k),
+				Value: v,
+			})
+		}
+	}
+	return patch
+}
+
+func createLastDownscalePatch(existingAnnotations map[string]string, newAnnotation map[string]string) ([]byte, error) {
+	var patch []lastDownscalePatch
+	patch = append(patch, updateLastDownscaleAnnotation(existingAnnotations, newAnnotation)...)
+	return json.Marshal(patch)
 }
 
 func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface, namespace, stsName, rolloutGroup string) (*statefulSetDownscale, error) {
