@@ -164,20 +164,18 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 			)
 		}
 		if foundSts != nil {
-			level.Warn(logger).Log("msg", "downscale not allowed because another statefulset was downscaled recently", "err", err)
-			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime,
-			)
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
+			level.Warn(logger).Log("msg", msg, "err", err)
+			return deny(msg)
 		}
 
 		foundSts = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList)
 		if foundSts != nil {
-			level.Warn(logger).Log("msg", "downscale not allowed because another statefulset with non-updated replicas")
-			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas,
-			)
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
+			level.Warn(logger).Log("msg", msg)
+			return deny(msg)
 		}
 	}
 
