@@ -253,9 +253,9 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		// Check that the admission response includes the patch for the last-downscale annotation
 		require.NotNil(t, admissionResponse.Patch)
 		// Check that the patch is correct
-		patchBytes, err := createLastDownscalePatch(objects[0].(*apps.StatefulSet).Annotations, map[string]string{config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339)})
+		patch, err := createLastDownscalePatch(objects[0].(*apps.StatefulSet).Annotations, map[string]string{config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339)})
 		require.NoError(t, err)
-		require.Equal(t, admissionResponse.Patch, patchBytes)
+		require.Equal(t, admissionResponse.Patch, []byte(patch))
 	}
 }
 

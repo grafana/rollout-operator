@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -225,7 +226,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	// Down-scale operation is allowed because all pods successfully prepared for shutdown. A patch is included to update the last-downscale annotation.
 	level.Info(logger).Log("msg", "downscale allowed")
-	patchBytes, patchErr := createLastDownscalePatch(annotations, map[string]string{config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339)})
+	patch, patchErr := createLastDownscalePatch(annotations, map[string]string{config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339)})
 	if patchErr != nil {
 		level.Error(logger).Log("msg", "error creating patch for last-downscale annotation", "err", patchErr)
 		return deny(
@@ -239,7 +240,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		Result: &metav1.Status{
 			Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is allowed -- all pods successfully prepared for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas),
 		},
-		Patch: patchBytes,
+		Patch: []byte(patch),
 		PatchType: func() *v1.PatchType {
 			pt := v1.PatchTypeJSONPatch
 			return &pt
@@ -302,10 +303,24 @@ func updateLastDownscaleAnnotation(target map[string]string, added map[string]st
 	return patch
 }
 
-func createLastDownscalePatch(existingAnnotations map[string]string, newAnnotation map[string]string) ([]byte, error) {
+// createLastDownscalePatch creates a JSON patch for the last-downscale annotation, encoded as a base64 string.
+// https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#response
+func createLastDownscalePatch(existingAnnotations map[string]string, newAnnotation map[string]string) (string, error) {
 	var patch []lastDownscalePatch
 	patch = append(patch, updateLastDownscaleAnnotation(existingAnnotations, newAnnotation)...)
-	return json.Marshal(patch)
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return "", err
+	}
+	return encodePatchByteSliceAsBase64(patchBytes)
+}
+
+// encodePatchByteSliceAsBase64 encodes the given JSON patch byte slice as a base64 string.
+func encodePatchByteSliceAsBase64(patchBytes []byte) (string, error) {
+	if patchBytes == nil {
+		return "", errors.New("input patchBytes byte slice is nil")
+	}
+	return base64.StdEncoding.EncodeToString(patchBytes), nil
 }
 
 func findDownscalesDoneMinTimeAgo(ctx context.Context, api kubernetes.Interface, namespace, stsName, rolloutGroup string) (*statefulSetDownscale, error) {
