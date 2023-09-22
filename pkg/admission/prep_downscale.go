@@ -260,7 +260,6 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 			continue
 		}
 		replicas := *sts.Spec.Replicas
-		level.Info(logger).Log("msg", "replicas for STS "+sts.Name, "replicas", replicas)
 
 		// Get time of last prepare_shutdown using the endpoint
 		var ep endpoint
@@ -281,15 +280,11 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode/100 != 2 {
-			level.Info(logger).Log("msg", "returning early due to non 200")
-			return nil, nil
-			/*
-				err := errors.New("HTTP get request returned non-2xx status code")
-				body, readError := io.ReadAll(resp.Body)
-				defer resp.Body.Close()
-				level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", errors.Join(err, readError), "status", resp.StatusCode, "response_body", body)
-				return nil, errors.Join(err, readError)
-			*/
+			err := errors.New("HTTP get request returned non-2xx status code")
+			body, readError := io.ReadAll(resp.Body)
+			defer resp.Body.Close()
+			level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", errors.Join(err, readError), "status", resp.StatusCode, "response_body", body)
+			return nil, errors.Join(err, readError)
 		}
 
 		bts, err := io.ReadAll(resp.Body)
@@ -313,7 +308,7 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 			level.Error(logger).Log("msg", "error parsing timestamp", "err", err, "timestamp", splits[1])
 			return nil, err
 		}
-		level.Info(logger).Log("msg", "last downscale time received", "time", lastDownscale.String())
+		level.Debug(logger).Log("msg", "last downscale time received", "time", lastDownscale.String())
 
 		timeBetweenDownscaleLabel, ok := sts.Labels[config.MinTimeBetweenZonesDownscaleLabelKey]
 		if !ok {
