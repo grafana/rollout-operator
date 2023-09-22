@@ -298,8 +298,12 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 			return nil, err
 		}
 
+		// The ingester will return either `unset` or `set <timestamp>`
 		splits := strings.SplitN(string(bts), " ", 2)
 		if len(splits) != 2 {
+			if len(splits) == 1 && splits[0] == "unset" {
+				return nil, nil
+			}
 			level.Error(logger).Log("msg", "error splitting body of HTTP get request", "err", err, "body", string(bts))
 			return nil, fmt.Errorf("error splitting body (%v) of HTTP get request: %w", string(bts), err)
 		}
