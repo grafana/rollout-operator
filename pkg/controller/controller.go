@@ -242,7 +242,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// up-to-date.
 	if updated, err := c.adjustStatefulSetsGroupReplicas(ctx, groupName, sets); updated || err != nil {
 		if err != nil {
-			return fmt.Errorf("unable to adjust desired replicas of StatefulSet in group %s: %w", groupName, err)
+			level.Warn(c.logger).Log("msg", "unable to adjust desired replicas of StatefulSet", "group", groupName, "err", err)
 		}
 
 		return nil
