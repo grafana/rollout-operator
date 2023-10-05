@@ -240,11 +240,11 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// Adjust the number of replicas for each StatefulSet in the group if desired. If the number of
 	// replicas of any StatefulSet was adjusted, return early in order to guarantee each STS model is
 	// up-to-date.
-	if updated, err := c.adjustStatefulSetsGroupReplicas(ctx, groupName, sets); updated || err != nil {
-		if err != nil {
-			level.Warn(c.logger).Log("msg", "unable to adjust desired replicas of StatefulSet", "group", groupName, "err", err)
-		}
-
+	updated, err := c.adjustStatefulSetsGroupReplicas(ctx, groupName, sets)
+	if err != nil {
+		level.Warn(c.logger).Log("msg", "unable to adjust desired replicas of StatefulSet", "group", groupName, "err", err)
+	}
+	if updated {
 		return nil
 	}
 
