@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/admission/v1"
 	apps "k8s.io/api/apps/v1"
@@ -21,8 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-
-	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 func TestUpscale(t *testing.T) {
@@ -328,3 +327,47 @@ spec:
       resources:
         requests:
           storage: 1Gi`
+
+func TestChangedEndpoints(t *testing.T) {
+	stsName := "ingester-zone-a"
+	namespace := "loki-prod"
+	port := "8080"
+	path := "/ingester/prepare_shutdown"
+	dryRun := false
+
+	ar := v1.AdmissionReview{
+		Request: &v1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{
+				Group:   "apps",
+				Version: "v1",
+				Kind:    "Statefulset",
+			},
+			Resource: metav1.GroupVersionResource{
+				Group:    "apps",
+				Version:  "v1",
+				Resource: "statefulsets",
+			},
+			Name:      stsName,
+			Namespace: namespace,
+			DryRun:    &dryRun,
+		},
+	}
+
+	t.Run("", func(t *testing.T) {
+		endpoints := changedEndpoints(5, 3, 2, ar, stsName, port, path)
+		require.Len(t, endpoints, 5)
+		require.NotContains(t, endpoints[0].url, "?unset=true")
+		require.NotContains(t, endpoints[1].url, "?unset=true")
+		require.NotContains(t, endpoints[2].url, "?unset=true")
+		require.Contains(t, endpoints[3].url, "?unset=true")
+		require.Contains(t, endpoints[4].url, "?unset=true")
+	})
+
+	t.Run("", func(t *testing.T) {
+		endpoints := changedEndpoints(3, 1, 3, ar, stsName, port, path)
+		require.Len(t, endpoints, 3)
+		require.NotContains(t, endpoints[0].url, "?unset=true")
+		require.Contains(t, endpoints[1].url, "?unset=true")
+		require.Contains(t, endpoints[2].url, "?unset=true")
+	})
+}

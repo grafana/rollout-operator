@@ -145,6 +145,8 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	diff := (*oldReplicas - *newReplicas)
 	rolloutGroup := lbls[config.RolloutGroupLabelKey]
+	level.Debug(logger).Log("msg", "checking rollout group", "group", rolloutGroup)
+
 	if rolloutGroup != "" {
 		foundSts, err := findDownscalesDoneMinTimeAgo(ctx, logger, api, client, ar, rolloutGroup, port, path, diff, *oldReplicas)
 		if err != nil {
@@ -169,7 +171,8 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
-	eps := changedEndpoints(*oldReplicas, diff, ar, ar.Request.Name, port, path)
+	// Also send the post response with ?unset=true to 3 more pods
+	eps := changedEndpoints(*oldReplicas, diff, 3, ar, ar.Request.Name, port, path)
 
 	g, _ := errgroup.WithContext(ctx)
 	for _, ep := range eps {
@@ -256,12 +259,13 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 	}
 
 	for _, sts := range list.Items {
+		level.Debug(logger).Log("msg", "checking sts", "sts", sts.Name)
 		if sts.Name == ar.Request.Name {
 			continue
 		}
 		replicas := *sts.Spec.Replicas
 
-		// Get time of last prepare_shutdown using the endpoint
+		// Get time of last prepare_shutdown using the endpoints of multiple
 		var ep endpoint
 		ep.url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
 			sts.Name, // pod name
@@ -292,12 +296,13 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 			level.Error(logger).Log("msg", "error reading body of HTTP get request", "err", err)
 			return nil, err
 		}
+		level.Debug(logger).Log("msg", "read bts", "bts", string(bts))
 
 		// The ingester will return either `unset` or `set <timestamp>`
 		splits := strings.SplitN(string(bts), " ", 2)
 		if len(splits) != 2 {
 			if len(splits) == 1 && splits[0] == "unset" {
-				return nil, nil
+				continue
 			}
 			level.Error(logger).Log("msg", "error splitting body of HTTP get request", "err", err, "body", string(bts))
 			return nil, fmt.Errorf("error splitting body (%v) of HTTP get request: %w", string(bts), err)
@@ -313,6 +318,7 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 		timeBetweenDownscaleLabel, ok := sts.Labels[config.MinTimeBetweenZonesDownscaleLabelKey]
 		if !ok {
 			// No time between downscale label set on the statefulset, we can continue
+			level.Debug(logger).Log("msg", "no min time between zones label, continue")
 			continue
 		}
 
@@ -339,16 +345,17 @@ type endpoint struct {
 	index int
 }
 
-func changedEndpoints(oldReplicas, diff int32, ar v1.AdmissionReview, stsName, port, path string) []endpoint {
-	eps := make([]endpoint, diff)
+func changedEndpoints(oldReplicas, diffShutdown, diffAdditional int32, ar v1.AdmissionReview, stsName, port, path string) []endpoint {
+	var eps []endpoint
 
 	// The DNS entry for a pod of a stateful set is
 	// ingester-zone-a-0.$(servicename).$(namespace).svc.cluster.local
 	// The service in this case is ingester-zone-a as well.
 	// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
-	for i := 0; i < int(diff); i++ {
+	for i := 0; i < int(diffShutdown); i++ {
 		index := int(oldReplicas) - i - 1 // nr in statefulset
-		eps[i].url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
+		var ep endpoint
+		ep.url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
 			stsName, // pod name
 			index,
 			stsName, // svc name
@@ -356,7 +363,28 @@ func changedEndpoints(oldReplicas, diff int32, ar v1.AdmissionReview, stsName, p
 			port,
 			path,
 		)
-		eps[i].index = index
+		ep.index = index
+		eps = append(eps, ep)
 	}
+
+	// These will not be prepared for shutdown but will contain the current time
+	for i := 0; i < int(diffAdditional); i++ {
+		index := int(oldReplicas) - int(diffShutdown) - i - 1
+		if index < 0 {
+			continue
+		}
+		var ep endpoint
+		ep.url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s?unset=true",
+			stsName, // pod name
+			index,
+			stsName, // svc name
+			ar.Request.Namespace,
+			port,
+			path,
+		)
+		ep.index = index
+		eps = append(eps, ep)
+	}
+
 	return eps
 }
