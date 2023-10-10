@@ -3,6 +3,8 @@ package admission
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 	"text/template"
 	"time"
 
+	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/stretchr/testify/require"
@@ -135,6 +138,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 
 	ctx := context.Background()
 	logger := newDebugLogger()
+	now := time.Now().UTC().Format(time.RFC3339)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(params.statusCode)
@@ -237,7 +241,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 						config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
 					},
 					Annotations: map[string]string{
-						config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339),
+						config.LastDownscaleAnnotationKey: now,
 					},
 				},
 			},
@@ -253,9 +257,17 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		// Check that the admission response includes the patch for the last-downscale annotation
 		require.NotNil(t, admissionResponse.Patch)
 		// Check that the patch is correct
-		patch, err := createLastDownscalePatch(objects[0].(*apps.StatefulSet).Annotations, map[string]string{config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339)})
+		patchJSON, err := createLastDownscalePatch(objects[0].(*apps.StatefulSet).Annotations, map[string]string{config.LastDownscaleAnnotationKey: now})
 		require.NoError(t, err)
-		require.Equal(t, admissionResponse.Patch, []byte(patch))
+		require.Equal(t, admissionResponse.Patch, patchJSON)
+		// Check that the patch is able to be unmashalled
+		var patch jsonpatch.Patch
+		err = json.Unmarshal(admissionResponse.Patch, &patch)
+		require.NoError(t, err)
+		fmt.Printf("patch: %v\n", patch)
+		// Decode the JSONpatch
+		_, err = jsonpatch.DecodePatch(admissionResponse.Patch)
+		require.NoError(t, err)
 	}
 }
 
@@ -307,3 +319,26 @@ spec:
       resources:
         requests:
           storage: 1Gi`
+
+func TestApplyJSONPatch(t *testing.T) {
+	patchJSON := "[{\"op\":\"add\",\"path\":\"/metadata/annotations\",\"value\":{\"grafana.com/last-downscale\":\"2023-09-28T21:06:36Z\"}}]"
+	targetJSON := `{"metadata":{}}`
+	expectedJSON := `{"metadata":{"annotations":{"grafana.com/last-downscale":"2023-09-28T21:06:36Z"}}}`
+
+	var patch jsonpatch.Patch
+	err := json.Unmarshal([]byte(patchJSON), &patch)
+	if err != nil {
+		t.Fatalf("unexpected error decoding patch: %v", err)
+	}
+
+	target := []byte(targetJSON)
+
+	result, err := patch.Apply(target)
+	if err != nil {
+		t.Fatalf("unexpected error applying patch: %v", err)
+	}
+
+	if string(result) != expectedJSON {
+		t.Errorf("unexpected result: got %q, want %q", string(result), expectedJSON)
+	}
+}
