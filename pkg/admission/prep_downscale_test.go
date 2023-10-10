@@ -356,18 +356,26 @@ func TestChangedEndpoints(t *testing.T) {
 	t.Run("", func(t *testing.T) {
 		endpoints := changedEndpoints(5, 3, 2, ar, stsName, port, path)
 		require.Len(t, endpoints, 5)
-		require.NotContains(t, endpoints[0].url, "?unset=true")
-		require.NotContains(t, endpoints[1].url, "?unset=true")
-		require.NotContains(t, endpoints[2].url, "?unset=true")
-		require.Contains(t, endpoints[3].url, "?unset=true")
-		require.Contains(t, endpoints[4].url, "?unset=true")
+		require.Equal(t, endpoints[0].url, "ingester-zone-a-4.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown")
+		require.Equal(t, endpoints[1].url, "ingester-zone-a-3.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown")
+		require.Equal(t, endpoints[2].url, "ingester-zone-a-2.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown")
+		require.Equal(t, endpoints[3].url, "ingester-zone-a-1.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown?unset=true")
+		require.Equal(t, endpoints[4].url, "ingester-zone-a-0.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown?unset=true")
 	})
 
 	t.Run("", func(t *testing.T) {
 		endpoints := changedEndpoints(3, 1, 3, ar, stsName, port, path)
 		require.Len(t, endpoints, 3)
-		require.NotContains(t, endpoints[0].url, "?unset=true")
-		require.Contains(t, endpoints[1].url, "?unset=true")
-		require.Contains(t, endpoints[2].url, "?unset=true")
+		require.Equal(t, endpoints[0].url, "ingester-zone-a-2.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown")
+		require.Equal(t, endpoints[1].url, "ingester-zone-a-1.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown?unset=true")
+		require.Equal(t, endpoints[2].url, "ingester-zone-a-0.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown?unset=true")
+	})
+
+	t.Run("", func(t *testing.T) {
+		endpoints := changedEndpoints(3, 2, 3, ar, stsName, port, path)
+		require.Len(t, endpoints, 3)
+		require.Equal(t, endpoints[0].url, "ingester-zone-a-2.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown")
+		require.Equal(t, endpoints[1].url, "ingester-zone-a-1.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown")
+		require.Equal(t, endpoints[2].url, "ingester-zone-a-0.ingester-zone-a.loki-prod.svc.cluster.local:8080//ingester/prepare_shutdown?unset=true")
 	})
 }

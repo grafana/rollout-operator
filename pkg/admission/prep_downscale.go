@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -29,7 +30,7 @@ const (
 
 func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
 	client := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 1 * time.Second,
 	}
 	return prepareDownscale(ctx, logger, ar, api, client)
 }
@@ -120,6 +121,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		return allowWarn(logger, fmt.Sprintf("unsupported type %T, allowing the change", o))
 	}
 
+	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	if lbls[config.PrepareDownscaleLabelKey] != config.PrepareDownscaleLabelValue {
 		// Not labeled, nothing to do.
 		return &v1.AdmissionResponse{Allowed: true}
@@ -169,7 +171,6 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
-	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
 	// Also send the post response with ?unset=true to 3 more pods
 	eps := changedEndpoints(*oldReplicas, diff, 3, ar, ar.Request.Name, port, path)
@@ -263,58 +264,6 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 		if sts.Name == ar.Request.Name {
 			continue
 		}
-		replicas := *sts.Spec.Replicas
-
-		// Get time of last prepare_shutdown using the endpoints of multiple
-		var ep endpoint
-		ep.url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
-			sts.Name, // pod name
-			replicas-1,
-			sts.Name, // svc name
-			ar.Request.Namespace,
-			port,
-			path,
-		)
-
-		logger := log.With(logger, "url", ep.url)
-		resp, err := httpClient.Get("http://" + ep.url)
-		if err != nil {
-			level.Error(logger).Log("msg", "error sending HTTP get request", "err", err)
-			return nil, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode/100 != 2 {
-			err := errors.New("HTTP get request returned non-2xx status code")
-			body, readError := io.ReadAll(resp.Body)
-			defer resp.Body.Close()
-			level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", errors.Join(err, readError), "status", resp.StatusCode, "response_body", body)
-			return nil, errors.Join(err, readError)
-		}
-
-		bts, err := io.ReadAll(resp.Body)
-		if err != nil {
-			level.Error(logger).Log("msg", "error reading body of HTTP get request", "err", err)
-			return nil, err
-		}
-		level.Debug(logger).Log("msg", "read bts", "bts", string(bts))
-
-		// The ingester will return either `unset` or `set <timestamp>`
-		splits := strings.SplitN(string(bts), " ", 2)
-		if len(splits) != 2 {
-			if len(splits) == 1 && splits[0] == "unset" {
-				continue
-			}
-			level.Error(logger).Log("msg", "error splitting body of HTTP get request", "err", err, "body", string(bts))
-			return nil, fmt.Errorf("error splitting body (%v) of HTTP get request: %w", string(bts), err)
-		}
-
-		lastDownscale, err := time.Parse(time.RFC3339, splits[1])
-		if err != nil {
-			level.Error(logger).Log("msg", "error parsing timestamp", "err", err, "timestamp", splits[1])
-			return nil, err
-		}
-		level.Debug(logger).Log("msg", "last downscale time received", "time", lastDownscale.String())
-
 		timeBetweenDownscaleLabel, ok := sts.Labels[config.MinTimeBetweenZonesDownscaleLabelKey]
 		if !ok {
 			// No time between downscale label set on the statefulset, we can continue
@@ -322,13 +271,83 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 			continue
 		}
 
+		replicas := *sts.Spec.Replicas
+
+		wg := sync.WaitGroup{}
+		eps := changedEndpoints(replicas, diff, 3, ar, sts.Name, port, path)
+		timestamps := make(chan time.Time, len(eps))
+		for _, ep := range eps {
+			wg.Add(1)
+			ep := ep
+			go func(ep endpoint) {
+				defer wg.Done()
+				// Get time of last prepare_shutdown from an ingester
+				// These calls can fail if the ingester is down
+				logger := log.With(logger, "url", ep.url)
+				resp, err := httpClient.Get("http://" + ep.url)
+				if err != nil {
+					level.Debug(logger).Log("msg", "error sending HTTP get request", "err", err)
+					return
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode/100 != 2 {
+					err := errors.New("HTTP get request returned non-2xx status code")
+					body, readError := io.ReadAll(resp.Body)
+					defer resp.Body.Close()
+					level.Debug(logger).Log("msg", "error received from shutdown endpoint", "err", errors.Join(err, readError), "status", resp.StatusCode, "response_body", body)
+					return
+				}
+
+				bts, err := io.ReadAll(resp.Body)
+				if err != nil {
+					level.Debug(logger).Log("msg", "error reading body of HTTP get request", "err", err)
+					return
+				}
+				level.Debug(logger).Log("msg", "read bts", "bts", string(bts))
+
+				// The ingester will return either `unset`,  `unset <timestamp>` or `set <timestamp>`
+				splits := strings.SplitN(string(bts), " ", 2)
+				if len(splits) != 2 {
+					// If `unset` only no timestamp was ever set so the downscale can go ahead
+					level.Error(logger).Log("msg", "error splitting body of HTTP get request", "err", err, "body", string(bts))
+					return
+				}
+
+				lastDownscale, err := time.Parse(time.RFC3339, splits[1])
+				if err != nil {
+					level.Error(logger).Log("msg", "error parsing timestamp", "err", err, "timestamp", splits[1])
+					return
+				}
+				level.Debug(logger).Log("msg", "last downscale time received", "time", lastDownscale.String())
+
+				timestamps <- lastDownscale
+			}(ep)
+		}
+		wg.Wait()
+		close(timestamps)
+
+		var lastDownscale time.Time
+		for t := range timestamps {
+			if t.After(lastDownscale) {
+				lastDownscale = t
+			}
+		}
+		level.Debug(logger).Log("msg", "last downscale time of all", "time", lastDownscale.String())
+
+		// No timestamp found: this can happen in the beginning or when downscaling to zero
+		if lastDownscale.IsZero() {
+			level.Debug(logger).Log("msg", "last downscale time is zero", "time", lastDownscale.String())
+			continue
+		}
+
 		minTimeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscaleLabel)
 		if err != nil {
-			return nil, fmt.Errorf("can't parse %v label of %s: %w", config.MinTimeBetweenZonesDownscaleLabelKey, sts.Name, err)
+			level.Debug(logger).Log("msg", fmt.Sprintf("can't parse %v label of %s", config.MinTimeBetweenZonesDownscaleLabelKey, sts.Name), "err", err)
+			continue
 		}
 
 		level.Info(logger).Log("msg", "checking time ", "minTimeBetween", minTimeBetweenDownscale.String(), "timeSince", time.Since(lastDownscale).String())
-		if time.Since(lastDownscale) > minTimeBetweenDownscale {
+		if time.Since(lastDownscale) <= minTimeBetweenDownscale {
 			s := statefulSetDownscale{
 				name:              sts.Name,
 				waitTime:          minTimeBetweenDownscale,
@@ -345,7 +364,7 @@ type endpoint struct {
 	index int
 }
 
-func changedEndpoints(oldReplicas, diffShutdown, diffAdditional int32, ar v1.AdmissionReview, stsName, port, path string) []endpoint {
+func changedEndpoints(oldReplicas, diffShutdown, extra int32, ar v1.AdmissionReview, stsName, port, path string) []endpoint {
 	var eps []endpoint
 
 	// The DNS entry for a pod of a stateful set is
@@ -368,7 +387,7 @@ func changedEndpoints(oldReplicas, diffShutdown, diffAdditional int32, ar v1.Adm
 	}
 
 	// These will not be prepared for shutdown but will contain the current time
-	for i := 0; i < int(diffAdditional); i++ {
+	for i := 0; i < int(extra); i++ {
 		index := int(oldReplicas) - int(diffShutdown) - i - 1
 		if index < 0 {
 			continue
