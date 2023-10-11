@@ -297,8 +297,8 @@ func updateLastDownscaleAnnotation(target map[string]string, added map[string]st
 		} else {
 			patch = append(patch, lastDownscalePatch{
 				Op:    "replace",
-				Path:  fmt.Sprintf("/metadata/annotations/%s", k),
-				Value: v,
+				Path:  "/metadata/annotations",
+				Value: map[string]string{k: v},
 			})
 		}
 	}
