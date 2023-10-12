@@ -261,7 +261,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	}
 	timestamp := time.Now()
 	if params.downscaleInProgress {
-		timestamp = timestamp.Add(-15 * time.Hour)
+		timestamp = timestamp.Add(-5 * time.Hour)
 	}
 	api := fake.NewSimpleClientset(objects...)
 	f := &fakeHttpClient{
