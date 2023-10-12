@@ -26,6 +26,7 @@ import (
 
 const (
 	PrepareDownscaleWebhookPath = "/admission/prepare-downscale"
+	extraPods                   = 3
 )
 
 func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
@@ -172,8 +173,8 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 	}
 
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
-	// Also send the post response with ?unset=true to 3 more pods to store the last timestamp
-	eps := changedEndpoints(*oldReplicas, diff, 3, ar, ar.Request.Name, port, path)
+	// Also send the post response with ?unset=true to extraPods more pods to store the last timestamp
+	eps := changedEndpoints(*oldReplicas, diff, extraPods, ar, ar.Request.Name, port, path)
 
 	g, _ := errgroup.WithContext(ctx)
 	for _, ep := range eps {
@@ -279,7 +280,7 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 		replicas := *sts.Spec.Replicas
 
 		wg := sync.WaitGroup{}
-		eps := changedEndpoints(replicas, diff, 3, ar, sts.Name, port, path)
+		eps := changedEndpoints(replicas, diff, extraPods, ar, sts.Name, port, path)
 		timestamps := make(chan time.Time, len(eps))
 		for _, ep := range eps {
 			wg.Add(1)
