@@ -172,7 +172,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 	}
 
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
-	// Also send the post response with ?unset=true to 3 more pods
+	// Also send the post response with ?unset=true to 3 more pods to store the last timestamp
 	eps := changedEndpoints(*oldReplicas, diff, 3, ar, ar.Request.Name, port, path)
 
 	g, _ := errgroup.WithContext(ctx)
@@ -260,7 +260,6 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 	}
 
 	for _, sts := range list.Items {
-		level.Debug(logger).Log("msg", "checking sts", "sts", sts.Name)
 		if sts.Name == ar.Request.Name {
 			continue
 		}
@@ -269,6 +268,12 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 			// No time between downscale label set on the statefulset, we can continue
 			level.Debug(logger).Log("msg", "no min time between zones label, continue")
 			continue
+		}
+
+		minTimeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscaleLabel)
+		if err != nil {
+			level.Debug(logger).Log("msg", fmt.Sprintf("can't parse %v label of %s", config.MinTimeBetweenZonesDownscaleLabelKey, sts.Name), "err", err)
+			return nil, fmt.Errorf("can't parse %v label of %s: %w", config.MinTimeBetweenZonesDownscaleLabelKey, sts.Name, err)
 		}
 
 		replicas := *sts.Spec.Replicas
@@ -303,13 +308,11 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 					level.Debug(logger).Log("msg", "error reading body of HTTP get request", "err", err)
 					return
 				}
-				level.Debug(logger).Log("msg", "read bts", "bts", string(bts))
 
 				// The ingester will return either `unset`,  `unset <timestamp>` or `set <timestamp>`
 				splits := strings.SplitN(string(bts), " ", 2)
 				if len(splits) != 2 {
 					// If `unset` only no timestamp was ever set so the downscale can go ahead
-					level.Error(logger).Log("msg", "error splitting body of HTTP get request", "err", err, "body", string(bts))
 					return
 				}
 
@@ -318,7 +321,6 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 					level.Error(logger).Log("msg", "error parsing timestamp", "err", err, "timestamp", splits[1])
 					return
 				}
-				level.Debug(logger).Log("msg", "last downscale time received", "time", lastDownscale.String())
 
 				timestamps <- lastDownscale
 			}(ep)
@@ -332,7 +334,6 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 				lastDownscale = t
 			}
 		}
-		level.Debug(logger).Log("msg", "last downscale time of all", "time", lastDownscale.String())
 
 		// No timestamp found: this can happen in the beginning or when downscaling to zero
 		if lastDownscale.IsZero() {
@@ -340,13 +341,7 @@ func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api ku
 			continue
 		}
 
-		minTimeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscaleLabel)
-		if err != nil {
-			level.Debug(logger).Log("msg", fmt.Sprintf("can't parse %v label of %s", config.MinTimeBetweenZonesDownscaleLabelKey, sts.Name), "err", err)
-			continue
-		}
-
-		level.Info(logger).Log("msg", "checking time ", "minTimeBetween", minTimeBetweenDownscale.String(), "timeSince", time.Since(lastDownscale).String())
+		level.Debug(logger).Log("msg", "checking time since last downscale", "minTimeBetween", minTimeBetweenDownscale.String(), "timeSince", time.Since(lastDownscale).String())
 		if time.Since(lastDownscale) <= minTimeBetweenDownscale {
 			s := statefulSetDownscale{
 				name:              sts.Name,
@@ -373,6 +368,9 @@ func changedEndpoints(oldReplicas, diffShutdown, extra int32, ar v1.AdmissionRev
 	// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
 	for i := 0; i < int(diffShutdown); i++ {
 		index := int(oldReplicas) - i - 1 // nr in statefulset
+		if index < 0 {
+			continue
+		}
 		var ep endpoint
 		ep.url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
 			stsName, // pod name
