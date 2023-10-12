@@ -63,7 +63,6 @@ func newDebugLogger() log.Logger {
 
 type testParams struct {
 	statusCode          int
-	stsAnnotated        bool
 	downscaleInProgress bool
 	allowed             bool
 	dryRun              bool
@@ -76,7 +75,6 @@ func withStatusCode(statusCode int) optionFunc {
 		tp.statusCode = statusCode
 		if tp.statusCode/100 != 2 {
 			tp.allowed = false
-			tp.stsAnnotated = false
 		}
 	}
 }
@@ -84,16 +82,13 @@ func withStatusCode(statusCode int) optionFunc {
 func withDryRun() optionFunc {
 	return func(tp *testParams) {
 		tp.dryRun = true
-		tp.stsAnnotated = false
 	}
 }
 
 func withDownscaleInProgress(inProgress bool) optionFunc {
 	return func(tp *testParams) {
-		tp.stsAnnotated = true
 		tp.allowed = true
 		if inProgress {
-			tp.stsAnnotated = false
 			tp.allowed = false
 		}
 		tp.downscaleInProgress = inProgress
@@ -117,7 +112,7 @@ type fakeHttpClient struct {
 func (f *fakeHttpClient) Post(url, contentType string, body io.Reader) (resp *http.Response, err error) {
 	return &http.Response{
 		StatusCode: f.statusCode,
-		Body:       io.NopCloser(bytes.NewBuffer([]byte("set "))),
+		Body:       io.NopCloser(bytes.NewBuffer([]byte("set"))),
 	}, nil
 }
 
@@ -131,7 +126,6 @@ func (f *fakeHttpClient) Get(url string) (resp *http.Response, err error) {
 func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, options ...optionFunc) {
 	params := testParams{
 		statusCode:          http.StatusOK,
-		stsAnnotated:        false,
 		downscaleInProgress: false,
 		allowed:             true,
 		dryRun:              false,
