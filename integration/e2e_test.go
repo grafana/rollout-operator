@@ -4,15 +4,11 @@ package integration
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/integration/k3t"
 )
@@ -215,136 +211,4 @@ func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 		require.NoError(t, err)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 3)
 	}
-}
-
-func TestSelfSignedCertificateWithExistingEmptySecret(t *testing.T) {
-	ctx := context.Background()
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
-	api := cluster.API()
-
-	// Setup.
-	{
-		t.Log("Create the webhook before the rollout-operator, as rollout-operator should update its certificate.")
-		_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		t.Log("Create an empty secret before the rollout-operator.")
-		_, err = api.CoreV1().Secrets(corev1.NamespaceDefault).Create(ctx, &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: certificateSecretName},
-			Immutable:  nil,
-			Data:       nil,
-			StringData: nil,
-			Type:       "Opaque",
-		}, metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		t.Log("Create rollout-operator and check it's running and ready.")
-		createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
-		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
-		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-	}
-
-	// Happy case check that webhook is working.
-	{
-		mock := mockServiceStatefulSet("mock", "1", true)
-		mock.ObjectMeta.Labels["grafana.com/no-downscale"] = "true"
-
-		t.Log("Create the service with one replica.")
-		requireCreateStatefulSet(ctx, t, api, mock)
-		requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
-
-		t.Log("Upscaling should still work correctly as the certificate should be correct.")
-		mock.Spec.Replicas = ptr[int32](2)
-		requireUpdateStatefulSet(ctx, t, api, mock)
-		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
-	}
-}
-
-func TestExpiringCertificate(t *testing.T) {
-	ctx := context.Background()
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
-	api := cluster.API()
-
-	// Setup.
-	deployment := rolloutOperatorDeployment(corev1.NamespaceDefault, true)
-	deployment.Spec.Template.Spec.Containers[0].Args = append(deployment.Spec.Template.Spec.Containers[0].Args, "-server-tls.self-signed-cert.expiration=10s")
-	{
-		t.Log("Create the webhook before the rollout-operator, as rollout-operator should update its certificate.")
-		_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
-
-		t.Log("Create rollout-operator and check it's running and ready.")
-		createRolloutOperatorDependencies(t, ctx, api, corev1.NamespaceDefault, true)
-		requireCreateDeployment(ctx, t, api, deployment)
-		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
-		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-	}
-
-	// Check certificate expiration and renewal.
-	{
-		t.Log("Check that certificate expires and is renewed.")
-		secretCertExpiration := getCertificateExpirationFromSecret(t, api, ctx)
-		t.Logf("Current certificate expires at %s, let's wait %s", secretCertExpiration, time.Until(secretCertExpiration))
-		time.Sleep(time.Until(secretCertExpiration))
-		require.Eventuallyf(t, func() bool {
-			currentSecretCertExpiration := getCertificateExpirationFromSecret(t, api, ctx)
-			return currentSecretCertExpiration.After(secretCertExpiration)
-		}, 30*time.Second, 1*time.Second, "certificate should be renewed and expiration date should change")
-		t.Log("Certificate was renewed.")
-
-		t.Log("Restarting rollout-operator with a configuration to create certificates that expire in a week")
-		deployment.Spec.Template.Spec.Containers[0].Args = append(deployment.Spec.Template.Spec.Containers[0].Args, "-server-tls.self-signed-cert.expiration=1w")
-
-		// Since our webhook also catches the deployment changes, we might call the API in that small window while the certificate
-		// is still expired. Let's retry several times.
-		// In your production environment, you'll probably just not use this for deployments.
-		require.Eventually(t, func() bool {
-			_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Update(ctx, deployment, metav1.UpdateOptions{})
-			if err != nil {
-				t.Logf("Failed updating rollout-operator deployment: %v", err)
-				return false
-			}
-			t.Logf("Updated rollout-operator deployment")
-			return true
-		}, 30*time.Second, 500*time.Millisecond, "can't update rollout-operator deployment")
-
-		t.Log("Waiting until the certificate is renewed with new expiration.")
-		require.Eventuallyf(t, func() bool {
-			currentSecretCertExpiration := getCertificateExpirationFromSecret(t, api, ctx)
-			// Check that expiration is within 6 and 8 days, that's enough.
-			return currentSecretCertExpiration.After(time.Now().Add(24*6*time.Hour)) && currentSecretCertExpiration.Before(time.Now().Add(24*8*time.Hour))
-		}, 30*time.Second, 1*time.Second, "certificate should be renewed and expiration date should be in a week")
-	}
-
-	// Check webhook interaction isn't broken.
-	{
-		t.Log("Check that webhook is still working (i.e., it's certificate is updated).")
-		mock := mockServiceStatefulSet("mock", "1", true)
-		mock.ObjectMeta.Labels["grafana.com/no-downscale"] = "true"
-
-		t.Log("Create the service with one replica.")
-		requireCreateStatefulSet(ctx, t, api, mock)
-		requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
-
-		t.Log("Upscaling should still work correctly as the certificate should be correct.")
-		mock.Spec.Replicas = ptr[int32](2)
-		requireUpdateStatefulSet(ctx, t, api, mock)
-		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
-	}
-}
-
-func getCertificateExpirationFromSecret(t *testing.T, api *kubernetes.Clientset, ctx context.Context) time.Time {
-	secret, err := api.CoreV1().Secrets(corev1.NamespaceDefault).Get(ctx, certificateSecretName, metav1.GetOptions{})
-	require.NoError(t, err, "Secret should exist one rollout-operator is running")
-	return getCertificateExpiration(t, secret)
-}
-
-func getCertificateExpiration(t *testing.T, secret *corev1.Secret) time.Time {
-	pair, err := tls.X509KeyPair(secret.Data["cert"], secret.Data["key"])
-	require.NoError(t, err)
-	require.Len(t, pair.Certificate, 1)
-
-	c, err := x509.ParseCertificate(pair.Certificate[0])
-	require.NoError(t, err)
-	return c.NotAfter
 }

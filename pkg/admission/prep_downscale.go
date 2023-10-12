@@ -152,18 +152,17 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 	if rolloutGroup != "" {
 		foundSts, err := findDownscalesDoneMinTimeAgo(ctx, logger, api, client, ar, rolloutGroup, port, path, diff, *oldReplicas)
 		if err != nil {
-			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
+			level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale annotations", "err", err)
 			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because finding other statefulsets failed.",
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because parsing downscale annotations failed.",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
 			)
 		}
 		if foundSts != nil {
-			level.Warn(logger).Log("msg", "downscale not allowed because another statefulset was downscaled recently", "err", err)
-			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime,
-			)
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
+			level.Warn(logger).Log("msg", msg, "err", err)
+			return deny(msg)
 		}
 	}
 
@@ -240,9 +239,11 @@ func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kube
 }
 
 type statefulSetDownscale struct {
-	name              string
-	waitTime          time.Duration
-	lastDownscaleTime time.Time
+	name               string
+	waitTime           time.Duration
+	lastDownscaleTime  time.Time
+	nonReadyReplicas   int
+	nonUpdatedReplicas int
 }
 
 func findDownscalesDoneMinTimeAgo(ctx context.Context, logger log.Logger, api kubernetes.Interface, httpClient httpClient, ar v1.AdmissionReview, rolloutGroup, port, path string, diff, oldReplicas int32) (*statefulSetDownscale, error) {
