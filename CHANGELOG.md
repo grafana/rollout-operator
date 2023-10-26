@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+## v0.8.2
+
+* [BUGFIX] Do not exit reconciliation early if there are errors while trying to adjust the number of replicas. #90
+
 ## v0.8.1
 
 * [ENHANCEMENT] Update the prepare-downscale webhook to check that a rollout is not in progress in the rollout-group, else deny. #82
