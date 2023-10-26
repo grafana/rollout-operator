@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -37,6 +38,9 @@ func TestRolloutController_Reconcile(t *testing.T) {
 	tests := map[string]struct {
 		statefulSets        []runtime.Object
 		pods                []runtime.Object
+		kubePatchErr        error
+		kubeDeleteErr       error
+		kubeUpdateErr       error
 		expectedDeletedPods []string
 		expectedUpdatedSets []string
 		expectedPatchedSets []string
@@ -311,15 +315,67 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedPatchedSets: []string{"ingester-zone-b"},
 		},
+		"should not return early and should delete pods if StatefulSet replicas cannot be scaled down": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withReplicas(2, 2), withLabels(map[string]string{
+					"grafana.com/min-time-between-zones-downscale": "12h",
+				})),
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withPrevRevision(),
+					withLabels(map[string]string{
+						"grafana.com/min-time-between-zones-downscale": "12h",
+					}),
+					withAnnotations(map[string]string{
+						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			kubePatchErr:        errors.New("cannot patch StatefulSet right now"),
+			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"}, // Max unavailable is 2 pods
+		},
+		"should not return early and should delete pods if StatefulSet replicas cannot be scaled up": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withReplicas(3, 3), withLabels(map[string]string{
+					"grafana.com/min-time-between-zones-downscale": "12h",
+				})),
+				mockStatefulSet("ingester-zone-b", withReplicas(2, 2), withPrevRevision(),
+					withLabels(map[string]string{
+						"grafana.com/min-time-between-zones-downscale": "12h",
+					}),
+					withAnnotations(map[string]string{
+						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+			},
+			kubePatchErr:        errors.New("cannot patch StatefulSet right now"),
+			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
+		},
 	}
 
 	for testName, testData := range tests {
 		t.Run(testName, func(t *testing.T) {
 			kubeClient := fake.NewSimpleClientset(append(testData.statefulSets, testData.pods...)...)
 
-			// Inject an hook to track all deleted pods.
+			// Inject an hook to track all deleted pods or return mocked errors.
 			var deletedPods []string
 			kubeClient.PrependReactor("delete", "*", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
+				if testData.kubeDeleteErr != nil {
+					return true, nil, testData.kubeDeleteErr
+				}
+
 				switch action.GetResource().Resource {
 				case "pods":
 					deletedPods = append(deletedPods, action.(ktesting.DeleteAction).GetName())
@@ -328,11 +384,15 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				return false, nil, nil
 			})
 
-			// Inject a hook to track all updated StatefulSets.
+			// Inject a hook to track all updated StatefulSets or return mocked errors.
 			var updatedSets []*v1.StatefulSet
 			var updatedStsNames []string
 
 			kubeClient.PrependReactor("update", "*", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
+				if testData.kubeUpdateErr != nil {
+					return true, nil, testData.kubeUpdateErr
+				}
+
 				switch action.GetResource().Resource {
 				case "statefulsets":
 					sts := action.(ktesting.UpdateAction).GetObject().(*v1.StatefulSet)
@@ -344,10 +404,14 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				return false, nil, nil
 			})
 
-			// Inject a hook to track all patched StatefulSets.
+			// Inject a hook to track all patched StatefulSets or return mocked errors.
 			var patchedStsNames []string
 
 			kubeClient.PrependReactor("patch", "*", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
+				if testData.kubePatchErr != nil {
+					return true, nil, testData.kubePatchErr
+				}
+
 				switch action.GetResource().Resource {
 				case "statefulsets":
 					name := action.(ktesting.PatchAction).GetName()

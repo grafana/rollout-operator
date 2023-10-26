@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+## v0.8.3
+
+* [BUGFIX] Do not exit reconciliation early if there are errors while trying to adjust the number of replicas. #92
+
 ## v0.8.2
 
 * [BUGFIX] Do not exit reconciliation early if there are errors while trying to adjust the number of replicas. #90

@@ -244,7 +244,8 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "unable to adjust desired replicas of StatefulSet", "group", groupName, "err", err)
 	}
-	if updated {
+	if err == nil && updated {
+		level.Debug(c.logger).Log("msg", "ending reconcile early due to updated StatefulSet replicas", "group", groupName)
 		return nil
 	}
 
@@ -326,7 +327,12 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 
 			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, desiredReplicas)
 			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
-			return true, err
+			if err != nil {
+				// If the patch failed, don't consider the statefulsets changed
+				return false, err
+			}
+
+			return true, nil
 		} else if desiredReplicas < currentReplicas {
 			level.Info(c.logger).Log(
 				"msg", "scaling down statefulset to match leader",
@@ -337,7 +343,12 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 
 			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, desiredReplicas)
 			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
-			return true, err
+			if err != nil {
+				// If the patch failed, don't consider the statefulsets changed
+				return false, err
+			}
+
+			return true, nil
 		}
 
 		// No change in the number of replicas: don't log because this will be the result most of the time.
