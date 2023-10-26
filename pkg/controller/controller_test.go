@@ -315,7 +315,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedPatchedSets: []string{"ingester-zone-b"},
 		},
-		"should not return early and should delete pods if StatefulSet replicas cannot be adjusted": {
+		"should not return early and should delete pods if StatefulSet replicas cannot be scaled down": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withReplicas(2, 2), withLabels(map[string]string{
 					"grafana.com/min-time-between-zones-downscale": "12h",
@@ -330,14 +330,38 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				),
 			},
 			pods: []runtime.Object{
-				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
-				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
-				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash),
-				mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash),
-				mockStatefulSetPod("ingester-zone-b-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
 			},
 			kubePatchErr:        errors.New("cannot patch StatefulSet right now"),
-			expectedDeletedPods: []string{"ingester-zone-a-0", "ingester-zone-a-1"},
+			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"}, // Max unavailable is 2 pods
+		},
+		"should not return early and should delete pods if StatefulSet replicas cannot be scaled up": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withReplicas(3, 3), withLabels(map[string]string{
+					"grafana.com/min-time-between-zones-downscale": "12h",
+				})),
+				mockStatefulSet("ingester-zone-b", withReplicas(2, 2), withPrevRevision(),
+					withLabels(map[string]string{
+						"grafana.com/min-time-between-zones-downscale": "12h",
+					}),
+					withAnnotations(map[string]string{
+						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+			},
+			kubePatchErr:        errors.New("cannot patch StatefulSet right now"),
+			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
 		},
 	}
 
