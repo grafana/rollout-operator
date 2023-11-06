@@ -2,6 +2,14 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #93
+  * `github.com/prometheus/client_golang` from `v1.16.0` to `v1.17.0`
+  * `github.com/prometheus/common` from `v0.44.0` to `v0.45.0`
+  * `golang.org/x/sync` from `v0.3.0` to `v0.4.0`
+  * `k8s.io/api` from `v0.28.1` to `v0.28.3`
+  * `k8s.io/apimachinery` from `v0.28.1` to `v0.28.3`
+  * `k8s.io/client-go` from `v0.28.1` to `v0.28.3`
+
 ## v0.8.3
 
 * [BUGFIX] Do not exit reconciliation early if there are errors while trying to adjust the number of replicas. #92
