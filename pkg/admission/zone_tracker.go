@@ -20,23 +20,33 @@ type zoneTracker struct {
 	key   string
 }
 
-func (zt *zoneTracker) loadZones(ctx context.Context) error {
-	zt.mu.Lock()
-	defer zt.mu.Unlock()
-
+// loadZones loads the zone file from object storage and populates the zone tracker.
+// If the zone file does not exist, create it and upload it to the bucket then try to get it again.
+func (zt *zoneTracker) loadZones(ctx context.Context, stsList *appsv1.StatefulSetList) error {
 	r, err := zt.bkt.Get(ctx, zt.key)
 	if err != nil {
-		return err
+		if zt.bkt.IsObjNotFoundErr(err) {
+			// Create the zone file if it doesn't exist and populate with the current time for each zone, try to get it again
+			err = zt.createInitialZones(ctx, stsList)
+			if err != nil {
+				return err
+			}
+			r, err = zt.bkt.Get(ctx, zt.key)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+		} else {
+			return err
+		}
 	}
 	defer r.Close()
 
 	return json.NewDecoder(r).Decode(&zt.zones)
 }
 
+// saveZones encodes the zone tracker to json and uploads the zone file to the bucket.
 func (zt *zoneTracker) saveZones(ctx context.Context) error {
-	zt.mu.Lock()
-	defer zt.mu.Unlock()
-
 	buf := &bytes.Buffer{}
 	if err := json.NewEncoder(buf).Encode(zt.zones); err != nil {
 		return err
@@ -45,25 +55,25 @@ func (zt *zoneTracker) saveZones(ctx context.Context) error {
 	return zt.bkt.Upload(ctx, zt.key, buf)
 }
 
+// lastDownscaled returns the last time the zone was downscaled in UTC in time.RFC3339 format.
 func (zt *zoneTracker) lastDownscaled(ctx context.Context, zone string) (string, error) {
-	if err := zt.loadZones(ctx); err != nil {
-		return "", err
-	}
-
 	zt.mu.Lock()
 	defer zt.mu.Unlock()
 
 	return zt.zones[zone], nil
 }
 
+// setDownscaled sets the last time the zone was downscaled to the current time in UTC in time.RFC3339 format.
 func (zt *zoneTracker) setDownscaled(ctx context.Context, zone string) error {
 	zt.mu.Lock()
+	defer zt.mu.Unlock()
+
 	zt.zones[zone] = time.Now().UTC().Format(time.RFC3339)
-	zt.mu.Unlock()
 
 	return zt.saveZones(ctx)
 }
 
+// findDownscalesDoneMinTimeAgo returns the statefulset that was downscaled the least amount of time ago
 func (zt *zoneTracker) findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, stsName string) (*statefulSetDownscale, error) {
 	zt.mu.Lock()
 	defer zt.mu.Unlock()
@@ -74,7 +84,7 @@ func (zt *zoneTracker) findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetL
 		}
 		lastDownscaleStr, ok := zt.zones[sts.Name]
 		if !ok {
-			// No last downscale label set on the statefulset, we can continue
+			// No last downscale timestamp set for the statefulset, we can continue
 			continue
 		}
 
@@ -107,14 +117,16 @@ func (zt *zoneTracker) findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetL
 	return nil, nil
 }
 
+// If the zone file does not exist, populate it with the current time for each zone and upload it to the bucket.
 func (zt *zoneTracker) createInitialZones(ctx context.Context, stsList *appsv1.StatefulSetList) error {
 	zt.mu.Lock()
+	defer zt.mu.Unlock()
+
 	for _, sts := range stsList.Items {
 		if _, ok := zt.zones[sts.Name]; !ok {
 			zt.zones[sts.Name] = time.Now().UTC().Format(time.RFC3339)
 		}
 	}
-	zt.mu.Unlock()
 
 	return zt.saveZones(ctx)
 }

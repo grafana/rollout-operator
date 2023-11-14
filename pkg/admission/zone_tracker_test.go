@@ -36,12 +36,17 @@ func (b *mockBucket) Upload(ctx context.Context, name string, r io.Reader) error
 	return nil
 }
 
+func (b *mockBucket) IsObjNotFoundErr(err error) bool {
+	return err.Error() == "object not found"
+}
+
 func TestZoneTracker(t *testing.T) {
 	ctx := context.Background()
 	bkt := &mockBucket{data: make(map[string][]byte)}
 	zt := newZoneTracker(bkt, "testkey")
 
 	zones := []string{"testzone", "testzone2", "testzone3"}
+	stsList := &apps.StatefulSetList{}
 	initialData := fmt.Sprintf("{\"testzone\": \"%s\"}", time.Now().Format(time.RFC3339))
 
 	if err := bkt.Upload(ctx, "testkey", bytes.NewBufferString(initialData)); err != nil {
@@ -49,7 +54,7 @@ func TestZoneTracker(t *testing.T) {
 	}
 
 	for _, zone := range zones {
-		if err := zt.loadZones(ctx); err != nil {
+		if err := zt.loadZones(ctx, stsList); err != nil {
 			t.Fatalf("loadZones failed: %v", err)
 		}
 
@@ -69,7 +74,7 @@ func TestZoneTracker(t *testing.T) {
 			t.Fatalf("saveZones failed: %v", err)
 		}
 
-		if err := zt.loadZones(ctx); err != nil {
+		if err := zt.loadZones(ctx, stsList); err != nil {
 			t.Fatalf("loadZones failed: %v", err)
 		}
 
@@ -96,10 +101,6 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 		t.Fatalf("Upload failed: %v", err)
 	}
 
-	if err := zt.loadZones(ctx); err != nil {
-		t.Fatalf("loadZones failed: %v", err)
-	}
-
 	stsList := &apps.StatefulSetList{
 		Items: []apps.StatefulSet{
 			{
@@ -121,6 +122,10 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 		},
 	}
 
+	if err := zt.loadZones(ctx, stsList); err != nil {
+		t.Fatalf("loadZones failed: %v", err)
+	}
+
 	s, err := zt.findDownscalesDoneMinTimeAgo(stsList, "other-zone")
 	if err != nil {
 		t.Fatalf("findDownscalesDoneMinTimeAgo failed: %v", err)
@@ -136,5 +141,52 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 
 	if s.waitTime != 2*time.Hour {
 		t.Errorf("findDownscalesDoneMinTimeAgo returned statefulSetDownscale with waitTime %v, want 2h", s.waitTime)
+	}
+}
+
+func TestLoadZonesCreatesInitialZones(t *testing.T) {
+	ctx := context.Background()
+	bkt := &mockBucket{data: make(map[string][]byte)}
+	zt := newZoneTracker(bkt, "testkey")
+	stsList := &apps.StatefulSetList{
+		Items: []apps.StatefulSet{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-zone",
+					Labels: map[string]string{
+						config.MinTimeBetweenZonesDownscaleLabelKey: "2h",
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "other-zone",
+					Labels: map[string]string{
+						config.MinTimeBetweenZonesDownscaleLabelKey: "1h",
+					},
+				},
+			},
+		},
+	}
+
+	// Try to load zones when the zone file does not exist
+	err := zt.loadZones(ctx, stsList)
+	if err != nil {
+		t.Fatalf("loadZones failed: %v", err)
+	}
+
+	// Check if the zone file was created
+	data, err := bkt.Get(ctx, "testkey")
+	if err != nil {
+		t.Fatalf("Download failed: %v", err)
+	}
+
+	readData, err := io.ReadAll(data)
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+
+	if string(readData) == "" {
+		t.Errorf("loadZones did not create initial zones")
 	}
 }

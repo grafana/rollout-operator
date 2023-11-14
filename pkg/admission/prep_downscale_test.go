@@ -29,30 +29,37 @@ import (
 
 func TestUpscale(t *testing.T) {
 	testPrepDownscaleWebhook(t, 2, 5)
+	testPrepDownscaleWebhookWithZoneTracker(t, 2, 5)
 }
 
 func TestNoReplicasChange(t *testing.T) {
 	testPrepDownscaleWebhook(t, 5, 5)
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 5)
 }
 
 func TestValidDownscale(t *testing.T) {
 	testPrepDownscaleWebhook(t, 3, 1, withDownscaleInProgress(false))
+	testPrepDownscaleWebhookWithZoneTracker(t, 3, 1, withDownscaleInProgress(false))
 }
 
 func TestValidDownscaleWith204(t *testing.T) {
 	testPrepDownscaleWebhook(t, 3, 1, withDownscaleInProgress(false), withStatusCode(http.StatusNoContent))
+	testPrepDownscaleWebhookWithZoneTracker(t, 3, 1, withDownscaleInProgress(false), withStatusCode(http.StatusNoContent))
 }
 
 func TestValidDownscaleWithAnotherInProgress(t *testing.T) {
 	testPrepDownscaleWebhook(t, 3, 1, withDownscaleInProgress(true))
+	testPrepDownscaleWebhookWithZoneTracker(t, 3, 1, withDownscaleInProgress(true))
 }
 
 func TestInvalidDownscale(t *testing.T) {
 	testPrepDownscaleWebhook(t, 5, 3, withStatusCode(http.StatusInternalServerError))
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withStatusCode(http.StatusInternalServerError))
 }
 
 func TestDownscaleDryRun(t *testing.T) {
 	testPrepDownscaleWebhook(t, 5, 3, withDryRun())
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withDryRun())
 }
 
 func newDebugLogger() log.Logger {
@@ -407,3 +414,131 @@ spec:
       resources:
         requests:
           storage: 1Gi`
+
+func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newReplicas int, options ...optionFunc) {
+	params := testParams{
+		statusCode:          http.StatusOK,
+		stsAnnotated:        false,
+		downscaleInProgress: false,
+		allowed:             true,
+		dryRun:              false,
+	}
+	for _, option := range options {
+		option(&params)
+	}
+
+	ctx := context.Background()
+	logger := newDebugLogger()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(params.statusCode)
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL)
+	require.NoError(t, err)
+	require.NotEmpty(t, u.Port())
+
+	path := "/prepare-downscale"
+	oldParams := templateParams{
+		Replicas:          oldReplicas,
+		DownScalePathKey:  config.PrepareDownscalePathAnnotationKey,
+		DownScalePath:     path,
+		DownScalePortKey:  config.PrepareDownscalePortAnnotationKey,
+		DownScalePort:     u.Port(),
+		DownScaleLabelKey: config.PrepareDownscaleLabelKey,
+	}
+
+	newParams := templateParams{
+		Replicas:          newReplicas,
+		DownScalePathKey:  config.PrepareDownscalePathAnnotationKey,
+		DownScalePath:     path,
+		DownScalePortKey:  config.PrepareDownscalePortAnnotationKey,
+		DownScalePort:     u.Port(),
+		DownScaleLabelKey: config.PrepareDownscaleLabelKey,
+	}
+
+	rawObject, err := statefulSetTemplate(newParams)
+	require.NoError(t, err)
+
+	oldRawObject, err := statefulSetTemplate(oldParams)
+	require.NoError(t, err)
+
+	namespace := "test"
+	stsName := "my-statefulset"
+	ar := v1.AdmissionReview{
+		Request: &v1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{
+				Group:   "apps",
+				Version: "v1",
+				Kind:    "Statefulset",
+			},
+			Resource: metav1.GroupVersionResource{
+				Group:    "apps",
+				Version:  "v1",
+				Resource: "statefulsets",
+			},
+			Name:      stsName,
+			Namespace: namespace,
+			Object: runtime.RawExtension{
+				Raw: rawObject,
+			},
+			OldObject: runtime.RawExtension{
+				Raw: oldRawObject,
+			},
+			DryRun: &params.dryRun,
+		},
+	}
+	objects := []runtime.Object{
+		&apps.StatefulSet{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "StatefulSet",
+				APIVersion: "apps/v1",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      stsName,
+				Namespace: namespace,
+				UID:       types.UID(stsName),
+				Labels:    map[string]string{config.RolloutGroupLabelKey: "ingester"},
+			},
+		},
+		&apps.StatefulSet{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "StatefulSet",
+				APIVersion: "apps/v1",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      stsName + "-1",
+				Namespace: namespace,
+				UID:       types.UID(stsName),
+				Labels:    map[string]string{config.RolloutGroupLabelKey: "ingester"},
+			},
+		},
+	}
+	if params.downscaleInProgress {
+		objects = append(objects,
+			&apps.StatefulSet{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "StatefulSet",
+					APIVersion: "apps/v1",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      stsName + "-2",
+					Namespace: namespace,
+					UID:       types.UID(stsName),
+					Labels: map[string]string{
+						config.RolloutGroupLabelKey:                 "ingester",
+						config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+					},
+				},
+			},
+		)
+	}
+	api := fake.NewSimpleClientset(objects...)
+	f := &fakeHttpClient{statusCode: params.statusCode}
+
+	bkt := &mockBucket{data: make(map[string][]byte)}
+	zt := newZoneTracker(bkt, "testkey")
+	admissionResponse := prepareDownscale(ctx, logger, ar, api, f, zt)
+	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
+}

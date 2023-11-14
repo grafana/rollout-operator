@@ -80,7 +80,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	cfg.serverSelfSignedCertExpiration = defaultServerSelfSignedCertExpiration
 
 	fs.BoolVar(&cfg.updateWebhooksWithSelfSignedCABundle, "webhooks.update-ca-bundle", true, "Update the CA bundle in the properly labeled webhook configurations with the self-signed certificate (-server-tls.self-signed-cert.enabled should be enabled).")
-	flag.BoolVar(&cfg.useZoneTracker, "use-zone-tracker", false, "Use zone tracker to prevent simultaneous downscales in different zones")
+	fs.BoolVar(&cfg.useZoneTracker, "use-zone-tracker", false, "Use zone tracker to prevent simultaneous downscales in different zones")
 }
 
 func (cfg config) validate() error {

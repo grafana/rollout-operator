@@ -164,10 +164,10 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 			)
 		}
 
-		// If using zoneTracker instead of downscale annotations
-		// TODO(jordanrushing): add logic for creating the initial zone file if it doesn't exist
+		// If using zoneTracker instead of downscale annotations, check the zone file for recent downscaling.
+		// Otherwise, check the downscale annotations.
 		if zt != nil {
-			if err := zt.loadZones(ctx); err != nil {
+			if err := zt.loadZones(ctx, stsList); err != nil {
 				level.Warn(logger).Log("msg", "downscale not allowed due to error while loading zones", "err", err)
 				return deny(
 					"downscale of %s/%s in %s from %d to %d replicas is not allowed because loading zones failed.",
@@ -279,9 +279,9 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	if zt != nil {
 		if err := zt.setDownscaled(ctx, ar.Request.Name); err != nil {
-			level.Error(logger).Log("msg", "downscale not allowed due to error while setting downscale annotation", "err", err)
+			level.Error(logger).Log("msg", "downscale not allowed due to error while setting downscale timestamp in the zone file", "err", err)
 			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because setting downscale annotation failed.",
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because setting downscale timestamp in the zone file failed.",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
 			)
 		}
