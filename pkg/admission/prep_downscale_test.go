@@ -248,7 +248,8 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	api := fake.NewSimpleClientset(objects...)
 	f := &fakeHttpClient{statusCode: params.statusCode}
 
-	admissionResponse := prepareDownscale(ctx, logger, ar, api, f)
+	var zt *zoneTracker
+	admissionResponse := prepareDownscale(ctx, logger, ar, api, f, zt)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
 	if params.stsAnnotated {

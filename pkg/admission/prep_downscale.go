@@ -23,24 +23,33 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
+	"github.com/thanos-io/objstore"
 )
 
 const (
 	PrepareDownscaleWebhookPath = "/admission/prepare-downscale"
 )
 
-func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
+func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool) *v1.AdmissionResponse {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
-	return prepareDownscale(ctx, logger, ar, api, client)
+
+	var zt *zoneTracker
+	if useZoneTracker {
+		// TODO(jordanrushing): fix bucket creation semantics and wire-in config supporting multiple CSPs
+		bkt := objstore.NewInMemBucket()
+		zt = newZoneTracker(bkt, "testkey")
+	}
+
+	return prepareDownscale(ctx, logger, ar, api, client, zt)
 }
 
 type httpClient interface {
 	Post(url, contentType string, body io.Reader) (resp *http.Response, err error)
 }
 
-func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
+func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient, zt *zoneTracker) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
 
 	oldObj, oldGVK, err := codecs.UniversalDeserializer().Decode(ar.Request.OldObject.Raw, nil, nil)
@@ -155,27 +164,54 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 			)
 		}
 
-		foundSts, err := findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name)
-		if err != nil {
-			level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale annotations", "err", err)
-			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because parsing downscale annotations failed.",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
-			)
-		}
-		if foundSts != nil {
-			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
-			level.Warn(logger).Log("msg", msg, "err", err)
-			return deny(msg)
-		}
+		// If using zoneTracker instead of downscale annotations
+		// TODO(jordanrushing): add logic for creating the initial zone file if it doesn't exist
+		if zt != nil {
+			if err := zt.loadZones(ctx); err != nil {
+				level.Warn(logger).Log("msg", "downscale not allowed due to error while loading zones", "err", err)
+				return deny(
+					"downscale of %s/%s in %s from %d to %d replicas is not allowed because loading zones failed.",
+					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
+				)
+			}
+			// Check if the zone has been downscaled recently.
+			foundSts, err := zt.findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name)
+			if err != nil {
+				level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale timestamps from the zone file", "err", err)
+				return deny(
+					"downscale of %s/%s in %s from %d to %d replicas is not allowed because parsing parsing downscale timestamps from the zone file failed.",
+					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
+				)
+			}
+			if foundSts != nil {
+				msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
+					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
+				level.Warn(logger).Log("msg", msg, "err", err)
+				return deny(msg)
+			}
+		} else {
+			foundSts, err := findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name)
+			if err != nil {
+				level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale annotations", "err", err)
+				return deny(
+					"downscale of %s/%s in %s from %d to %d replicas is not allowed because parsing downscale annotations failed.",
+					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
+				)
+			}
+			if foundSts != nil {
+				msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
+					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
+				level.Warn(logger).Log("msg", msg, "err", err)
+				return deny(msg)
+			}
 
-		foundSts = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList)
-		if foundSts != nil {
-			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
-			level.Warn(logger).Log("msg", msg)
-			return deny(msg)
+			foundSts = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList)
+			if foundSts != nil {
+				msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
+					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
+				level.Warn(logger).Log("msg", msg)
+				return deny(msg)
+			}
 		}
 	}
 
@@ -241,13 +277,23 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		)
 	}
 
-	err = addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name)
-	if err != nil {
-		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
-		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
-		)
+	if zt != nil {
+		if err := zt.setDownscaled(ctx, ar.Request.Name); err != nil {
+			level.Error(logger).Log("msg", "downscale not allowed due to error while setting downscale annotation", "err", err)
+			return deny(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because setting downscale annotation failed.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
+			)
+		}
+	} else {
+		err := addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name)
+		if err != nil {
+			level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
+			return deny(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
+			)
+		}
 	}
 
 	// Down-scale operation is allowed because all pods successfully prepared for shutdown

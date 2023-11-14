@@ -19,6 +19,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/model"
 	"go.uber.org/atomic"
+	v1 "k8s.io/api/admission/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -54,6 +55,8 @@ type config struct {
 	serverSelfSignedCertExpiration model.Duration
 
 	updateWebhooksWithSelfSignedCABundle bool
+
+	useZoneTracker bool
 }
 
 func (cfg *config) register(fs *flag.FlagSet) {
@@ -77,6 +80,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	cfg.serverSelfSignedCertExpiration = defaultServerSelfSignedCertExpiration
 
 	fs.BoolVar(&cfg.updateWebhooksWithSelfSignedCABundle, "webhooks.update-ca-bundle", true, "Update the CA bundle in the properly labeled webhook configurations with the self-signed certificate (-server-tls.self-signed-cert.enabled should be enabled).")
+	flag.BoolVar(&cfg.useZoneTracker, "use-zone-tracker", false, "Use zone tracker to prevent simultaneous downscales in different zones")
 }
 
 func (cfg config) validate() error {
@@ -185,10 +189,14 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 		check(tlscert.PatchCABundleOnMutatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
 	}
 
+	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
+		return admission.PrepareDownscale(ctx, logger, ar, api, cfg.useZoneTracker)
+	}
+
 	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert)
 	check(errors.Wrap(err, "failed to create tls server"))
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
-	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(admission.PrepareDownscale, logger, kubeClient))
+	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, kubeClient))
 	check(errors.Wrap(tlsSrv.Start(), "failed to start tls server"))
 }
 
