@@ -15,7 +15,7 @@ import (
 )
 
 type mockBucket struct {
-	objstore.Bucket
+	bkt  objstore.Bucket
 	data map[string][]byte
 }
 
@@ -40,9 +40,41 @@ func (b *mockBucket) IsObjNotFoundErr(err error) bool {
 	return err.Error() == "object not found"
 }
 
+func (*mockBucket) Attributes(ctx context.Context, name string) (objstore.ObjectAttributes, error) {
+	panic("unimplemented")
+}
+
+func (*mockBucket) Close() error {
+	panic("unimplemented")
+}
+
+func (*mockBucket) Delete(ctx context.Context, name string) error {
+	panic("unimplemented")
+}
+
+func (*mockBucket) Exists(ctx context.Context, name string) (bool, error) {
+	panic("unimplemented")
+}
+
+func (*mockBucket) GetRange(ctx context.Context, name string, off int64, length int64) (io.ReadCloser, error) {
+	panic("unimplemented")
+}
+
+func (*mockBucket) IsAccessDeniedErr(err error) bool {
+	panic("unimplemented")
+}
+
+func (*mockBucket) Iter(ctx context.Context, dir string, f func(string) error, options ...objstore.IterOption) error {
+	panic("unimplemented")
+}
+
+func (*mockBucket) Name() string {
+	panic("unimplemented")
+}
+
 func TestZoneTracker(t *testing.T) {
 	ctx := context.Background()
-	bkt := &mockBucket{data: make(map[string][]byte)}
+	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
 	zt := newZoneTracker(bkt, "testkey")
 
 	zones := []string{"testzone", "testzone2", "testzone3"}
@@ -92,7 +124,7 @@ func TestZoneTracker(t *testing.T) {
 
 func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 	ctx := context.Background()
-	bkt := &mockBucket{data: make(map[string][]byte)}
+	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
 	zt := newZoneTracker(bkt, "testkey")
 
 	// Create an initial file in the bucket
@@ -146,7 +178,7 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 
 func TestLoadZonesCreatesInitialZones(t *testing.T) {
 	ctx := context.Background()
-	bkt := &mockBucket{data: make(map[string][]byte)}
+	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
 	zt := newZoneTracker(bkt, "testkey")
 	stsList := &apps.StatefulSetList{
 		Items: []apps.StatefulSet{

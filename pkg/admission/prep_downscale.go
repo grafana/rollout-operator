@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-kit/log"
@@ -23,14 +24,13 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
-	"github.com/thanos-io/objstore"
 )
 
 const (
 	PrepareDownscaleWebhookPath = "/admission/prepare-downscale"
 )
 
-func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool) *v1.AdmissionResponse {
+func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, objectStorageProvider string, bucketName string, endpoint string, region string) *v1.AdmissionResponse {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -38,8 +38,13 @@ func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 	var zt *zoneTracker
 	if useZoneTracker {
 		// TODO(jordanrushing): fix bucket creation semantics and wire-in config supporting multiple CSPs
-		bkt := objstore.NewInMemBucket()
-		zt = newZoneTracker(bkt, "testkey")
+		accessKey := os.Getenv("S3_ACCESS_KEY")
+		secretKey := os.Getenv("S3_SECRET_KEY")
+		// TODO(jordanrushing): stop hardcoding insecure: true
+		s3Config, _ := config.CreateS3ConfigYaml(bucketName, endpoint, region, accessKey, secretKey, true)
+		bkt, _ := newS3BucketClient(s3Config, logger)
+
+		zt = newZoneTracker(bkt, config.ZoneTrackerKey)
 	}
 
 	return prepareDownscale(ctx, logger, ar, api, client, zt)

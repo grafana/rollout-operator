@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-kit/log"
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/thanos-io/objstore"
+	"github.com/thanos-io/objstore/providers/s3"
 	appsv1 "k8s.io/api/apps/v1"
 )
 
@@ -122,9 +124,10 @@ func (zt *zoneTracker) createInitialZones(ctx context.Context, stsList *appsv1.S
 	zt.mu.Lock()
 	defer zt.mu.Unlock()
 
+	currentTime := time.Now().UTC().Format(time.RFC3339)
 	for _, sts := range stsList.Items {
 		if _, ok := zt.zones[sts.Name]; !ok {
-			zt.zones[sts.Name] = time.Now().UTC().Format(time.RFC3339)
+			zt.zones[sts.Name] = currentTime
 		}
 	}
 
@@ -137,4 +140,9 @@ func newZoneTracker(bkt objstore.Bucket, key string) *zoneTracker {
 		bkt:   bkt,
 		key:   key,
 	}
+}
+
+// TODO(jordanrushing): Make this generic for supported providers
+func newS3BucketClient(config []byte, logger log.Logger) (objstore.Bucket, error) {
+	return s3.NewBucket(logger, config, "grafana-rollout-operator")
 }
