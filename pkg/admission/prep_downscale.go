@@ -38,8 +38,8 @@ func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 	var zt *zoneTracker
 	if useZoneTracker {
 		// TODO(jordanrushing): fix bucket creation semantics and wire-in config supporting multiple CSPs
-		accessKey := os.Getenv("S3_ACCESS_KEY")
-		secretKey := os.Getenv("S3_SECRET_KEY")
+		accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+		secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 		// TODO(jordanrushing): stop hardcoding insecure: true
 		s3Config, _ := config.CreateS3ConfigYaml(bucketName, endpoint, region, accessKey, secretKey, true)
 		bkt, _ := newS3BucketClient(s3Config, logger)
