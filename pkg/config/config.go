@@ -1,9 +1,5 @@
 package config
 
-import (
-	"gopkg.in/yaml.v2"
-)
-
 const (
 	// NoDownscaleLabelKey is the label to prevent downscaling of a statefulset
 	NoDownscaleLabelKey   = "grafana.com/no-downscale"
@@ -36,34 +32,3 @@ const (
 	// ZoneTrackerKey is the key used to store the zone tracker data in object storage
 	ZoneTrackerKey = "zone-tracker/last-downscaled.json"
 )
-
-type S3Config struct {
-	Type   string `yaml:"type"`
-	Config struct {
-		Bucket    string `yaml:"bucket"`
-		Endpoint  string `yaml:"endpoint"`
-		Region    string `yaml:"region"`
-		AccessKey string `yaml:"access_key"`
-		SecretKey string `yaml:"secret_key"`
-		Insecure  bool   `yaml:"insecure"`
-	} `yaml:"config"`
-}
-
-func CreateS3ConfigYaml(s3Bucket, s3Endpoint, s3Region, s3AccessKey, s3SecretKey string, insecure bool) ([]byte, error) {
-	cfg := S3Config{
-		Type: "S3",
-	}
-	cfg.Config.Bucket = s3Bucket
-	cfg.Config.Endpoint = s3Endpoint
-	cfg.Config.Region = s3Region
-	cfg.Config.AccessKey = s3AccessKey
-	cfg.Config.SecretKey = s3SecretKey
-	cfg.Config.Insecure = true
-
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	return data, nil
-}

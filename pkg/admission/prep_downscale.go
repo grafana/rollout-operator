@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/go-kit/log"
@@ -30,20 +29,17 @@ const (
 	PrepareDownscaleWebhookPath = "/admission/prepare-downscale"
 )
 
-func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, objectStorageProvider string, bucketName string, endpoint string, region string) *v1.AdmissionResponse {
+func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, objectStorageProvider string, bucketName string, endpoint string, region string, accountName string) *v1.AdmissionResponse {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
 
 	var zt *zoneTracker
 	if useZoneTracker {
-		// TODO(jordanrushing): fix bucket creation semantics and wire-in config supporting multiple CSPs
-		accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
-		secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-		// TODO(jordanrushing): stop hardcoding insecure: true
-		s3Config, _ := config.CreateS3ConfigYaml(bucketName, endpoint, region, accessKey, secretKey, true)
-		bkt, _ := newS3BucketClient(s3Config, logger)
-
+		bkt, err := newBucketClient(ctx, objectStorageProvider, bucketName, endpoint, region, accountName, logger)
+		if err != nil {
+			return deny("downscale not allowed due to error while creating object storage bucket client with zoneTracker enabled: %v", err)
+		}
 		zt = newZoneTracker(bkt, config.ZoneTrackerKey)
 	}
 

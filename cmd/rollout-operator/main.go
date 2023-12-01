@@ -62,6 +62,7 @@ type config struct {
 	bucketName            string
 	objectStorageEndpoint string
 	objectStorageRegion   string
+	accountName           string
 }
 
 func (cfg *config) register(fs *flag.FlagSet) {
@@ -91,6 +92,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.bucketName, "bucket-name", "", "The name of the bucket to use for the zone tracker")
 	fs.StringVar(&cfg.objectStorageEndpoint, "endpoint", "", "The endpoint to use for the object storage provider")
 	fs.StringVar(&cfg.objectStorageRegion, "region", "", "The region to use for the object storage provider")
+	fs.StringVar(&cfg.accountName, "account-name", "", "The account name to use for the Azure object storage provider")
 }
 
 func (cfg config) validate() error {
@@ -118,6 +120,14 @@ func (cfg config) validate() error {
 		}
 		if !supported {
 			return fmt.Errorf("the provided object storage provider is not supported (currently supported providers: %s)", strings.Join(supportedProviders, ", "))
+		}
+		if cfg.objectStorageProvider == "azure" && cfg.accountName == "" {
+			return errors.New("the account name for the Azure object storage provider has not been specified")
+		}
+		if cfg.objectStorageProvider == "s3" {
+			if cfg.objectStorageEndpoint == "" || cfg.objectStorageRegion == "" {
+				return errors.New("the endpoint and region for the S3 object storage provider have not been specified")
+			}
 		}
 	}
 
@@ -220,7 +230,7 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 	}
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-		return admission.PrepareDownscale(ctx, logger, ar, api, cfg.useZoneTracker, cfg.objectStorageProvider, cfg.bucketName, cfg.objectStorageEndpoint, cfg.objectStorageRegion)
+		return admission.PrepareDownscale(ctx, logger, ar, api, cfg.useZoneTracker, cfg.objectStorageProvider, cfg.bucketName, cfg.objectStorageEndpoint, cfg.objectStorageRegion, cfg.accountName)
 	}
 
 	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert)

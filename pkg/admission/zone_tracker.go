@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/thanos-io/objstore"
+	"github.com/thanos-io/objstore/providers/azure"
+	"github.com/thanos-io/objstore/providers/gcs"
 	"github.com/thanos-io/objstore/providers/s3"
+	"gopkg.in/yaml.v2"
 	appsv1 "k8s.io/api/apps/v1"
 )
 
@@ -142,7 +146,86 @@ func newZoneTracker(bkt objstore.Bucket, key string) *zoneTracker {
 	}
 }
 
-// TODO(jordanrushing): Make this generic for supported providers
+// newBucketClient creates a new object storage bucket client based on the minimum provided configuration flags and provider
+// Supported providers are s3, azure, and gcs
+func newBucketClient(ctx context.Context, provider string, bucket string, endpoint string, region string, accountName string, logger log.Logger) (objstore.Bucket, error) {
+	switch provider {
+	case "s3":
+		config, err := createS3ConfigYaml(bucket, endpoint, region)
+		if err != nil {
+			return nil, err
+		}
+		return newS3BucketClient(config, logger)
+	case "azure":
+		config, err := createAzureConfigYaml(bucket, accountName)
+		if err != nil {
+			return nil, err
+		}
+		return newAzureBucketClient(config, logger)
+	case "gcs":
+		config, err := createGCSConfigYaml(ctx, bucket)
+		if err != nil {
+			return nil, err
+		}
+		return newGCSBucketClient(ctx, config, logger)
+	default:
+		return nil, fmt.Errorf("unable to provision an object storage bucket client based on the provided configuration flags")
+	}
+}
+
 func newS3BucketClient(config []byte, logger log.Logger) (objstore.Bucket, error) {
 	return s3.NewBucket(logger, config, "grafana-rollout-operator")
+}
+
+func newAzureBucketClient(config []byte, logger log.Logger) (objstore.Bucket, error) {
+	return azure.NewBucket(logger, config, "grafana-rollout-operator")
+}
+
+func newGCSBucketClient(ctx context.Context, config []byte, logger log.Logger) (objstore.Bucket, error) {
+	return gcs.NewBucket(ctx, logger, config, "grafana-rollout-operator")
+}
+
+func createS3ConfigYaml(bucket, endpoint, region string) ([]byte, error) {
+	cfg := &s3.Config{
+		Bucket:    bucket,
+		Endpoint:  endpoint,
+		Region:    region,
+		AccessKey: os.Getenv("AWS_ACCESS_KEY_ID"),
+		SecretKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
+func createAzureConfigYaml(container, accountName string) ([]byte, error) {
+	cfg := &azure.Config{
+		ContainerName:      container,
+		StorageAccountKey:  os.Getenv("AZURE_BLOB_SECRET_ACCESS_KEY"),
+		StorageAccountName: accountName,
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
+func createGCSConfigYaml(ctx context.Context, bucket string) ([]byte, error) {
+	cfg := &gcs.Config{
+		Bucket: bucket,
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
 }
