@@ -157,7 +157,7 @@ func newBucketClient(ctx context.Context, provider string, bucket string, endpoi
 		}
 		return newS3BucketClient(config, logger)
 	case "azure":
-		config, err := createAzureConfigYaml(bucket, accountName)
+		config, err := createAzureConfigYaml(bucket, accountName, endpoint)
 		if err != nil {
 			return nil, err
 		}
@@ -202,11 +202,12 @@ func createS3ConfigYaml(bucket, endpoint, region string) ([]byte, error) {
 	return data, nil
 }
 
-func createAzureConfigYaml(container, accountName string) ([]byte, error) {
+func createAzureConfigYaml(container, accountName, endpoint string) ([]byte, error) {
 	cfg := &azure.Config{
 		ContainerName:      container,
 		StorageAccountKey:  os.Getenv("AZURE_BLOB_SECRET_ACCESS_KEY"),
 		StorageAccountName: accountName,
+		Endpoint:           endpoint,
 	}
 
 	data, err := yaml.Marshal(cfg)

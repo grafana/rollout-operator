@@ -121,13 +121,11 @@ func (cfg config) validate() error {
 		if !supported {
 			return fmt.Errorf("the provided object storage provider is not supported (currently supported providers: %s)", strings.Join(supportedProviders, ", "))
 		}
-		if cfg.objectStorageProvider == "azure" && cfg.accountName == "" {
+		if cfg.objectStorageProvider == "azure" && (cfg.accountName == "" || cfg.objectStorageEndpoint == "") {
 			return errors.New("the account name for the Azure object storage provider has not been specified")
 		}
-		if cfg.objectStorageProvider == "s3" {
-			if cfg.objectStorageEndpoint == "" || cfg.objectStorageRegion == "" {
-				return errors.New("the endpoint and region for the S3 object storage provider have not been specified")
-			}
+		if cfg.objectStorageProvider == "s3" && (cfg.objectStorageEndpoint == "" || cfg.objectStorageRegion == "") {
+			return errors.New("the endpoint and region for the S3 object storage provider have not been specified")
 		}
 	}
 
