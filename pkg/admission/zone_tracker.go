@@ -41,7 +41,6 @@ func (zt *zoneTracker) loadZones(ctx context.Context, stsList *appsv1.StatefulSe
 			if err != nil {
 				return err
 			}
-			defer r.Close()
 		} else {
 			return err
 		}
