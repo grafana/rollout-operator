@@ -222,3 +222,46 @@ func TestLoadZonesCreatesInitialZones(t *testing.T) {
 		t.Errorf("loadZones did not create initial zones")
 	}
 }
+
+func TestLoadZonesEmptyBucket(t *testing.T) {
+	ctx := context.Background()
+	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
+	zt := newZoneTracker(bkt, "testkey")
+	stsList := &apps.StatefulSetList{}
+
+	err := zt.loadZones(ctx, stsList)
+	if err != nil {
+		t.Fatalf("loadZones failed: %v", err)
+	}
+
+	if len(zt.zones) != 0 {
+		t.Errorf("loadZones failed to populate initial zones in an empty bucket")
+	}
+}
+
+func TestSetDownscaledNonExistentZone(t *testing.T) {
+	ctx := context.Background()
+	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
+	zt := newZoneTracker(bkt, "testkey")
+
+	err := zt.setDownscaled(ctx, "nonexistentzone")
+	if err != nil {
+		t.Fatalf("setDownscaled failed: %v", err)
+	}
+
+	if _, ok := zt.zones["nonexistentzone"]; !ok {
+		t.Errorf("setDownscaled did not handle non-existent zone correctly")
+	}
+}
+
+func TestLastDownscaledNonExistentZone(t *testing.T) {
+	ctx := context.Background()
+	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
+	zt := newZoneTracker(bkt, "testkey")
+
+	time, _ := zt.lastDownscaled(ctx, "nonexistentzone")
+	fmt.Printf("time: %v\n", time)
+	if time != "" {
+		t.Errorf("lastDownscaled did not handle non-existent zone correctly")
+	}
+}
