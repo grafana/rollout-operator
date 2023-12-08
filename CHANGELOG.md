@@ -3,6 +3,7 @@
 ## main / unreleased
 
 * [ENHANCEMENT] Expose pprof endpoint for profiling. #109
+* [ENHANCEMENT] Update Docker base image to `alpine:3.19`. #97
 
 ## v0.10.1
 
