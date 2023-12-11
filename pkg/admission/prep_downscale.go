@@ -164,7 +164,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 			)
 		}
 		if foundSts != nil {
-			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labeled to wait %s between zone downscales",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
 			level.Warn(logger).Log("msg", msg, "err", err)
 			return deny(msg)
