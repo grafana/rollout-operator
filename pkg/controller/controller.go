@@ -145,12 +145,12 @@ func (c *RolloutController) Init() error {
 	go c.statefulSetsFactory.Start(c.stopCh)
 	go c.podsFactory.Start(c.stopCh)
 
-	// Wait until all informers' caches have been synched.
-	level.Info(c.logger).Log("msg", "informers cache is synching")
+	// Wait until all informer caches have been synced.
+	level.Info(c.logger).Log("msg", "informer caches are syncing")
 	if ok := cache.WaitForCacheSync(c.stopCh, c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced); !ok {
-		return errors.New("informers cache failed to sync")
+		return errors.New("informer caches failed to sync")
 	}
-	level.Info(c.logger).Log("msg", "informers cache has synced")
+	level.Info(c.logger).Log("msg", "informer caches have synced")
 
 	return nil
 }
