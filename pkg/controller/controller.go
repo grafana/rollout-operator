@@ -116,9 +116,8 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 
 // Init the controller.
 func (c *RolloutController) Init() error {
-
 	// We enqueue a reconcile request each time any of the observed StatefulSets are updated. The UpdateFunc
-	// is also called every sync period even if no changed occurred.
+	// is also called every sync period even if no changes occurred.
 	_, err := c.statefulSetsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			c.enqueueReconcile()
@@ -146,12 +145,12 @@ func (c *RolloutController) Init() error {
 	go c.statefulSetsFactory.Start(c.stopCh)
 	go c.podsFactory.Start(c.stopCh)
 
-	// Wait until all informers caches have been synched.
-	level.Info(c.logger).Log("msg", "informers cache is synching")
+	// Wait until all informer caches have been synced.
+	level.Info(c.logger).Log("msg", "informer caches are syncing")
 	if ok := cache.WaitForCacheSync(c.stopCh, c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced); !ok {
-		return errors.New("informers cache failed to sync")
+		return errors.New("informer caches failed to sync")
 	}
-	level.Info(c.logger).Log("msg", "informers cache has synced")
+	level.Info(c.logger).Log("msg", "informer caches have synced")
 
 	return nil
 }
@@ -184,8 +183,7 @@ func (c *RolloutController) Stop() {
 	close(c.stopCh)
 }
 
-// enqueueReconcile enqueues a request to run a reconcile as soon as possible. If multiple reconcile
-// requests are enqueued while
+// enqueueReconcile requests to run a reconcile at the next interval.
 func (c *RolloutController) enqueueReconcile() {
 	c.shouldReconcile.Store(true)
 }
@@ -249,8 +247,8 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 		return nil
 	}
 
-	// Ensure all StatefulSets have OnDelete update strategy. If not, then we're not able to guarantee
-	// that will be updated only 1 StatefulSet at a time.
+	// Ensure all StatefulSets have OnDelete update strategy. Otherwise, we're not able to guarantee
+	// for only 1 StatefulSet to be updated at a time.
 	for _, sts := range sets {
 		if sts.Spec.UpdateStrategy.Type != v1.OnDeleteStatefulSetStrategyType {
 			return fmt.Errorf("StatefulSet %s has %s update strategy while %s is expected, skipping reconcile", sts.Name, sts.Spec.UpdateStrategy.Type, v1.OnDeleteStatefulSetStrategyType)
@@ -271,8 +269,8 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	}
 
 	// Ensure there are not 2+ StatefulSets with not-Ready pods. If there are, we shouldn't proceed
-	// rolling out pods and we should wait until these pods are Ready. Reason is that if there are
-	// unavailable pods in multiple StatefulSets this could lead to an outage, so we want pods to
+	// rolling out pods and we should wait until these pods are Ready. The reason is that if there are
+	// unavailable pods in multiple StatefulSets, this could lead to an outage, so we want pods to
 	// get back to Ready first before proceeding.
 	if len(notReadySets) > 1 {
 		// Do not return error because it's not an actionable error with regards to the operator behaviour.
@@ -290,7 +288,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 		ongoing, err := c.updateStatefulSetPods(ctx, sts)
 		if err != nil {
 			// Do not continue with other StatefulSets because this StatefulSet
-			// is expected to be successfully updated before proceeding with next ones.
+			// is expected to be successfully updated before proceeding.
 			return errors.Wrapf(err, "failed to update StatefulSet %s", sts.Name)
 		}
 
@@ -385,7 +383,7 @@ func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (boo
 		return true, nil
 	}
 
-	// The number of ready replicas reported by the StatefulSet match the total number of
+	// The number of ready replicas reported by the StatefulSet matches the total number of
 	// replicas. However, there's still no guarantee that all pods are running. For example,
 	// a terminating pod (which we don't consider "ready") may have not yet failed the
 	// readiness probe for the consecutive number of times required to switch its status
@@ -418,7 +416,7 @@ func (c *RolloutController) listNotReadyPodsByStatefulSet(sts *v1.StatefulSet) (
 		return nil, err
 	}
 
-	// Build a list of not-ready ones. We don't pre-allocate this list cause most of the times we
+	// Build a list of not-ready ones. We don't pre-allocate this list because most of the time we
 	// expect all pods are running and ready.
 	var notReady []*corev1.Pod
 
@@ -476,8 +474,8 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 		}
 
 		for _, pod := range podsToUpdate[:numPods] {
-			// Skip if the pod is terminating. Since "Terminating" is not a pod Phase, we can infer it checking
-			// if the pod is in Running phase but the deletionTimestamp has been set (kubectl does something
+			// Skip if the pod is terminating. Since "Terminating" is not a pod Phase, we can infer it by checking
+			// if the pod is in the Running phase but the deletionTimestamp has been set (kubectl does something
 			// similar too).
 			if pod.Status.Phase == corev1.PodRunning && pod.DeletionTimestamp != nil {
 				level.Debug(c.logger).Log("msg", fmt.Sprintf("waiting for pod %s to be terminated", pod.Name))
@@ -486,7 +484,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 			level.Info(c.logger).Log("msg", fmt.Sprintf("terminating pod %s", pod.Name))
 			if err := c.kubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
-				return false, errors.Wrapf(err, "failed to restart pod %s", pod.Name)
+				return false, errors.Wrapf(err, "failed to delete pod %s", pod.Name)
 			}
 		}
 
@@ -507,7 +505,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	// At this point there are no pods to update, so we can update the currentRevision in the StatefulSet.
 	// When the StatefulSet update strategy is RollingUpdate this is done automatically by the controller,
-	// when when it's OnDelete (our case) then it's our responsibility to update it once done.
+	// but when it's OnDelete (our case) then it's our responsibility to update it once done.
 	if sts.Status.CurrentRevision != sts.Status.UpdateRevision {
 		oldRev := sts.Status.CurrentRevision
 		sts.Status.CurrentRevision = sts.Status.UpdateRevision
@@ -528,7 +526,7 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 		updateRev = sts.Status.UpdateRevision
 	)
 
-	// Do NOT introduce a short circuit if "currRev == updateRev". Reason is that if a change
+	// Do NOT introduce a short circuit if "currRev == updateRev". The reason is that if a change
 	// is rolled back in the StatefulSet to the previous version, the updateRev == currRev but
 	// its pods may still run the previous updateRev. We need to check pods to be 100% sure.
 	if currRev == "" {
@@ -537,7 +535,7 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 		return nil, errors.New("updateRevision is empty")
 	}
 
-	// Get any pods whose revision doesn't match the StatefulSet's updateRevision
+	// Get any pods which revision doesn't match the StatefulSet's updateRevision
 	// and so it means they still need to be updated.
 	podsSelector := labels.NewSelector().Add(
 		util.MustNewLabelsRequirement(v1.ControllerRevisionHashLabelKey, selection.NotEquals, []string{updateRev}),
