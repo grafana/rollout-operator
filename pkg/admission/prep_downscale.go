@@ -170,7 +170,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 			return deny(msg)
 		}
 
-		foundSts = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList)
+		foundSts = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList, ar.Request.Name)
 		if foundSts != nil {
 			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
@@ -340,8 +340,11 @@ func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, stsName strin
 
 // findStatefulSetWithNonUpdatedReplicas returns any statefulset that has non-updated replicas, indicating that the countRunningAndReadyPods
 // may be in the process of being rolled.
-func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace string, stsList *appsv1.StatefulSetList) *statefulSetDownscale {
+func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace string, stsList *appsv1.StatefulSetList, excludeStsName string) *statefulSetDownscale {
 	for _, sts := range stsList.Items {
+		if sts.Name == excludeStsName {
+			continue
+		}
 		readyPods, err := countRunningAndReadyPods(ctx, api, namespace, &sts)
 		if err != nil {
 			return nil
