@@ -91,7 +91,7 @@ func TestZoneTracker(t *testing.T) {
 		}
 
 		// Test isDownscaled
-		_, err := zt.lastDownscaled(ctx, zone)
+		_, err := zt.lastDownscaled(zone)
 		if err != nil {
 			t.Fatalf("isDownscaled failed: %v", err)
 		}
@@ -111,7 +111,7 @@ func TestZoneTracker(t *testing.T) {
 		}
 
 		// Test isDownscaled
-		downscaled, err := zt.lastDownscaled(ctx, zone)
+		downscaled, err := zt.lastDownscaled(zone)
 		if err != nil {
 			t.Fatalf("isDownscaled failed: %v", err)
 		}
@@ -255,11 +255,10 @@ func TestSetDownscaledNonExistentZone(t *testing.T) {
 }
 
 func TestLastDownscaledNonExistentZone(t *testing.T) {
-	ctx := context.Background()
 	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
 	zt := newZoneTracker(bkt, "testkey")
 
-	time, _ := zt.lastDownscaled(ctx, "nonexistentzone")
+	time, _ := zt.lastDownscaled("nonexistentzone")
 	fmt.Printf("time: %v\n", time)
 	if time != "" {
 		t.Errorf("lastDownscaled did not handle non-existent zone correctly")

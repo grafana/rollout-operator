@@ -51,6 +51,7 @@ func (zt *zoneTracker) loadZones(ctx context.Context, stsList *appsv1.StatefulSe
 }
 
 // saveZones encodes the zone tracker to json and uploads the zone file to the bucket.
+// Lock zt.mu before calling
 func (zt *zoneTracker) saveZones(ctx context.Context) error {
 	buf := &bytes.Buffer{}
 	if err := json.NewEncoder(buf).Encode(zt.zones); err != nil {
@@ -61,10 +62,7 @@ func (zt *zoneTracker) saveZones(ctx context.Context) error {
 }
 
 // lastDownscaled returns the last time the zone was downscaled in UTC in time.RFC3339 format.
-func (zt *zoneTracker) lastDownscaled(ctx context.Context, zone string) (string, error) {
-	zt.mu.Lock()
-	defer zt.mu.Unlock()
-
+func (zt *zoneTracker) lastDownscaled(zone string) (string, error) {
 	return zt.zones[zone], nil
 }
 
@@ -87,8 +85,9 @@ func (zt *zoneTracker) findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetL
 		if sts.Name == stsName {
 			continue
 		}
-		lastDownscaleStr, ok := zt.zones[sts.Name]
-		if !ok {
+
+		lastDownscaleStr, err := zt.lastDownscaled(sts.Name)
+		if err != nil {
 			// No last downscale timestamp set for the statefulset, we can continue
 			continue
 		}
@@ -115,10 +114,11 @@ func (zt *zoneTracker) findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetL
 				waitTime:          minTimeBetweenDownscale,
 				lastDownscaleTime: lastDownscale,
 			}
+
 			return &s, nil
 		}
-
 	}
+
 	return nil, nil
 }
 
@@ -162,7 +162,7 @@ func newBucketClient(ctx context.Context, provider string, bucket string, endpoi
 		}
 		return newAzureBucketClient(config, logger)
 	case "gcs":
-		config, err := createGCSConfigYaml(ctx, bucket)
+		config, err := createGCSConfigYaml(bucket)
 		if err != nil {
 			return nil, err
 		}
@@ -217,7 +217,7 @@ func createAzureConfigYaml(container, accountName, endpoint string) ([]byte, err
 	return data, nil
 }
 
-func createGCSConfigYaml(ctx context.Context, bucket string) ([]byte, error) {
+func createGCSConfigYaml(bucket string) ([]byte, error) {
 	cfg := &gcs.Config{
 		Bucket: bucket,
 	}
