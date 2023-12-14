@@ -25,6 +25,6 @@ RUN addgroup -g 10000 -S rollout-operator && \
 USER rollout-operator:rollout-operator
 
 ARG revision
-LABEL org.opencontainers.image.title="rollout-operator" \
+LABEL org.opencontainers.image.title="rollout-operator-debug" \
     org.opencontainers.image.source="https://github.com/grafana/rollout-operator" \
     org.opencontainers.image.revision="${revision}"
