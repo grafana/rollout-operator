@@ -170,7 +170,13 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 			return deny(msg)
 		}
 
-		foundSts = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList, ar.Request.Name)
+		foundSts, err = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList, ar.Request.Name)
+		if err != nil {
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because an error occurred while checking whether StatefulSets have non-updated replicas",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas)
+			level.Warn(logger).Log("msg", msg, "err", err)
+			return deny(msg)
+		}
 		if foundSts != nil {
 			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
@@ -347,14 +353,14 @@ func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, excludeStsNam
 // may be in the process of being rolled.
 //
 // The StatefulSet whose name matches the input excludeStsName is not checked.
-func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace string, stsList *appsv1.StatefulSetList, excludeStsName string) *statefulSetDownscale {
+func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace string, stsList *appsv1.StatefulSetList, excludeStsName string) (*statefulSetDownscale, error) {
 	for _, sts := range stsList.Items {
 		if sts.Name == excludeStsName {
 			continue
 		}
 		readyPods, err := countRunningAndReadyPods(ctx, api, namespace, &sts)
 		if err != nil {
-			return nil
+			return nil, err
 		}
 		status := sts.Status
 		if int(status.Replicas) != readyPods || int(status.UpdatedReplicas) != readyPods {
@@ -362,10 +368,10 @@ func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.I
 				name:               sts.Name,
 				nonReadyReplicas:   int(status.Replicas) - readyPods,
 				nonUpdatedReplicas: int(status.Replicas - status.UpdatedReplicas),
-			}
+			}, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // countRunningAndReadyPods counts running and ready pods for a StatefulSet.
