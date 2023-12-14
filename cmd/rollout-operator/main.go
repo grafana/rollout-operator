@@ -144,11 +144,12 @@ func main() {
 	check(err)
 
 	reg := prometheus.NewRegistry()
+	metrics := newMetrics(reg)
 	ready := atomic.NewBool(false)
 	restart := make(chan string)
 
 	// Expose HTTP endpoints.
-	srv := newServer(cfg.serverPort, logger)
+	srv := newServer(cfg.serverPort, logger, metrics)
 	srv.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	srv.Handle("/ready", readyHandler(ready))
 	check(srv.Start())
@@ -160,8 +161,8 @@ func main() {
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
 	check(errors.Wrap(err, "failed to create Kubernetes client"))
 
-	// startTLS server if enabled.
-	maybeStartTLSServer(cfg, logger, kubeClient, restart)
+	// Start TLS server if enabled.
+	maybeStartTLSServer(cfg, logger, kubeClient, restart, metrics)
 
 	// Init the controller.
 	c := controller.NewRolloutController(kubeClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
@@ -191,7 +192,7 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string) {
+func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics) {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
 		return
@@ -231,7 +232,7 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 		return admission.PrepareDownscale(ctx, logger, ar, api, cfg.useZoneTracker, cfg.objectStorageProvider, cfg.bucketName, cfg.objectStorageEndpoint, cfg.objectStorageRegion, cfg.accountName)
 	}
 
-	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert)
+	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert, metrics)
 	check(errors.Wrap(err, "failed to create tls server"))
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, kubeClient))

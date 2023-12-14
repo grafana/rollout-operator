@@ -2,6 +2,15 @@
 
 ## main / unreleased
 
+## v0.10.1
+
+* [BUGFIX] Do not allow downscale if the operator failed to check whether there are StatefulSets with non-updated replicas. #105
+
+## v0.10.0
+
+* [ENHANCEMENT] Proceed with prepare-downscale operation even when pods from zone being downscaled are not ready or not up to date. #99
+* [ENHANCEMENT] Expose metrics for incoming HTTP requests. #100
+
 ## v0.9.0
 
 * [ENHANCEMENT] Updated dependencies, including: #93
