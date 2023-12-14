@@ -50,7 +50,7 @@ publish-standard-image: clean ## Build and publish only the standard rollout-ope
 
 .PHONY: publish-debug-image
 publish-debug-image: clean
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-debug -t $(IMAGE_PREFIX)/rollout-operator-debug:latest -t $(IMAGE_PREFIX)/rollout-operator-debug:$(IMAGE_TAG) -f Dockerfile.delve .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-debug -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG)-debug -f Dockerfile.delve .
 
 .PHONY: publish-boringcrypto-image
 publish-boringcrypto-image: clean ## Build and publish only the boring-crypto rollout-operator image
