@@ -21,13 +21,19 @@ import (
 
 type zoneTracker struct {
 	mu    sync.Mutex
-	zones map[string]string
+	zones map[string]zoneInfo
 	bkt   objstore.Bucket
 	key   string
 }
 
+type zoneInfo struct {
+	LastDownscaled string `json:"lastDownscaled"`
+}
+
 // loadZones loads the zone file from object storage and populates the zone tracker.
 // If the zone file does not exist, create it and upload it to the bucket then try to get it again.
+//
+// This assumes that statefulset names are unique for all zones being tracked, including across rollout groups
 func (zt *zoneTracker) loadZones(ctx context.Context, stsList *appsv1.StatefulSetList) error {
 	r, err := zt.bkt.Get(ctx, zt.key)
 	if err != nil {
@@ -47,7 +53,19 @@ func (zt *zoneTracker) loadZones(ctx context.Context, stsList *appsv1.StatefulSe
 	}
 	defer r.Close()
 
-	return json.NewDecoder(r).Decode(&zt.zones)
+	// Create a new map to hold the decoded data
+	zones := make(map[string]zoneInfo)
+
+	// Decode the JSON data into the zones map
+	err = json.NewDecoder(r).Decode(&zones)
+	if err != nil {
+		return err
+	}
+
+	// Assign the decoded zones map to the zoneTracker's zones field
+	zt.zones = zones
+
+	return nil
 }
 
 // saveZones encodes the zone tracker to json and uploads the zone file to the bucket.
@@ -63,7 +81,11 @@ func (zt *zoneTracker) saveZones(ctx context.Context) error {
 
 // lastDownscaled returns the last time the zone was downscaled in UTC in time.RFC3339 format.
 func (zt *zoneTracker) lastDownscaled(zone string) (string, error) {
-	return zt.zones[zone], nil
+	zoneInfo, ok := zt.zones[zone]
+	if !ok {
+		return "", fmt.Errorf("zone %s not found", zone)
+	}
+	return zoneInfo.LastDownscaled, nil
 }
 
 // setDownscaled sets the last time the zone was downscaled to the current time in UTC in time.RFC3339 format.
@@ -71,7 +93,12 @@ func (zt *zoneTracker) setDownscaled(ctx context.Context, zone string) error {
 	zt.mu.Lock()
 	defer zt.mu.Unlock()
 
-	zt.zones[zone] = time.Now().UTC().Format(time.RFC3339)
+	zoneInfo, ok := zt.zones[zone]
+	if !ok {
+		return fmt.Errorf("zone %s not found", zone)
+	}
+
+	zoneInfo.LastDownscaled = time.Now().UTC().Format(time.RFC3339)
 
 	return zt.saveZones(ctx)
 }
@@ -128,9 +155,10 @@ func (zt *zoneTracker) createInitialZones(ctx context.Context, stsList *appsv1.S
 	defer zt.mu.Unlock()
 
 	currentTime := time.Now().UTC().Format(time.RFC3339)
+	zoneInfo := &zoneInfo{LastDownscaled: currentTime}
 	for _, sts := range stsList.Items {
 		if _, ok := zt.zones[sts.Name]; !ok {
-			zt.zones[sts.Name] = currentTime
+			zt.zones[sts.Name] = *zoneInfo
 		}
 	}
 
@@ -139,7 +167,7 @@ func (zt *zoneTracker) createInitialZones(ctx context.Context, stsList *appsv1.S
 
 func newZoneTracker(bkt objstore.Bucket, key string) *zoneTracker {
 	return &zoneTracker{
-		zones: make(map[string]string),
+		zones: make(map[string]zoneInfo),
 		bkt:   bkt,
 		key:   key,
 	}

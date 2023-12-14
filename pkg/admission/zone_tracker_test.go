@@ -78,11 +78,24 @@ func TestZoneTracker(t *testing.T) {
 	zt := newZoneTracker(bkt, "testkey")
 
 	zones := []string{"testzone", "testzone2", "testzone3"}
-	stsList := &apps.StatefulSetList{}
-	initialData := fmt.Sprintf("{\"testzone\": \"%s\"}", time.Now().Format(time.RFC3339))
-
-	if err := bkt.Upload(ctx, "testkey", bytes.NewBufferString(initialData)); err != nil {
-		t.Fatalf("Upload failed: %v", err)
+	stsList := &apps.StatefulSetList{
+		Items: []apps.StatefulSet{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testzone",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testzone2",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testzone3",
+				},
+			},
+		},
 	}
 
 	for _, zone := range zones {
@@ -126,12 +139,6 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 	ctx := context.Background()
 	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
 	zt := newZoneTracker(bkt, "testkey")
-
-	// Create an initial file in the bucket
-	initialData := fmt.Sprintf("{\"test-zone\": \"%s\"}", time.Now().Add(-time.Hour).Format(time.RFC3339))
-	if err := bkt.Upload(ctx, "testkey", bytes.NewBufferString(initialData)); err != nil {
-		t.Fatalf("Upload failed: %v", err)
-	}
 
 	stsList := &apps.StatefulSetList{
 		Items: []apps.StatefulSet{
@@ -245,11 +252,11 @@ func TestSetDownscaledNonExistentZone(t *testing.T) {
 	zt := newZoneTracker(bkt, "testkey")
 
 	err := zt.setDownscaled(ctx, "nonexistentzone")
-	if err != nil {
+	if err == nil {
 		t.Fatalf("setDownscaled failed: %v", err)
 	}
 
-	if _, ok := zt.zones["nonexistentzone"]; !ok {
+	if _, ok := zt.zones["nonexistentzone"]; ok {
 		t.Errorf("setDownscaled did not handle non-existent zone correctly")
 	}
 }
