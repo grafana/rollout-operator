@@ -8,7 +8,7 @@ RUN apk add --no-cache build-base git
 
 COPY . /src/rollout-operator
 WORKDIR /src/rollout-operator
-RUN go install -ldflags "-s -w -extldflags '-static'" github.com/go-delve/delve/cmd/dlv@v1.21.2
+RUN go install github.com/go-delve/delve/cmd/dlv@v1.21.2
 RUN /go/bin/dlv -h
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make ${BUILDTARGET}
 
