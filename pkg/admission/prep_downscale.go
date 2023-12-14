@@ -206,7 +206,13 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 				return deny(msg)
 			}
 
-			foundSts = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList)
+			foundSts, err = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList, ar.Request.Name)
+			if err != nil {
+				msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because an error occurred while checking whether StatefulSets have non-updated replicas",
+					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas)
+				level.Warn(logger).Log("msg", msg, "err", err)
+				return deny(msg)
+			}
 			if foundSts != nil {
 				msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
 					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
