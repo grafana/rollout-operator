@@ -313,8 +313,10 @@ func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
 	api := fake.NewSimpleClientset(objects...)
 
 	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup)
-	sts := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, stsList, stsMeta.Name)
-	assert.Nil(t, err)
+	require.NoError(t, err)
+
+	sts, err := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, stsList, stsMeta.Name)
+	require.NoError(t, err)
 	require.NotNil(t, sts)
 	assert.Equal(t, sts.name, "zone-b")
 }
@@ -345,8 +347,10 @@ func TestFindStatefulSetWithNonUpdatedReplicas_UnavailableReplicasSameZone(t *te
 	api := fake.NewSimpleClientset(objects...)
 
 	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup)
-	sts := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, stsList, stsMeta.Name)
-	assert.Nil(t, err)
+	require.NoError(t, err)
+
+	sts, err := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, stsList, stsMeta.Name)
+	require.NoError(t, err)
 	require.Nil(t, sts)
 }
 
