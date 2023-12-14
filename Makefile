@@ -21,6 +21,9 @@ help: ## Display this help and any documented user-facing targets
 rollout-operator: $(GO_FILES) ## Build the rollout-operator binary
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
+rollout-operator-debug: $(GO_FILES)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
+
 .PHONY: rollout-operator-boringcrypto
 rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary with boringcrypto
 	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -tags netgo ./cmd/rollout-operator
@@ -28,6 +31,10 @@ rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary 
 .PHONY: build-image 
 build-image: clean ## Build the rollout-operator image
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+
+.PHONY: build-debug-image ## Build a rollout-operator image running in delve
+build-debug-image: clean
+	docker buildx build --load --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) -f Dockerfile.delve .
 
 .PHONY: build-image-boringcrypto
 build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto 
