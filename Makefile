@@ -22,7 +22,7 @@ rollout-operator: $(GO_FILES) ## Build the rollout-operator binary
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
 rollout-operator-debug: $(GO_FILES)
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build  -gcflags "all=-N -l" -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
 .PHONY: rollout-operator-boringcrypto
 rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary with boringcrypto
