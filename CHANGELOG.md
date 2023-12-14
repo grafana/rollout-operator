@@ -3,6 +3,7 @@
 ## main / unreleased
 
 * [ENHANCEMENT] Proceed with prepare-downscale operation even when pods from zone being downscaled are not ready or not up to date. #99
+* [ENHANCEMENT] Expose metrics for incoming HTTP requests. #100
 
 ## v0.9.0
 

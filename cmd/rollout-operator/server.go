@@ -8,23 +8,24 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/gorilla/mux"
 )
 
 type server struct {
 	srv    *http.Server
-	mux    *http.ServeMux
+	mux    *mux.Router
 	port   int
 	logger log.Logger
 }
 
-func newServer(port int, logger log.Logger) *server {
-	mux := http.NewServeMux()
+func newServer(port int, logger log.Logger, metrics *metrics) *server {
+	m, handler := newInstrumentedRouter(metrics)
 
 	return &server{
 		port: port,
-		mux:  mux,
+		mux:  m,
 		srv: &http.Server{
-			Handler:      mux,
+			Handler:      handler,
 			ReadTimeout:  10 * time.Second,
 			WriteTimeout: 10 * time.Second,
 			IdleTimeout:  3 * time.Minute,
