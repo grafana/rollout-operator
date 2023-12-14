@@ -89,6 +89,9 @@ func (zt *zoneTracker) setDownscaled(ctx context.Context, zone string) error {
 
 	zoneInfo.LastDownscaled = time.Now().UTC().Format(time.RFC3339)
 
+	// Update the zones map with the updated zoneInfo
+	zt.zones[zone] = zoneInfo
+
 	return zt.saveZones(ctx)
 }
 
