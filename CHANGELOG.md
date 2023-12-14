@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.10.1
+
 * [BUGFIX] Do not allow downscale if the operator failed to check whether there are StatefulSets with non-updated replicas. #105
 
 ## v0.10.0
