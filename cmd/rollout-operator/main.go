@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/grafana/dskit/tracing"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -117,6 +118,17 @@ func main() {
 	metrics := newMetrics(reg)
 	ready := atomic.NewBool(false)
 	restart := make(chan string)
+
+	name := os.Getenv("JAEGER_SERVICE_NAME")
+	if name == "" {
+		name = "rollout-operator"
+	}
+
+	if trace, err := tracing.NewFromEnv(name); err != nil {
+		level.Error(logger).Log("msg", "Failed to setup tracing", "err", err.Error())
+	} else {
+		defer trace.Close()
+	}
 
 	// Expose HTTP endpoints.
 	srv := newServer(cfg.serverPort, logger, metrics)
