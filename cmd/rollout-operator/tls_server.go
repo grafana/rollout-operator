@@ -9,31 +9,32 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/gorilla/mux"
 
 	"github.com/grafana/rollout-operator/pkg/tlscert"
 )
 
 type tlsServer struct {
 	srv    *http.Server
-	mux    *http.ServeMux
+	mux    *mux.Router
 	port   int
 	logger log.Logger
 }
 
-func newTLSServer(port int, logger log.Logger, cert tlscert.Certificate) (*tlsServer, error) {
+func newTLSServer(port int, logger log.Logger, cert tlscert.Certificate, metrics *metrics) (*tlsServer, error) {
 	pair, err := tls.X509KeyPair(cert.Cert, cert.Key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load key pair: %v", err)
 	}
 
-	mux := http.NewServeMux()
+	m, handler := newInstrumentedRouter(metrics)
 
 	return &tlsServer{
 		port: port,
-		mux:  mux,
+		mux:  m,
 		srv: &http.Server{
 			TLSConfig:    &tls.Config{Certificates: []tls.Certificate{pair}},
-			Handler:      mux,
+			Handler:      handler,
 			ReadTimeout:  10 * time.Second,
 			WriteTimeout: 10 * time.Second,
 			IdleTimeout:  3 * time.Minute,
