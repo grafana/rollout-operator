@@ -297,10 +297,15 @@ type statefulSetDownscale struct {
 	nonUpdatedReplicas int
 }
 
-// findDownscalesDoneMinTimeAgo returns an error if downscale annotations cannot be parsed.
-func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, stsName string) (*statefulSetDownscale, error) {
+// findDownscalesDoneMinTimeAgo checks whether there's any StatefulSet in the stsList which has been downscaled
+// less than "min allowed time" ago. The timestamp of the last downscale and the minimum time required between
+// downscales are set as StatefulSet annotation and label respectively. If such annotations and labels can't be
+// parsed, then this function returns an error.
+//
+// The StatefulSet whose name matches the input excludeStsName is not checked.
+func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, excludeStsName string) (*statefulSetDownscale, error) {
 	for _, sts := range stsList.Items {
-		if sts.Name == stsName {
+		if sts.Name == excludeStsName {
 			continue
 		}
 		lastDownscaleAnnotation, ok := sts.Annotations[config.LastDownscaleAnnotationKey]
@@ -340,6 +345,8 @@ func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, stsName strin
 
 // findStatefulSetWithNonUpdatedReplicas returns any statefulset that has non-updated replicas, indicating that the countRunningAndReadyPods
 // may be in the process of being rolled.
+//
+// The StatefulSet whose name matches the input excludeStsName is not checked.
 func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace string, stsList *appsv1.StatefulSetList, excludeStsName string) *statefulSetDownscale {
 	for _, sts := range stsList.Items {
 		if sts.Name == excludeStsName {
