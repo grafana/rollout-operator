@@ -34,7 +34,7 @@ build-image: clean ## Build the rollout-operator image
 
 .PHONY: build-debug-image ## Build a rollout-operator image running in delve
 build-debug-image: clean
-	docker buildx build --load --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) -f Dockerfile.delve .
+	docker buildx build --load --platform linux/arm64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) -f Dockerfile.delve .
 
 .PHONY: build-image-boringcrypto
 build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto 
