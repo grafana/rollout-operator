@@ -17,7 +17,7 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=build /go/bin/dlv /bin/dlv
 COPY --from=build /src/rollout-operator/rollout-operator /bin/rollout-operator
-ENTRYPOINT [ "/usr/bin/dlv", "--headless=true", "--listen=:49988", "--api-version=2", "--accept-multiclient", "exec", "/bin/rollout-operator" ]
+ENTRYPOINT [ "/bin/dlv", "--headless=true", "--listen=:49988", "--api-version=2", "--accept-multiclient", "exec", "/bin/rollout-operator" ]
 
 # Create rollout-operator user to run as non-root.
 RUN addgroup -g 10000 -S rollout-operator && \
