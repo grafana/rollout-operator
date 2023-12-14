@@ -26,24 +26,35 @@ rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary 
 	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -tags netgo ./cmd/rollout-operator
 
 .PHONY: build-image 
-build-image: clean ## Build the rollout-operator image
-	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+build-image: create-image-builder clean ## Build the rollout-operator image
+	docker buildx build --load --platform linux/amd64 --builder rollout-operator-image-builder --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: build-image-boringcrypto
-build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto 
+build-image-boringcrypto: create-image-builder clean ## Build the rollout-operator image with boringcrypto
 	# Tags with the regular image repo for integration testing
-	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --load --platform linux/amd64 --builder rollout-operator-image-builder --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: publish-images
 publish-images: publish-standard-image publish-boringcrypto-image ## Build and publish both the standard and boringcrypto images
 
 .PHONY: publish-standard-image
-publish-standard-image: clean ## Build and publish only the standard rollout-operator image
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
+publish-standard-image: create-image-builder clean ## Build and publish only the standard rollout-operator image
+	docker buildx build --push --platform linux/amd64,linux/arm64 --builder rollout-operator-image-builder --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: publish-boringcrypto-image
-publish-boringcrypto-image: clean ## Build and publish only the boring-crypto rollout-operator image
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
+publish-boringcrypto-image: create-image-builder clean ## Build and publish only the boring-crypto rollout-operator image
+	docker buildx build --push --platform linux/amd64,linux/arm64 --builder rollout-operator-image-builder --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
+
+.PHONY: create-image-builder
+create-image-builder: clean ## Creates a multi-platform image image builder
+	@# Check if the image builder already exists. If doesn't exist we create a new one.
+	@# The "docker buildx inspect" command below inspects the builder created in the previous step and performs any
+	@# necessary setup or configuration. The --bootstrap flag indicates that the builder should be initialized.
+	@$$(docker buildx inspect --builder rollout-operator-image-builder 2>&1 > /dev/null); \
+    if [ $$? -ne 0 ]; then \
+        docker buildx create --use --platform linux/amd64,linux/arm64 --name rollout-operator-image-builder; \
+		docker buildx inspect --bootstrap; \
+    fi
 
 .PHONY: test
 test: ## Run tests
