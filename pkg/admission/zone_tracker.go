@@ -36,35 +36,24 @@ type zoneInfo struct {
 // This assumes that statefulset names are unique for all zones being tracked, including across rollout groups
 func (zt *zoneTracker) loadZones(ctx context.Context, stsList *appsv1.StatefulSetList) error {
 	r, err := zt.bkt.Get(ctx, zt.key)
-	if err != nil {
-		if zt.bkt.IsObjNotFoundErr(err) {
-			// Create the zone file if it doesn't exist and populate with the current time for each zone, try to get it again
-			err = zt.createInitialZones(ctx, stsList)
-			if err != nil {
-				return err
-			}
-			r, err = zt.bkt.Get(ctx, zt.key)
-			if err != nil {
-				return err
-			}
-		} else {
+	if err != nil && zt.bkt.IsObjNotFoundErr(err) {
+		if err = zt.createInitialZones(ctx, stsList); err != nil {
 			return err
 		}
+		if r, err = zt.bkt.Get(ctx, zt.key); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
 	}
 	defer r.Close()
 
-	// Create a new map to hold the decoded data
 	zones := make(map[string]zoneInfo)
-
-	// Decode the JSON data into the zones map
-	err = json.NewDecoder(r).Decode(&zones)
-	if err != nil {
+	if err = json.NewDecoder(r).Decode(&zones); err != nil {
 		return err
 	}
 
-	// Assign the decoded zones map to the zoneTracker's zones field
 	zt.zones = zones
-
 	return nil
 }
 
