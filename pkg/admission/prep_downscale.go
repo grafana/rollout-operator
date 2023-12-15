@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/opentracing/opentracing-go"
 	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -51,6 +52,14 @@ type httpClient interface {
 
 func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
+
+	span := opentracing.SpanFromContext(ctx)
+	if span != nil {
+		span.SetTag("object.name", ar.Request.Name)
+		span.SetTag("object.resource", ar.Request.Resource.Resource)
+		span.SetTag("object.namespace", ar.Request.Namespace)
+		span.SetTag("request.dry_run", *ar.Request.DryRun)
+	}
 
 	if *ar.Request.DryRun {
 		return &v1.AdmissionResponse{Allowed: true}
