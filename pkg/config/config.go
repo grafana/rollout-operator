@@ -28,7 +28,4 @@ const (
 	// RolloutDownscaleLeaderAnnotationKey is the name of the leader statefulset that should be used to determine
 	// the number of replicas in a follower statefulset.
 	RolloutDownscaleLeaderAnnotationKey = "grafana.com/rollout-downscale-leader"
-
-	// ZoneTrackerKey is the key used to store the zone tracker data in object storage
-	ZoneTrackerKey = "zone-tracker/last-downscaled.json"
 )
