@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	_ "net/http/pprof" // anonymous import to get the pprof handler registered
 	"os"
 	"os/signal"
 	"syscall"
@@ -110,6 +111,7 @@ func main() {
 	srv := newServer(cfg.serverPort, logger, metrics)
 	srv.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	srv.Handle("/ready", readyHandler(ready))
+	srv.PathPrefix("/debug/pprof").Handler(http.DefaultServeMux)
 	check(srv.Start())
 
 	// Build the Kubernetes client config.
