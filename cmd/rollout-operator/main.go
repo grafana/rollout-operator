@@ -16,6 +16,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/tracing"
+	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -29,8 +30,6 @@ import (
 	"github.com/grafana/rollout-operator/pkg/admission"
 	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
-	"github.com/grafana/rollout-operator/pkg/util"
-
 	// Required to get the GCP auth provider working.
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 )
@@ -143,7 +142,7 @@ func main() {
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
 
 	kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-		return util.TracerTransport{Next: rt}
+		return &nethttp.Transport{RoundTripper: rt}
 	})
 
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)

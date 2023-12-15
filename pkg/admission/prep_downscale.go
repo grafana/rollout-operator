@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
 	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/admission/v1"
@@ -35,7 +36,7 @@ const (
 func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *v1.AdmissionResponse {
 	client := &http.Client{
 		Timeout:   5 * time.Second,
-		Transport: util.TracerTransport{Next: http.DefaultTransport},
+		Transport: &nethttp.Transport{RoundTripper: http.DefaultTransport},
 	}
 
 	if useZoneTracker {
@@ -47,7 +48,7 @@ func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 }
 
 type httpClient interface {
-	Post(url, contentType string, body io.Reader) (resp *http.Response, err error)
+	Do(req *http.Request) (*http.Response, error)
 }
 
 func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
@@ -439,15 +440,26 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 		g.Go(func() error {
 			logger := log.With(logger, "url", ep.url, "index", ep.index)
 
-			resp, err := client.Post("http://"+ep.url, "application/json", nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+ep.url, nil)
 			if err != nil {
-				level.Error(logger).Log("msg", "error sending HTTP post request", "err", err)
+				level.Error(logger).Log("msg", "error creating HTTP POST request", "err", err)
+			}
+
+			req.Header.Set("Content-Type", "application/json")
+			req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
+			defer ht.Finish()
+
+			resp, err := client.Do(req)
+			if err != nil {
+				level.Error(logger).Log("msg", "error sending HTTP POST request", "err", err)
 				return err
 			}
+
+			defer resp.Body.Close()
+
 			if resp.StatusCode/100 != 2 {
 				err := errors.New("HTTP post request returned non-2xx status code")
 				body, readError := io.ReadAll(resp.Body)
-				defer resp.Body.Close()
 				level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", err, "status", resp.StatusCode, "response_body", body)
 				return errors.Join(err, readError)
 			}
