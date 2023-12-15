@@ -1,71 +1,92 @@
 package admission
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
-	"github.com/go-kit/log"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/grafana/rollout-operator/pkg/config"
-	"github.com/thanos-io/objstore"
-	"github.com/thanos-io/objstore/providers/azure"
-	"github.com/thanos-io/objstore/providers/gcs"
-	"github.com/thanos-io/objstore/providers/s3"
-	"gopkg.in/yaml.v2"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type zoneTracker struct {
-	mu    sync.Mutex
-	zones map[string]zoneInfo
-	bkt   objstore.Bucket
-	key   string
+	mu            sync.Mutex
+	zones         map[string]zoneInfo
+	client        kubernetes.Interface
+	namespace     string
+	configMapName string
 }
 
 type zoneInfo struct {
 	LastDownscaled string `json:"lastDownscaled"`
 }
 
-// loadZones loads the zone file from object storage and populates the zone tracker.
-// If the zone file does not exist, create it and upload it to the bucket then try to get it again.
-//
-// This assumes that statefulset names are unique for all zones being tracked, including across rollout groups
 func (zt *zoneTracker) loadZones(ctx context.Context, stsList *appsv1.StatefulSetList) error {
-	r, err := zt.bkt.Get(ctx, zt.key)
-	if err != nil && zt.bkt.IsObjNotFoundErr(err) {
-		if err = zt.createInitialZones(ctx, stsList); err != nil {
+	cm, err := zt.client.CoreV1().ConfigMaps(zt.namespace).Get(ctx, zt.configMapName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// If the ConfigMap does not exist, create it
+			cm = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      zt.configMapName,
+					Namespace: zt.namespace,
+				},
+				Data: make(map[string]string),
+			}
+			cm, err = zt.client.CoreV1().ConfigMaps(zt.namespace).Create(ctx, cm, metav1.CreateOptions{})
+			if err != nil {
+				return err
+			}
+		} else {
 			return err
 		}
-		if r, err = zt.bkt.Get(ctx, zt.key); err != nil {
+		// Populate initial zones after the configmap is created
+		if err := zt.createInitialZones(ctx, stsList); err != nil {
 			return err
 		}
-	} else if err != nil {
-		return err
-	}
-	defer r.Close()
-
-	zones := make(map[string]zoneInfo)
-	if err = json.NewDecoder(r).Decode(&zones); err != nil {
-		return err
 	}
 
-	zt.zones = zones
+	// Convert the ConfigMap data to the zones map
+	for zone, data := range cm.Data {
+		var zi zoneInfo
+		err = json.Unmarshal([]byte(data), &zi)
+		if err != nil {
+			return err
+		}
+		zt.zones[zone] = zi
+	}
+
 	return nil
 }
 
-// saveZones encodes the zone tracker to json and uploads the zone file to the bucket.
-// Lock zt.mu before calling
 func (zt *zoneTracker) saveZones(ctx context.Context) error {
-	buf := &bytes.Buffer{}
-	if err := json.NewEncoder(buf).Encode(zt.zones); err != nil {
-		return err
+	// Convert the zones map to ConfigMap data
+	data := make(map[string]string)
+	for zone, zi := range zt.zones {
+		ziBytes, err := json.Marshal(zi)
+		if err != nil {
+			return err
+		}
+		data[zone] = string(ziBytes)
 	}
 
-	return zt.bkt.Upload(ctx, zt.key, buf)
+	// Update the ConfigMap with the new data
+	_, err := zt.client.CoreV1().ConfigMaps(zt.namespace).Update(ctx, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      zt.configMapName,
+			Namespace: zt.namespace,
+		},
+		Data: data,
+	}, metav1.UpdateOptions{})
+
+	return err
 }
 
 // lastDownscaled returns the last time the zone was downscaled in UTC in time.RFC3339 format.
@@ -157,95 +178,11 @@ func (zt *zoneTracker) createInitialZones(ctx context.Context, stsList *appsv1.S
 	return zt.saveZones(ctx)
 }
 
-func newZoneTracker(bkt objstore.Bucket, key string) *zoneTracker {
+func newZoneTracker(api kubernetes.Interface, namespace string, configMapName string) *zoneTracker {
 	return &zoneTracker{
-		zones: make(map[string]zoneInfo),
-		bkt:   bkt,
-		key:   key,
+		zones:         make(map[string]zoneInfo),
+		client:        api,
+		namespace:     namespace,
+		configMapName: configMapName,
 	}
-}
-
-// newBucketClient creates a new object storage bucket client based on the minimum provided configuration flags and provider
-// Supported providers are s3, azure, and gcs
-func newBucketClient(ctx context.Context, provider string, bucket string, endpoint string, region string, accountName string, logger log.Logger) (objstore.Bucket, error) {
-	switch provider {
-	case "s3":
-		config, err := createS3ConfigYaml(bucket, endpoint, region)
-		if err != nil {
-			return nil, err
-		}
-		return newS3BucketClient(config, logger)
-	case "azure":
-		config, err := createAzureConfigYaml(bucket, accountName, endpoint)
-		if err != nil {
-			return nil, err
-		}
-		return newAzureBucketClient(config, logger)
-	case "gcs":
-		config, err := createGCSConfigYaml(bucket)
-		if err != nil {
-			return nil, err
-		}
-		return newGCSBucketClient(ctx, config, logger)
-	default:
-		return nil, fmt.Errorf("unable to provision an object storage bucket client based on the provided configuration flags")
-	}
-}
-
-func newS3BucketClient(config []byte, logger log.Logger) (objstore.Bucket, error) {
-	return s3.NewBucket(logger, config, "grafana-rollout-operator")
-}
-
-func newAzureBucketClient(config []byte, logger log.Logger) (objstore.Bucket, error) {
-	return azure.NewBucket(logger, config, "grafana-rollout-operator")
-}
-
-func newGCSBucketClient(ctx context.Context, config []byte, logger log.Logger) (objstore.Bucket, error) {
-	return gcs.NewBucket(ctx, logger, config, "grafana-rollout-operator")
-}
-
-func createS3ConfigYaml(bucket, endpoint, region string) ([]byte, error) {
-	cfg := &s3.Config{
-		Bucket:    bucket,
-		Endpoint:  endpoint,
-		Region:    region,
-		AccessKey: os.Getenv("AWS_ACCESS_KEY_ID"),
-		SecretKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
-	}
-
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	return data, nil
-}
-
-func createAzureConfigYaml(container, accountName, endpoint string) ([]byte, error) {
-	cfg := &azure.Config{
-		ContainerName:      container,
-		StorageAccountKey:  os.Getenv("AZURE_BLOB_SECRET_ACCESS_KEY"),
-		StorageAccountName: accountName,
-		Endpoint:           endpoint,
-	}
-
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	return data, nil
-}
-
-func createGCSConfigYaml(bucket string) ([]byte, error) {
-	cfg := &gcs.Config{
-		Bucket: bucket,
-	}
-
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	return data, nil
 }

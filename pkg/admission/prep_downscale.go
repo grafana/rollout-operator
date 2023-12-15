@@ -29,18 +29,14 @@ const (
 	PrepareDownscaleWebhookPath = "/admission/prepare-downscale"
 )
 
-func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, objectStorageProvider string, bucketName string, endpoint string, region string, accountName string) *v1.AdmissionResponse {
+func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *v1.AdmissionResponse {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
 
 	var zt *zoneTracker
 	if useZoneTracker {
-		bkt, err := newBucketClient(ctx, objectStorageProvider, bucketName, endpoint, region, accountName, logger)
-		if err != nil {
-			return deny("downscale not allowed due to error while creating object storage bucket client with zoneTracker enabled: %v", err)
-		}
-		zt = newZoneTracker(bkt, config.ZoneTrackerKey)
+		zt = newZoneTracker(api, ar.Request.Namespace, zoneTrackerConfigMapName)
 	}
 
 	return prepareDownscale(ctx, logger, ar, api, client, zt)

@@ -16,7 +16,6 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thanos-io/objstore"
 	v1 "k8s.io/api/admission/v1"
 	apps "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -573,8 +572,8 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 	api := fake.NewSimpleClientset(objects...)
 	f := &fakeHttpClient{statusCode: params.statusCode}
 
-	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
-	zt := newZoneTracker(bkt, "testkey")
+	zt := newZoneTracker(api, namespace, "zone-tracker-test-cm")
+
 	admissionResponse := prepareDownscale(ctx, logger, ar, api, f, zt)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 }

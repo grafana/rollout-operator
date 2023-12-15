@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -57,12 +56,8 @@ type config struct {
 
 	updateWebhooksWithSelfSignedCABundle bool
 
-	useZoneTracker        bool
-	objectStorageProvider string
-	bucketName            string
-	objectStorageEndpoint string
-	objectStorageRegion   string
-	accountName           string
+	useZoneTracker           bool
+	zoneTrackerConfigMapName string
 }
 
 func (cfg *config) register(fs *flag.FlagSet) {
@@ -88,11 +83,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.BoolVar(&cfg.updateWebhooksWithSelfSignedCABundle, "webhooks.update-ca-bundle", true, "Update the CA bundle in the properly labeled webhook configurations with the self-signed certificate (-server-tls.self-signed-cert.enabled should be enabled).")
 
 	fs.BoolVar(&cfg.useZoneTracker, "use-zone-tracker", false, "Use the zone tracker to prevent simultaneous downscales in different zones")
-	fs.StringVar(&cfg.objectStorageProvider, "provider", "", "The object storage provider to use for the zone tracker. Supported values: s3, gcs, azure")
-	fs.StringVar(&cfg.bucketName, "bucket-name", "", "The name of the bucket to use for the zone tracker")
-	fs.StringVar(&cfg.objectStorageEndpoint, "endpoint", "", "The endpoint to use for the object storage provider")
-	fs.StringVar(&cfg.objectStorageRegion, "region", "", "The region to use for the object storage provider")
-	fs.StringVar(&cfg.accountName, "account-name", "", "The account name to use for the Azure object storage provider")
+	fs.StringVar(&cfg.zoneTrackerConfigMapName, "zone-tracker.config-map-name", "rollout-operator-zone-tracker", "The name of the ConfigMap to use for the zone tracker")
 }
 
 func (cfg config) validate() error {
@@ -104,28 +95,8 @@ func (cfg config) validate() error {
 		return errors.New("either configure both Kubernetes API URL and config file or none of them")
 	}
 	if cfg.useZoneTracker {
-		if cfg.objectStorageProvider == "" {
-			return errors.New("the object storage provider for the zone tracker has not been specified")
-		}
-		if cfg.bucketName == "" {
-			return errors.New("the bucket name for the zone tracker has not been specified")
-		}
-		supportedProviders := []string{"s3", "gcs", "azure"}
-		supported := false
-		for _, provider := range supportedProviders {
-			if cfg.objectStorageProvider == provider {
-				supported = true
-				break
-			}
-		}
-		if !supported {
-			return fmt.Errorf("the provided object storage provider is not supported (currently supported providers: %s)", strings.Join(supportedProviders, ", "))
-		}
-		if cfg.objectStorageProvider == "azure" && (cfg.accountName == "" || cfg.objectStorageEndpoint == "") {
-			return errors.New("the account name for the Azure object storage provider has not been specified")
-		}
-		if cfg.objectStorageProvider == "s3" && (cfg.objectStorageEndpoint == "" || cfg.objectStorageRegion == "") {
-			return errors.New("the endpoint and region for the S3 object storage provider have not been specified")
+		if cfg.zoneTrackerConfigMapName == "" {
+			return errors.New("the zone tracker ConfigMap name has not been specified")
 		}
 	}
 
@@ -229,7 +200,7 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 	}
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-		return admission.PrepareDownscale(ctx, logger, ar, api, cfg.useZoneTracker, cfg.objectStorageProvider, cfg.bucketName, cfg.objectStorageEndpoint, cfg.objectStorageRegion, cfg.accountName)
+		return admission.PrepareDownscale(ctx, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName)
 	}
 
 	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert, metrics)

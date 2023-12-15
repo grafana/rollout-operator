@@ -1,85 +1,31 @@
 package admission
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"io"
 	"testing"
 	"time"
 
 	"github.com/grafana/rollout-operator/pkg/config"
-	"github.com/thanos-io/objstore"
 	apps "k8s.io/api/apps/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
-
-type mockBucket struct {
-	bkt  objstore.Bucket
-	data map[string][]byte
-}
-
-func (b *mockBucket) Get(ctx context.Context, name string) (io.ReadCloser, error) {
-	data, ok := b.data[name]
-	if !ok {
-		return nil, fmt.Errorf("object not found")
-	}
-	return io.NopCloser(bytes.NewReader(data)), nil
-}
-
-func (b *mockBucket) Upload(ctx context.Context, name string, r io.Reader) error {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return err
-	}
-	b.data[name] = data
-	return nil
-}
-
-func (b *mockBucket) IsObjNotFoundErr(err error) bool {
-	return err.Error() == "object not found"
-}
-
-func (*mockBucket) Attributes(ctx context.Context, name string) (objstore.ObjectAttributes, error) {
-	panic("unimplemented")
-}
-
-func (*mockBucket) Close() error {
-	panic("unimplemented")
-}
-
-func (*mockBucket) Delete(ctx context.Context, name string) error {
-	panic("unimplemented")
-}
-
-func (*mockBucket) Exists(ctx context.Context, name string) (bool, error) {
-	panic("unimplemented")
-}
-
-func (*mockBucket) GetRange(ctx context.Context, name string, off int64, length int64) (io.ReadCloser, error) {
-	panic("unimplemented")
-}
-
-func (*mockBucket) IsAccessDeniedErr(err error) bool {
-	panic("unimplemented")
-}
-
-func (*mockBucket) Iter(ctx context.Context, dir string, f func(string) error, options ...objstore.IterOption) error {
-	panic("unimplemented")
-}
-
-func (*mockBucket) Name() string {
-	panic("unimplemented")
-}
 
 func TestZoneTracker(t *testing.T) {
 	ctx := context.Background()
-	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
-	zt := newZoneTracker(bkt, "testkey")
+
+	// Create a fake client
+	client := fake.NewSimpleClientset()
+
+	// Create a new zoneTracker with the fake client
+	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
 
 	zones := []string{"testzone", "testzone2", "testzone3"}
-	stsList := &apps.StatefulSetList{
-		Items: []apps.StatefulSet{
+	stsList := &appsv1.StatefulSetList{
+		Items: []appsv1.StatefulSet{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "testzone",
@@ -103,10 +49,10 @@ func TestZoneTracker(t *testing.T) {
 			t.Fatalf("loadZones failed: %v", err)
 		}
 
-		// Test isDownscaled
+		// Test lastDownscaled
 		_, err := zt.lastDownscaled(zone)
 		if err != nil {
-			t.Fatalf("isDownscaled failed: %v", err)
+			t.Fatalf("lastDownscaled failed: %v", err)
 		}
 
 		// Test setDownscaled
@@ -123,22 +69,25 @@ func TestZoneTracker(t *testing.T) {
 			t.Fatalf("loadZones failed: %v", err)
 		}
 
-		// Test isDownscaled
+		// Test lastDownscaled
 		downscaled, err := zt.lastDownscaled(zone)
 		if err != nil {
-			t.Fatalf("isDownscaled failed: %v", err)
+			t.Fatalf("lastDownscaled failed: %v", err)
 		}
 
 		if downscaled == "" {
-			t.Fatalf("isDownscaled returned false, want true")
+			t.Fatalf("lastDownscaled returned an empty string, want a timestamp")
 		}
 	}
 }
 
 func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 	ctx := context.Background()
-	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
-	zt := newZoneTracker(bkt, "testkey")
+	// Create a fake client
+	client := fake.NewSimpleClientset()
+
+	// Create a new zoneTracker with the fake client
+	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
 
 	stsList := &apps.StatefulSetList{
 		Items: []apps.StatefulSet{
@@ -185,8 +134,12 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 
 func TestLoadZonesCreatesInitialZones(t *testing.T) {
 	ctx := context.Background()
-	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
-	zt := newZoneTracker(bkt, "testkey")
+	// Create a fake client
+	client := fake.NewSimpleClientset()
+
+	// Create a new zoneTracker with the fake client
+	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
+
 	stsList := &apps.StatefulSetList{
 		Items: []apps.StatefulSet{
 			{
@@ -215,25 +168,33 @@ func TestLoadZonesCreatesInitialZones(t *testing.T) {
 	}
 
 	// Check if the zone file was created
-	data, err := bkt.Get(ctx, "testkey")
+	cm, err := client.CoreV1().ConfigMaps("testnamespace").Get(ctx, "testconfigmap", metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("Download failed: %v", err)
+		t.Fatalf("Get ConfigMap failed: %v", err)
 	}
 
-	readData, err := io.ReadAll(data)
-	if err != nil {
-		t.Fatalf("ReadAll failed: %v", err)
-	}
+	// Check the data for each zone
+	for zone, data := range cm.Data {
+		var zi zoneInfo
+		err = json.Unmarshal([]byte(data), &zi)
+		if err != nil {
+			t.Fatalf("Unmarshal failed for zone %s: %v", zone, err)
+		}
 
-	if string(readData) == "" {
-		t.Errorf("loadZones did not create initial zones")
+		if zi.LastDownscaled == "" {
+			t.Errorf("LastDownscaled is empty for zone %s", zone)
+		}
 	}
 }
 
 func TestLoadZonesEmptyBucket(t *testing.T) {
 	ctx := context.Background()
-	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
-	zt := newZoneTracker(bkt, "testkey")
+	// Create a fake client
+	client := fake.NewSimpleClientset()
+
+	// Create a new zoneTracker with the fake client
+	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
+
 	stsList := &apps.StatefulSetList{}
 
 	err := zt.loadZones(ctx, stsList)
@@ -248,8 +209,11 @@ func TestLoadZonesEmptyBucket(t *testing.T) {
 
 func TestSetDownscaledNonExistentZone(t *testing.T) {
 	ctx := context.Background()
-	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
-	zt := newZoneTracker(bkt, "testkey")
+	// Create a fake client
+	client := fake.NewSimpleClientset()
+
+	// Create a new zoneTracker with the fake client
+	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
 
 	err := zt.setDownscaled(ctx, "nonexistentzone")
 	if err == nil {
@@ -262,8 +226,11 @@ func TestSetDownscaledNonExistentZone(t *testing.T) {
 }
 
 func TestLastDownscaledNonExistentZone(t *testing.T) {
-	bkt := &mockBucket{bkt: objstore.NewInMemBucket(), data: make(map[string][]byte)}
-	zt := newZoneTracker(bkt, "testkey")
+	// Create a fake client
+	client := fake.NewSimpleClientset()
+
+	// Create a new zoneTracker with the fake client
+	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
 
 	time, _ := zt.lastDownscaled("nonexistentzone")
 	fmt.Printf("time: %v\n", time)
