@@ -33,7 +33,8 @@ const (
 
 func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *v1.AdmissionResponse {
 	client := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout:   5 * time.Second,
+		Transport: util.TracerTransport{Next: http.DefaultTransport},
 	}
 
 	if useZoneTracker {
