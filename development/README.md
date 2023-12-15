@@ -9,3 +9,5 @@ To use it:
 * Port forward to the Jaeger UI: `kubectl --namespace=rollout-operator-development port-forward svc/jaeger 16686:16686`
 
 You'll then be able to access the rollout operator at `http://localhost:8080`, and the Jaeger tracing UI at `http://localhost:16686`.
+
+You can use the `test-app` StatefulSet to exercise the operator.
