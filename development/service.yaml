@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rollout-operator
+  namespace: rollout-operator-development
+spec:
+  selector:
+    name: rollout-operator
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8001
+  type: NodePort
