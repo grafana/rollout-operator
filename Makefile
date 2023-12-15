@@ -4,6 +4,7 @@ GIT_REVISION := $(shell git rev-parse --short HEAD)
 
 IMAGE_PREFIX ?= grafana
 IMAGE_TAG ?= $(subst /,-,$(GIT_BRANCH))-$(GIT_REVISION)
+IMAGE_TAG_DEBUG ?= $(IMAGE_TAG)-debug
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -32,9 +33,14 @@ rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary 
 build-image: clean ## Build the rollout-operator image
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
-.PHONY: build-debug-image ## Build a rollout-operator debug image running in delve
-build-debug-image: clean
-	docker buildx build --load --platform linux/arm64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) -f Dockerfile.delve .
+# Separate build targets per architecture because docker exporter currently doesn't support multi-arch builds on mac.
+.PHONY: build-debug-image-amd64 ## Build a rollout-operator debug image running in delve
+build-debug-image-amd64: clean
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:$(IMAGE_TAG_DEBUG) -f Dockerfile.delve .
+
+.PHONY: build-debug-image-arm64 ## Build a rollout-operator debug image running in delve
+build-debug-image-arm64: clean
+	docker buildx build --load --platform linux/arm64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:$(IMAGE_TAG_DEBUG) -f Dockerfile.delve .
 
 .PHONY: build-image-boringcrypto
 build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto 
@@ -50,7 +56,7 @@ publish-standard-image: clean ## Build and publish only the standard rollout-ope
 
 .PHONY: publish-debug-image
 publish-debug-image: clean
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-debug -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG)-debug -f Dockerfile.delve .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-debug -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG_DEBUG) -f Dockerfile.delve .
 
 .PHONY: publish-boringcrypto-image
 publish-boringcrypto-image: clean ## Build and publish only the boring-crypto rollout-operator image
