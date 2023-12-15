@@ -53,3 +53,7 @@ func (s *server) Start() error {
 func (s *server) Handle(pattern string, handler http.Handler) {
 	s.mux.Handle(pattern, handler)
 }
+
+func (s *server) PathPrefix(tpl string) *mux.Route {
+	return s.mux.PathPrefix(tpl)
+}
