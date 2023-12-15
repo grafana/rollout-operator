@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: rollout-operator-development
+spec:
+  selector:
+    name: jaeger
+  ports:
+    - protocol: TCP
+      port: 16686
+      targetPort: 16686
+      name: http
+    - protocol: UDP
+      port: 6831
+      targetPort: 6831
+      name: thrift-compact-udp
+  type: ClusterIP
