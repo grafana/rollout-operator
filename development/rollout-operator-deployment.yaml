@@ -29,6 +29,8 @@ spec:
             - -kubernetes.namespace=rollout-operator-development
             - -reconcile.interval=1s
             - -log.level=debug
+            - -server-tls.enabled=true
+            - -server-tls.self-signed-cert.secret-name=certificate
           ports:
             - containerPort: 8001
               name: http-metrics

@@ -10,4 +10,10 @@ spec:
     - protocol: TCP
       port: 80
       targetPort: 8001
-  type: NodePort
+      name: http
+    - protocol: TCP
+      port: 443
+      targetPort: 8443
+      name: https
+  publishNotReadyAddresses: true
+  type: ClusterIP
