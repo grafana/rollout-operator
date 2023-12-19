@@ -1,4 +1,4 @@
-FROM alpine:3.18
+FROM alpine:3.19
 
 COPY       mock-service /bin/mock-service
 ENTRYPOINT [ "/bin/mock-service" ]

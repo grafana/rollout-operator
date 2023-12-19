@@ -1,17 +1,15 @@
-FROM golang:1.21-alpine3.18 AS build
+FROM golang:1.21-bookworm AS build
 
 ARG TARGETOS
 ARG TARGETARCH
 ARG BUILDTARGET=rollout-operator
 
-RUN apk add --no-cache build-base git
-
 COPY . /src/rollout-operator
 WORKDIR /src/rollout-operator
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make ${BUILDTARGET}
 
-FROM alpine:3.18
-RUN apk add --no-cache ca-certificates
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates gcompat
 
 COPY --from=build /src/rollout-operator/rollout-operator /bin/rollout-operator
 ENTRYPOINT [ "/bin/rollout-operator" ]

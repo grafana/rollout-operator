@@ -3,6 +3,7 @@
 ## main / unreleased
 
 * [ENHANCEMENT] Expose pprof endpoint for profiling. #109
+* [ENHANCEMENT] Change Docker build image to `golang:1.21-bookworm` and update base image to `alpine:3.19`. #97
 
 ## v0.10.1
 
