@@ -177,7 +177,7 @@ func (zt *zoneTracker) findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetL
 	return nil, nil
 }
 
-// If the zone file does not exist, populate it with the current time for each zone and upload it to the bucket.
+// If the zone ConfigMap does not exist, populate it with the current time for each zone and save it.
 func (zt *zoneTracker) createInitialZones(ctx context.Context, stsList *appsv1.StatefulSetList) error {
 	zt.mu.Lock()
 	defer zt.mu.Unlock()

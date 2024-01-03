@@ -24,11 +24,6 @@ require (
 )
 
 require (
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
-	google.golang.org/grpc v1.59.0 // indirect
-)
-
-require (
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
@@ -127,6 +122,8 @@ require (
 	golang.org/x/time v0.4.0 // indirect
 	golang.org/x/tools v0.9.1 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d // indirect
+	google.golang.org/grpc v1.59.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect

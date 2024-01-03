@@ -161,7 +161,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 			)
 		}
 
-		// If using zoneTracker instead of downscale annotations, check the zone file for recent downscaling.
+		// If using zoneTracker instead of downscale annotations, check the zone ConfigMap for recent downscaling.
 		// Otherwise, check the downscale annotations.
 		if zt != nil {
 			if err := zt.loadZones(ctx, stsList); err != nil {
@@ -174,9 +174,9 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 			// Check if the zone has been downscaled recently.
 			foundSts, err := zt.findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name)
 			if err != nil {
-				level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale timestamps from the zone file", "err", err)
+				level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale timestamps from the zone ConfigMap", "err", err)
 				return deny(
-					"downscale of %s/%s in %s from %d to %d replicas is not allowed because parsing parsing downscale timestamps from the zone file failed.",
+					"downscale of %s/%s in %s from %d to %d replicas is not allowed because parsing parsing downscale timestamps from the zone ConfigMap failed.",
 					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
 				)
 			}
@@ -282,9 +282,9 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	if zt != nil {
 		if err := zt.setDownscaled(ctx, ar.Request.Name); err != nil {
-			level.Error(logger).Log("msg", "downscale not allowed due to error while setting downscale timestamp in the zone file", "err", err)
+			level.Error(logger).Log("msg", "downscale not allowed due to error while setting downscale timestamp in the zone ConfigMap", "err", err)
 			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because setting downscale timestamp in the zone file failed.",
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because setting downscale timestamp in the zone ConfigMap failed.",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldReplicas, *newReplicas,
 			)
 		}

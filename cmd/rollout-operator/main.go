@@ -94,10 +94,8 @@ func (cfg config) validate() error {
 	if (cfg.kubeAPIURL == "") != (cfg.kubeConfigFile == "") {
 		return errors.New("either configure both Kubernetes API URL and config file or none of them")
 	}
-	if cfg.useZoneTracker {
-		if cfg.zoneTrackerConfigMapName == "" {
-			return errors.New("the zone tracker ConfigMap name has not been specified")
-		}
+	if cfg.useZoneTracker && cfg.zoneTrackerConfigMapName == "" {
+		return errors.New("the zone tracker ConfigMap name has not been specified")
 	}
 
 	return nil

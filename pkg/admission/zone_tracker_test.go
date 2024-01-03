@@ -187,7 +187,7 @@ func TestLoadZonesCreatesInitialZones(t *testing.T) {
 	}
 }
 
-func TestLoadZonesEmptyBucket(t *testing.T) {
+func TestLoadZonesEmptyConfigMap(t *testing.T) {
 	ctx := context.Background()
 	// Create a fake client
 	client := fake.NewSimpleClientset()

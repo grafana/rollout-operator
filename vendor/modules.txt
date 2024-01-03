@@ -586,7 +586,7 @@ google.golang.org/appengine/internal/log
 google.golang.org/appengine/internal/remote_api
 google.golang.org/appengine/internal/urlfetch
 google.golang.org/appengine/urlfetch
-# google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d
 ## explicit; go 1.19
 google.golang.org/genproto/googleapis/rpc/status
 # google.golang.org/grpc v1.59.0
