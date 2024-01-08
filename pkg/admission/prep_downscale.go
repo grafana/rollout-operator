@@ -42,14 +42,14 @@ func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		return zt.prepareDownscale(ctx, logger, ar, api, client)
 	}
 
-	return prepareDownscale(ctx, logger, ar, api, client, zt)
+	return prepareDownscale(ctx, logger, ar, api, client)
 }
 
 type httpClient interface {
 	Post(url, contentType string, body io.Reader) (resp *http.Response, err error)
 }
 
-func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient, zt *zoneTracker) *v1.AdmissionResponse {
+func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
 
 	if *ar.Request.DryRun {
