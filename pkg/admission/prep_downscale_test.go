@@ -723,14 +723,14 @@ func TestCreateEndpoints(t *testing.T) {
 				replicas: func() *int32 { i := int32(3); return &i }(),
 			},
 			port: "8080",
-			path: "metrics",
+			path: "prepare-downscale",
 			expected: []endpoint{
 				{
-					url:   "test-4.test.default.svc.cluster.local:8080/metrics",
+					url:   "test-4.test.default.svc.cluster.local:8080/prepare-downscale",
 					index: 4,
 				},
 				{
-					url:   "test-3.test.default.svc.cluster.local:8080/metrics",
+					url:   "test-3.test.default.svc.cluster.local:8080/prepare-downscale",
 					index: 3,
 				},
 			},
