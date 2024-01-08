@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rollout-operator
+  namespace: rollout-operator-development
+spec:
+  selector:
+    name: rollout-operator
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8001
+      name: http
+    - protocol: TCP
+      port: 443
+      targetPort: 8443
+      name: https
+  publishNotReadyAddresses: true
+  type: ClusterIP

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-app
+spec:
+  selector:
+    name: test-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: test-app
+  labels:
+    grafana.com/prepare-downscale: "true"
+  annotations:
+    grafana.com/prepare-downscale-http-path: "/"
+    grafana.com/prepare-downscale-http-port: "80"
+spec:
+  replicas: 3
+  serviceName: test-app
+  selector:
+    matchLabels:
+      name: test-app
+  template:
+    metadata:
+      labels:
+        name: test-app
+    spec:
+      containers:
+        - name: app
+          image: nginx:latest

@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rollout-operator
+  namespace: rollout-operator-development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: rollout-operator
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  minReadySeconds: 10
+  template:
+    metadata:
+      name: rollout-operator
+      labels:
+        name: rollout-operator
+    spec:
+      serviceAccountName: rollout-operator
+      containers:
+        - name: rollout-operator
+          image: rollout-operator:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - -kubernetes.namespace=rollout-operator-development
+            - -reconcile.interval=1s
+            - -log.level=debug
+            - -server-tls.enabled=true
+            - -server-tls.self-signed-cert.secret-name=certificate
+          ports:
+            - containerPort: 8001
+              name: http-metrics
+          readinessProbe:
+            initialDelaySeconds: 1
+            timeoutSeconds: 1
+            httpGet:
+              port: 8001
+              path: /ready
+          env:
+            - name: JAEGER_AGENT_HOST
+              value: jaeger.rollout-operator-development.svc.cluster.local
+            - name: JAEGER_AGENT_PORT
+              value: "6831"
+            - name: JAEGER_SAMPLER_TYPE
+              value: const
+            - name: JAEGER_SAMPLER_PARAM
+              value: "1"
+            - name: JAEGER_TAGS
+              value: app=rollout-operator
+            - name: JAEGER_REPORTER_MAX_QUEUE_SIZE
+              value: "1000"
+      restartPolicy: Always
