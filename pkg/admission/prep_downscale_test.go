@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"reflect"
 	"testing"
 	"text/template"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/admission/v1"
 	apps "k8s.io/api/apps/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -574,6 +576,181 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 
 	zt := newZoneTracker(api, namespace, "zone-tracker-test-cm")
 
-	admissionResponse := prepareDownscale(ctx, logger, ar, api, f, zt)
+	admissionResponse := zt.prepareDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
+}
+
+func TestDecodeAndReplicas(t *testing.T) {
+	raw := []byte(`{"kind":"Deployment","apiVersion":"apps/v1","metadata":{"name":"test-deployment","namespace":"default"},"spec":{"replicas":3}}`)
+	info, err := decodeAndReplicas(raw)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if *info.replicas != 3 {
+		t.Errorf("expected 3 replicas, got %d", *info.replicas)
+	}
+	if info.gvk.Kind != "Deployment" {
+		t.Errorf("expected kind to be 'Deployment', got '%s'", info.gvk.Kind)
+	}
+	if info.gvk.GroupVersion().String() != "apps/v1" {
+		t.Errorf("expected GroupVersion to be 'apps/v1', got '%s'", info.gvk.GroupVersion().String())
+	}
+}
+
+func TestCheckReplicasChange(t *testing.T) {
+	logger := log.NewNopLogger()
+
+	tests := []struct {
+		name     string
+		oldInfo  *objectInfo
+		newInfo  *objectInfo
+		expected *v1.AdmissionResponse
+	}{
+		{
+			name:     "both replicas nil",
+			oldInfo:  &objectInfo{},
+			newInfo:  &objectInfo{},
+			expected: &v1.AdmissionResponse{Allowed: true},
+		},
+		{
+			name:     "old replicas nil",
+			oldInfo:  &objectInfo{},
+			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			expected: &v1.AdmissionResponse{Allowed: true},
+		},
+		{
+			name:     "new replicas nil",
+			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			newInfo:  &objectInfo{},
+			expected: &v1.AdmissionResponse{Allowed: true},
+		},
+		{
+			name:     "upscale",
+			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(5); return &i }()},
+			expected: &v1.AdmissionResponse{Allowed: true},
+		},
+		{
+			name:     "no replicas change",
+			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			expected: &v1.AdmissionResponse{Allowed: true},
+		},
+		{
+			name:     "downscale",
+			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(5); return &i }()},
+			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := checkReplicasChange(logger, tt.oldInfo, tt.newInfo)
+			if (actual == nil && tt.expected != nil) || (actual != nil && tt.expected == nil) || (actual != nil && tt.expected != nil && actual.Allowed != tt.expected.Allowed) {
+				t.Errorf("checkReplicasChange() = %v, want %v", actual, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetLabelsAndAnnotations(t *testing.T) {
+	ctx := context.Background()
+	ar := v1.AdmissionReview{}
+	api := fake.NewSimpleClientset()
+
+	tests := []struct {
+		name        string
+		info        *objectInfo
+		expectedLbl map[string]string
+		expectedAnn map[string]string
+		expectErr   bool
+	}{
+		{
+			name: "Deployment",
+			info: &objectInfo{
+				obj: &appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels:      map[string]string{"label1": "value1"},
+						Annotations: map[string]string{"annotation1": "value1"},
+					},
+				},
+			},
+			expectedLbl: map[string]string{"label1": "value1"},
+			expectedAnn: map[string]string{"annotation1": "value1"},
+			expectErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lbls, anns, err := getLabelsAndAnnotations(ctx, ar, api, tt.info)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("getLabelsAndAnnotations() error = %v, expectErr %v", err, tt.expectErr)
+				return
+			}
+			if !reflect.DeepEqual(lbls, tt.expectedLbl) {
+				t.Errorf("getLabelsAndAnnotations() labels = %v, want %v", lbls, tt.expectedLbl)
+			}
+			if !reflect.DeepEqual(anns, tt.expectedAnn) {
+				t.Errorf("getLabelsAndAnnotations() annotations = %v, want %v", anns, tt.expectedAnn)
+			}
+		})
+	}
+}
+
+func TestCreateEndpoints(t *testing.T) {
+	ar := v1.AdmissionReview{
+		Request: &v1.AdmissionRequest{
+			Name:      "test",
+			Namespace: "default",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		oldInfo  *objectInfo
+		newInfo  *objectInfo
+		port     string
+		path     string
+		expected []endpoint
+	}{
+		{
+			name: "downscale by 2",
+			oldInfo: &objectInfo{
+				replicas: func() *int32 { i := int32(5); return &i }(),
+			},
+			newInfo: &objectInfo{
+				replicas: func() *int32 { i := int32(3); return &i }(),
+			},
+			port: "8080",
+			path: "metrics",
+			expected: []endpoint{
+				{
+					url:   "test-4.test.default.svc.cluster.local:8080/metrics",
+					index: 4,
+				},
+				{
+					url:   "test-3.test.default.svc.cluster.local:8080/metrics",
+					index: 3,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := createEndpoints(ar, tt.oldInfo, tt.newInfo, tt.port, tt.path)
+			if len(actual) != len(tt.expected) {
+				t.Errorf("createEndpoints() = %v, want %v", actual, tt.expected)
+				return
+			}
+			for i, ep := range actual {
+				if ep.url != tt.expected[i].url || ep.index != tt.expected[i].index {
+					t.Errorf("createEndpoints() = %v, want %v", actual, tt.expected)
+					return
+				}
+			}
+		})
+	}
 }
