@@ -153,7 +153,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 	}
 
 	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
-	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
+	// Create a slice of endpoint addresses for pods to send HTTP POST requests to and to fail if any don't return 200
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
 	err = sendPrepareShutdownRequests(ctx, logger, client, eps)
@@ -458,7 +458,7 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 			defer resp.Body.Close()
 
 			if resp.StatusCode/100 != 2 {
-				err := errors.New("HTTP post request returned non-2xx status code")
+				err := errors.New("HTTP POST request returned non-2xx status code")
 				body, readError := io.ReadAll(resp.Body)
 				level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", err, "status", resp.StatusCode, "response_body", body)
 				return errors.Join(err, readError)
