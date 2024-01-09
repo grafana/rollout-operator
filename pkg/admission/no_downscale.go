@@ -148,6 +148,13 @@ func allowErr(logger log.Logger, msg string, err error) *v1.AdmissionResponse {
 }
 
 func getResourceLabels(ctx context.Context, ar v1.AdmissionReview, api kubernetes.Interface) (map[string]string, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "Get resource labels")
+	defer span.Finish()
+
+	span.SetTag("namespace", ar.Request.Namespace)
+	span.SetTag("name", ar.Request.Name)
+	span.SetTag("resource", ar.Request.Resource.Resource)
+
 	switch ar.Request.Resource.Resource {
 	case "statefulsets":
 		obj, err := api.AppsV1().StatefulSets(ar.Request.Namespace).Get(ctx, ar.Request.Name, metav1.GetOptions{})

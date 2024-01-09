@@ -29,6 +29,7 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/admission"
 	"github.com/grafana/rollout-operator/pkg/controller"
+	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
 	// Required to get the GCP auth provider working.
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -142,7 +143,7 @@ func main() {
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
 
 	kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-		return &nethttp.Transport{RoundTripper: rt}
+		return instrumentation.NewKubernetesAPIClientTracer(&nethttp.Transport{RoundTripper: rt})
 	})
 
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)

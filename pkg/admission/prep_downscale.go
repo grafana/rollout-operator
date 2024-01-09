@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/grafana/dskit/spanlogger"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
 	"golang.org/x/sync/errgroup"
@@ -53,14 +54,14 @@ type httpClient interface {
 
 func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
+	spanLogger, ctx := spanlogger.New(ctx, logger, "Prepare downscale", tenantResolver)
+	defer spanLogger.Span.Finish()
+	logger = spanLogger
 
-	span := opentracing.SpanFromContext(ctx)
-	if span != nil {
-		span.SetTag("object.name", ar.Request.Name)
-		span.SetTag("object.resource", ar.Request.Resource.Resource)
-		span.SetTag("object.namespace", ar.Request.Namespace)
-		span.SetTag("request.dry_run", *ar.Request.DryRun)
-	}
+	spanLogger.SetTag("object.name", ar.Request.Name)
+	spanLogger.SetTag("object.resource", ar.Request.Resource.Resource)
+	spanLogger.SetTag("object.namespace", ar.Request.Namespace)
+	spanLogger.SetTag("request.dry_run", *ar.Request.DryRun)
 
 	if *ar.Request.DryRun {
 		return &v1.AdmissionResponse{Allowed: true}
@@ -71,12 +72,15 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		return allowErr(logger, "can't decode old object, allowing the change", err)
 	}
 	logger = log.With(logger, "request_gvk", oldInfo.gvk, "old_replicas", int32PtrStr(oldInfo.replicas))
+	spanLogger.SetTag("request.gvk", oldInfo.gvk)
+	spanLogger.SetTag("old_replicas", int32PtrStr(oldInfo.replicas))
 
 	newInfo, err := decodeAndReplicas(ar.Request.Object.Raw)
 	if err != nil {
 		return allowErr(logger, "can't decode new object, allowing the change", err)
 	}
 	logger = log.With(logger, "new_replicas", int32PtrStr(newInfo.replicas))
+	spanLogger.SetTag("new_replicas", int32PtrStr(newInfo.replicas))
 
 	// Continue if it's a downscale
 	response := checkReplicasChange(logger, oldInfo, newInfo)
@@ -196,6 +200,12 @@ func deny(msg string, args ...any) *v1.AdmissionResponse {
 }
 
 func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kubernetes.Interface) (map[string]string, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "Get resource annotations")
+	defer span.Finish()
+
+	span.SetTag("namespace", ar.Request.Namespace)
+	span.SetTag("name", ar.Request.Name)
+
 	switch ar.Request.Resource.Resource {
 	case "statefulsets":
 		obj, err := api.AppsV1().StatefulSets(ar.Request.Namespace).Get(ctx, ar.Request.Name, metav1.GetOptions{})
@@ -208,6 +218,12 @@ func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kube
 }
 
 func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "Add downscaled annotation to StatefulSet")
+	defer span.Finish()
+
+	span.SetTag("namespace", namespace)
+	span.SetTag("name", stsName)
+
 	client := api.AppsV1().StatefulSets(namespace)
 	patch := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, config.LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))
 	_, err := client.Patch(ctx, stsName, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
@@ -273,6 +289,11 @@ func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, excludeStsNam
 //
 // The StatefulSet whose name matches the input excludeStsName is not checked.
 func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace string, stsList *appsv1.StatefulSetList, excludeStsName string) (*statefulSetDownscale, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "Find StatefulSet with non-updated replicas")
+	defer span.Finish()
+
+	span.SetTag("namespace", namespace)
+
 	for _, sts := range stsList.Items {
 		if sts.Name == excludeStsName {
 			continue
@@ -295,6 +316,12 @@ func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.I
 
 // countRunningAndReadyPods counts running and ready pods for a StatefulSet.
 func countRunningAndReadyPods(ctx context.Context, api kubernetes.Interface, namespace string, sts *appsv1.StatefulSet) (int, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "Count running and ready pods for StatefulSet")
+	defer span.Finish()
+
+	span.SetTag("namespace", namespace)
+	span.SetTag("name", sts.Name)
+
 	pods, err := findPodsForStatefulSet(ctx, api, namespace, sts)
 	if err != nil {
 		return 0, err
@@ -320,6 +347,12 @@ func findPodsForStatefulSet(ctx context.Context, api kubernetes.Interface, names
 }
 
 func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interface, namespace, rolloutGroup string) (*appsv1.StatefulSetList, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "Find StatefulSets for rollout group")
+	defer span.Finish()
+
+	span.SetTag("namespace", namespace)
+	span.SetTag("rollout_group", rolloutGroup)
+
 	groupReq, err := labels.NewRequirement(config.RolloutGroupLabelKey, selection.Equals, []string{rolloutGroup})
 	if err != nil {
 		return nil, err
@@ -438,7 +471,11 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 	for _, ep := range eps {
 		ep := ep // https://golang.org/doc/faq#closures_and_goroutines
 		g.Go(func() error {
-			logger := log.With(logger, "url", ep.url, "index", ep.index)
+			logger, ctx := spanlogger.New(ctx, log.With(logger, "url", ep.url, "index", ep.index), "Prepare pod for shutdown", tenantResolver)
+			defer logger.Span.Finish()
+
+			logger.SetTag("url", ep.url)
+			logger.SetTag("index", ep.index)
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+ep.url, nil)
 			if err != nil {
@@ -460,7 +497,7 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 			if resp.StatusCode/100 != 2 {
 				err := errors.New("HTTP POST request returned non-2xx status code")
 				body, readError := io.ReadAll(resp.Body)
-				level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", err, "status", resp.StatusCode, "response_body", body)
+				level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", err, "status", resp.StatusCode, "response_body", string(body))
 				return errors.Join(err, readError)
 			}
 			level.Debug(logger).Log("msg", "pod prepared for shutdown")
@@ -468,4 +505,16 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 		})
 	}
 	return g.Wait()
+}
+
+var tenantResolver spanlogger.TenantResolver = noTenantResolver{}
+
+type noTenantResolver struct{}
+
+func (n noTenantResolver) TenantID(ctx context.Context) (string, error) {
+	return "", nil
+}
+
+func (n noTenantResolver) TenantIDs(ctx context.Context) ([]string, error) {
+	return nil, nil
 }
