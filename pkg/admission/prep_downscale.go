@@ -36,9 +36,8 @@ func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		Timeout: 5 * time.Second,
 	}
 
-	var zt *zoneTracker
 	if useZoneTracker {
-		zt = newZoneTracker(api, ar.Request.Namespace, zoneTrackerConfigMapName)
+		zt := newZoneTracker(api, ar.Request.Namespace, zoneTrackerConfigMapName)
 		return zt.prepareDownscale(ctx, logger, ar, api, client)
 	}
 
