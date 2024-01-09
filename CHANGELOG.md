@@ -4,7 +4,7 @@
 
 * [ENHANCEMENT] Expose pprof endpoint for profiling. #109
 * [ENHANCEMENT] Change Docker build image to `golang:1.21-bookworm` and update base image to `alpine:3.19`. #97
-* [ENHANCEMENT] Updated dependencies, including: #110
+* [ENHANCEMENT] Updated dependencies, including: #111
   * `github.com/gorilla/mux` from `v1.8.0` to `v1.8.1`
   * `github.com/prometheus/client_golang` from `v1.17.0` to `v1.18.0`
   * `golang.org/x/sync` from `v0.5.0` to `v0.6.0`
