@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/model"
 	"go.uber.org/atomic"
+	v1 "k8s.io/api/admission/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -55,6 +56,9 @@ type config struct {
 	serverSelfSignedCertExpiration model.Duration
 
 	updateWebhooksWithSelfSignedCABundle bool
+
+	useZoneTracker           bool
+	zoneTrackerConfigMapName string
 }
 
 func (cfg *config) register(fs *flag.FlagSet) {
@@ -78,6 +82,9 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	cfg.serverSelfSignedCertExpiration = defaultServerSelfSignedCertExpiration
 
 	fs.BoolVar(&cfg.updateWebhooksWithSelfSignedCABundle, "webhooks.update-ca-bundle", true, "Update the CA bundle in the properly labeled webhook configurations with the self-signed certificate (-server-tls.self-signed-cert.enabled should be enabled).")
+
+	fs.BoolVar(&cfg.useZoneTracker, "use-zone-tracker", false, "Use the zone tracker to prevent simultaneous downscales in different zones")
+	fs.StringVar(&cfg.zoneTrackerConfigMapName, "zone-tracker.config-map-name", "rollout-operator-zone-tracker", "The name of the ConfigMap to use for the zone tracker")
 }
 
 func (cfg config) validate() error {
@@ -88,6 +95,10 @@ func (cfg config) validate() error {
 	if (cfg.kubeAPIURL == "") != (cfg.kubeConfigFile == "") {
 		return errors.New("either configure both Kubernetes API URL and config file or none of them")
 	}
+	if cfg.useZoneTracker && cfg.zoneTrackerConfigMapName == "" {
+		return errors.New("the zone tracker ConfigMap name has not been specified")
+	}
+
 	return nil
 }
 
@@ -188,10 +199,14 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 		check(tlscert.PatchCABundleOnMutatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
 	}
 
+	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
+		return admission.PrepareDownscale(ctx, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName)
+	}
+
 	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert, metrics)
 	check(errors.Wrap(err, "failed to create tls server"))
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
-	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(admission.PrepareDownscale, logger, kubeClient))
+	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, kubeClient))
 	check(errors.Wrap(tlsSrv.Start(), "failed to start tls server"))
 }
 
