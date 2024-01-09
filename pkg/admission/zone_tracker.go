@@ -254,15 +254,17 @@ func (zt *zoneTracker) setDownscaled(ctx context.Context, zone string) error {
 	zt.mu.Lock()
 	defer zt.mu.Unlock()
 
-	zoneInfo, ok := zt.zones[zone]
+	info, ok := zt.zones[zone]
 	if !ok {
-		return fmt.Errorf("zone %s not found", zone)
+		// If the zone is not found, create it and add it to the zones map
+		info := &zoneInfo{LastDownscaled: time.Now().UTC().Format(time.RFC3339)}
+		zt.zones[zone] = *info
+	} else {
+		// If the zone is found, update the LastDownscaled time
+		info.LastDownscaled = time.Now().UTC().Format(time.RFC3339)
+		// Update the zones map with the new zoneInfo
+		zt.zones[zone] = info
 	}
-
-	zoneInfo.LastDownscaled = time.Now().UTC().Format(time.RFC3339)
-
-	// Update the zones map with the new zoneInfo
-	zt.zones[zone] = zoneInfo
 
 	return zt.saveZones(ctx)
 }

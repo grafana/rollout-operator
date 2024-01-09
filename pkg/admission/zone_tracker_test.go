@@ -10,6 +10,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/config"
 	apps "k8s.io/api/apps/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -207,21 +208,68 @@ func TestLoadZonesEmptyConfigMap(t *testing.T) {
 	}
 }
 
-func TestSetDownscaledNonExistentZone(t *testing.T) {
+func TestSetDownscaled(t *testing.T) {
 	ctx := context.Background()
 	// Create a fake client
 	client := fake.NewSimpleClientset()
 
+	// Create the configmap
+	cm := &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "testconfigmap",
+			Namespace: "testnamespace",
+		},
+		Data: map[string]string{
+			"testzone": `{"LastDownscaled":"2020-01-01T00:00:00Z"}`,
+		},
+	}
+	_, err := client.CoreV1().ConfigMaps("testnamespace").Create(ctx, cm, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Create ConfigMap failed: %v", err)
+	}
+
 	// Create a new zoneTracker with the fake client
 	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
 
-	err := zt.setDownscaled(ctx, "nonexistentzone")
-	if err == nil {
+	// Test when zone does not exist in the map
+	zone := "nonexistentzone"
+	err = zt.setDownscaled(context.Background(), zone)
+	if err != nil {
 		t.Fatalf("setDownscaled failed: %v", err)
 	}
 
-	if _, ok := zt.zones["nonexistentzone"]; ok {
-		t.Errorf("setDownscaled did not handle non-existent zone correctly")
+	zoneInfo, ok := zt.zones[zone]
+	if !ok {
+		t.Errorf("setDownscaled did not create non-existent zone")
+	} else {
+		// Check that the LastDownscaled time was set correctly
+		lastDownscaled, err := time.Parse(time.RFC3339, zoneInfo.LastDownscaled)
+		if err != nil {
+			t.Errorf("setDownscaled did not set LastDownscaled time correctly: %v", err)
+		}
+		if time.Since(lastDownscaled) > time.Second {
+			t.Errorf("setDownscaled did not set LastDownscaled time to now")
+		}
+	}
+
+	// Test when zone already exists in the map
+	err = zt.setDownscaled(context.Background(), zone)
+	if err != nil {
+		t.Fatalf("setDownscaled failed: %v", err)
+	}
+
+	zoneInfo, ok = zt.zones[zone]
+	if !ok {
+		t.Errorf("setDownscaled did not update existing zone")
+	} else {
+		// Check that the LastDownscaled time was updated correctly
+		lastDownscaled, err := time.Parse(time.RFC3339, zoneInfo.LastDownscaled)
+		if err != nil {
+			t.Errorf("setDownscaled did not update LastDownscaled time correctly: %v", err)
+		}
+		if time.Since(lastDownscaled) > time.Second {
+			t.Errorf("setDownscaled did not update LastDownscaled time to now")
+		}
 	}
 }
 
