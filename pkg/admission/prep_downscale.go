@@ -160,8 +160,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 	// Create a slice of endpoint addresses for pods to send HTTP POST requests to and to fail if any don't return 200
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
-	err = sendPrepareShutdownRequests(ctx, logger, client, eps)
-	if err != nil {
+	if err := sendPrepareShutdownRequests(ctx, logger, client, eps); err != nil {
 		// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
 		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
 		return deny(
@@ -170,8 +169,7 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 		)
 	}
 
-	err = addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name)
-	if err != nil {
+	if err := addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name); err != nil {
 		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
@@ -467,6 +465,13 @@ func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, 
 }
 
 func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) error {
+	if len(eps) == 0 {
+		return nil
+	}
+
+	span, ctx := opentracing.StartSpanFromContext(ctx, "Prepare pods for shutdown")
+	defer span.Finish()
+
 	g, _ := errgroup.WithContext(ctx)
 	for _, ep := range eps {
 		ep := ep // https://golang.org/doc/faq#closures_and_goroutines
