@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/grafana/dskit/spanlogger"
 	"github.com/opentracing/opentracing-go"
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -25,25 +26,27 @@ const (
 
 func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
+	spanLogger, ctx := spanlogger.New(ctx, logger, "No downscale", tenantResolver)
+	defer spanLogger.Span.Finish()
+	logger = spanLogger
 
-	span := opentracing.SpanFromContext(ctx)
-	if span != nil {
-		span.SetTag("object.name", ar.Request.Name)
-		span.SetTag("object.resource", ar.Request.Resource.Resource)
-		span.SetTag("object.namespace", ar.Request.Namespace)
-	}
+	spanLogger.SetTag("object.name", ar.Request.Name)
+	spanLogger.SetTag("object.resource", ar.Request.Resource.Resource)
+	spanLogger.SetTag("object.namespace", ar.Request.Namespace)
 
 	oldObj, oldGVK, err := codecs.UniversalDeserializer().Decode(ar.Request.OldObject.Raw, nil, nil)
 	if err != nil {
 		return allowErr(logger, "can't decode old object, allowing the change", err)
 	}
 	logger = log.With(logger, "request_gvk", oldGVK)
+	spanLogger.SetTag("request.gvk", oldGVK)
 
 	oldReplicas, err := replicas(oldObj, oldGVK)
 	if err != nil {
 		return allowErr(logger, "can't get old replicas, allowing the change", err)
 	}
 	logger = log.With(logger, "old_replicas", int32PtrStr(oldReplicas))
+	spanLogger.SetTag("old_replicas", int32PtrStr(oldReplicas))
 
 	newObj, newGVK, err := codecs.UniversalDeserializer().Decode(ar.Request.Object.Raw, nil, nil)
 	if err != nil {
@@ -55,6 +58,7 @@ func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, 
 		return allowErr(logger, "can't get new replicas, allowing the change", err)
 	}
 	logger = log.With(logger, "new_replicas", int32PtrStr(newReplicas))
+	spanLogger.SetTag("new_replicas", int32PtrStr(newReplicas))
 
 	// Both replicas are nil, nothing to warn about.
 	if oldReplicas == nil && newReplicas == nil {
