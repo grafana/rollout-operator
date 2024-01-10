@@ -5,6 +5,7 @@
 * [FEATURE] Coordinate downscaling between zones with a ConfigMap instead of annotation, optionally, via the new zoneTracker for the prepare-downscale admission webhook. #107
 * [ENHANCEMENT] Expose pprof endpoint for profiling. #109
 * [ENHANCEMENT] Change Docker build image to `golang:1.21-bookworm` and update base image to `alpine:3.19`. #97
+* [ENHANCEMENT] Add basic tracing support. #101
 
 ## v0.10.1
 
