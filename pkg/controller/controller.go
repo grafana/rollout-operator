@@ -9,7 +9,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/hashicorp/go-multierror"
-	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -190,9 +189,6 @@ func (c *RolloutController) enqueueReconcile() {
 }
 
 func (c *RolloutController) reconcile(ctx context.Context) error {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "RolloutController.reconcile")
-	defer span.Finish()
-
 	level.Info(c.logger).Log("msg", "reconcile started")
 
 	sets, err := c.listStatefulSetsWithRolloutGroup()
