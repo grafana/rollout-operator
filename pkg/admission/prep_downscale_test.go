@@ -125,7 +125,7 @@ type fakeHttpClient struct {
 	statusCode int
 }
 
-func (f *fakeHttpClient) Post(url, contentType string, body io.Reader) (resp *http.Response, err error) {
+func (f *fakeHttpClient) Do(req *http.Request) (resp *http.Response, err error) {
 	return &http.Response{
 		StatusCode: f.statusCode,
 		Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),

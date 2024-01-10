@@ -21,6 +21,7 @@ rules:
       - list
       - get
       - watch
+      - patch
   - apiGroups:
       - apps
     resources:
