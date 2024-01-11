@@ -46,7 +46,7 @@ func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, 
 		return allowErr(logger, "can't get old replicas, allowing the change", err)
 	}
 	logger = log.With(logger, "old_replicas", int32PtrStr(oldReplicas))
-	spanLogger.SetTag("old_replicas", int32PtrStr(oldReplicas))
+	spanLogger.SetTag("object.old_replicas", int32PtrStr(oldReplicas))
 
 	newObj, newGVK, err := codecs.UniversalDeserializer().Decode(ar.Request.Object.Raw, nil, nil)
 	if err != nil {
@@ -58,7 +58,7 @@ func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, 
 		return allowErr(logger, "can't get new replicas, allowing the change", err)
 	}
 	logger = log.With(logger, "new_replicas", int32PtrStr(newReplicas))
-	spanLogger.SetTag("new_replicas", int32PtrStr(newReplicas))
+	spanLogger.SetTag("object.new_replicas", int32PtrStr(newReplicas))
 
 	// Both replicas are nil, nothing to warn about.
 	if oldReplicas == nil && newReplicas == nil {
@@ -155,9 +155,9 @@ func getResourceLabels(ctx context.Context, ar v1.AdmissionReview, api kubernete
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.getResourceLabels()")
 	defer span.Finish()
 
-	span.SetTag("namespace", ar.Request.Namespace)
-	span.SetTag("name", ar.Request.Name)
-	span.SetTag("resource", ar.Request.Resource.Resource)
+	span.SetTag("object.namespace", ar.Request.Namespace)
+	span.SetTag("object.name", ar.Request.Name)
+	span.SetTag("object.resource", ar.Request.Resource.Resource)
 
 	switch ar.Request.Resource.Resource {
 	case "statefulsets":

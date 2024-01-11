@@ -73,14 +73,14 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 	}
 	logger = log.With(logger, "request_gvk", oldInfo.gvk, "old_replicas", int32PtrStr(oldInfo.replicas))
 	spanLogger.SetTag("request.gvk", oldInfo.gvk)
-	spanLogger.SetTag("old_replicas", int32PtrStr(oldInfo.replicas))
+	spanLogger.SetTag("object.old_replicas", int32PtrStr(oldInfo.replicas))
 
 	newInfo, err := decodeAndReplicas(ar.Request.Object.Raw)
 	if err != nil {
 		return allowErr(logger, "can't decode new object, allowing the change", err)
 	}
 	logger = log.With(logger, "new_replicas", int32PtrStr(newInfo.replicas))
-	spanLogger.SetTag("new_replicas", int32PtrStr(newInfo.replicas))
+	spanLogger.SetTag("object.new_replicas", int32PtrStr(newInfo.replicas))
 
 	// Continue if it's a downscale
 	response := checkReplicasChange(logger, oldInfo, newInfo)
@@ -201,8 +201,8 @@ func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kube
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.getResourceAnnotations()")
 	defer span.Finish()
 
-	span.SetTag("namespace", ar.Request.Namespace)
-	span.SetTag("name", ar.Request.Name)
+	span.SetTag("object.namespace", ar.Request.Namespace)
+	span.SetTag("object.name", ar.Request.Name)
 
 	switch ar.Request.Resource.Resource {
 	case "statefulsets":
@@ -219,8 +219,8 @@ func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.In
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.addDownscaledAnnotationToStatefulSet()")
 	defer span.Finish()
 
-	span.SetTag("namespace", namespace)
-	span.SetTag("name", stsName)
+	span.SetTag("object.namespace", namespace)
+	span.SetTag("object.name", stsName)
 
 	client := api.AppsV1().StatefulSets(namespace)
 	patch := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, config.LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))
@@ -290,7 +290,7 @@ func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.I
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.findStatefulSetWithNonUpdatedReplicas()")
 	defer span.Finish()
 
-	span.SetTag("namespace", namespace)
+	span.SetTag("object.namespace", namespace)
 
 	for _, sts := range stsList.Items {
 		if sts.Name == excludeStsName {
@@ -317,8 +317,8 @@ func countRunningAndReadyPods(ctx context.Context, api kubernetes.Interface, nam
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.countRunningAndReadyPods()")
 	defer span.Finish()
 
-	span.SetTag("namespace", namespace)
-	span.SetTag("name", sts.Name)
+	span.SetTag("object.namespace", namespace)
+	span.SetTag("object.name", sts.Name)
 
 	pods, err := findPodsForStatefulSet(ctx, api, namespace, sts)
 	if err != nil {
@@ -348,7 +348,7 @@ func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interfa
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.findStatefulSetsForRolloutGroup()")
 	defer span.Finish()
 
-	span.SetTag("namespace", namespace)
+	span.SetTag("object.namespace", namespace)
 	span.SetTag("rollout_group", rolloutGroup)
 
 	groupReq, err := labels.NewRequirement(config.RolloutGroupLabelKey, selection.Equals, []string{rolloutGroup})
