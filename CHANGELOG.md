@@ -5,7 +5,14 @@
 * [FEATURE] Coordinate downscaling between zones with a ConfigMap instead of annotation, optionally, via the new zoneTracker for the prepare-downscale admission webhook. #107
 * [ENHANCEMENT] Expose pprof endpoint for profiling. #109
 * [ENHANCEMENT] Change Docker build image to `golang:1.21-bookworm` and update base image to `alpine:3.19`. #97
-* [ENHANCEMENT] Add basic tracing support. #101
+* [ENHANCEMENT] Add basic tracing support. #101 #114
+* [ENHANCEMENT] Updated dependencies, including: #111
+  * `github.com/gorilla/mux` from `v1.8.0` to `v1.8.1`
+  * `github.com/prometheus/client_golang` from `v1.17.0` to `v1.18.0`
+  * `golang.org/x/sync` from `v0.5.0` to `v0.6.0`
+  * `k8s.io/api` from `v0.28.3` to `v0.29.0`
+  * `k8s.io/apimachinery` from `v0.28.3` to `v0.29.0`
+  * `k8s.io/client-go` from `v0.28.3` to `v0.29.0`
 
 ## v0.10.1
 
