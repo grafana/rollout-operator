@@ -45,6 +45,9 @@ func newInstrumentedRouter(metrics *metrics) (*mux.Router, http.Handler) {
 	router := mux.NewRouter()
 
 	httpMiddleware := []middleware.Interface{
+		middleware.Tracer{
+			RouteMatcher: router,
+		},
 		middleware.Instrument{
 			RouteMatcher:     router,
 			Duration:         metrics.RequestDuration,

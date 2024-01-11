@@ -15,6 +15,8 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/grafana/dskit/tracing"
+	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -27,8 +29,8 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/admission"
 	"github.com/grafana/rollout-operator/pkg/controller"
+	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
-
 	// Required to get the GCP auth provider working.
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 )
@@ -118,6 +120,17 @@ func main() {
 	ready := atomic.NewBool(false)
 	restart := make(chan string)
 
+	name := os.Getenv("JAEGER_SERVICE_NAME")
+	if name == "" {
+		name = "rollout-operator"
+	}
+
+	if trace, err := tracing.NewFromEnv(name); err != nil {
+		fatal(fmt.Errorf("failed to set up tracing: %w", err))
+	} else {
+		defer trace.Close()
+	}
+
 	// Expose HTTP endpoints.
 	srv := newServer(cfg.serverPort, logger, metrics)
 	srv.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
@@ -128,6 +141,10 @@ func main() {
 	// Build the Kubernetes client config.
 	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile)
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
+
+	kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+		return instrumentation.NewKubernetesAPIClientTracer(&nethttp.Transport{RoundTripper: rt})
+	})
 
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
 	check(errors.Wrap(err, "failed to create Kubernetes client"))
