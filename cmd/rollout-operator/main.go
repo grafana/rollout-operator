@@ -126,7 +126,7 @@ func main() {
 	}
 
 	if trace, err := tracing.NewFromEnv(name); err != nil {
-		level.Error(logger).Log("msg", "Failed to setup tracing", "err", err.Error())
+		fatal(fmt.Errorf("failed to set up tracing: %w", err))
 	} else {
 		defer trace.Close()
 	}
