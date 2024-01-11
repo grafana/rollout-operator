@@ -54,7 +54,7 @@ type httpClient interface {
 
 func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
-	spanLogger, ctx := spanlogger.New(ctx, logger, "Prepare downscale", tenantResolver)
+	spanLogger, ctx := spanlogger.New(ctx, logger, "admission.prepareDownscale()", tenantResolver)
 	defer spanLogger.Span.Finish()
 	logger = spanLogger
 
@@ -198,7 +198,7 @@ func deny(msg string, args ...any) *v1.AdmissionResponse {
 }
 
 func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kubernetes.Interface) (map[string]string, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "Get resource annotations")
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.getResourceAnnotations()")
 	defer span.Finish()
 
 	span.SetTag("namespace", ar.Request.Namespace)
@@ -216,7 +216,7 @@ func getResourceAnnotations(ctx context.Context, ar v1.AdmissionReview, api kube
 }
 
 func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "Add downscaled annotation to StatefulSet")
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.addDownscaledAnnotationToStatefulSet()")
 	defer span.Finish()
 
 	span.SetTag("namespace", namespace)
@@ -287,7 +287,7 @@ func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, excludeStsNam
 //
 // The StatefulSet whose name matches the input excludeStsName is not checked.
 func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace string, stsList *appsv1.StatefulSetList, excludeStsName string) (*statefulSetDownscale, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "Find StatefulSet with non-updated replicas")
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.findStatefulSetWithNonUpdatedReplicas()")
 	defer span.Finish()
 
 	span.SetTag("namespace", namespace)
@@ -314,7 +314,7 @@ func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.I
 
 // countRunningAndReadyPods counts running and ready pods for a StatefulSet.
 func countRunningAndReadyPods(ctx context.Context, api kubernetes.Interface, namespace string, sts *appsv1.StatefulSet) (int, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "Count running and ready pods for StatefulSet")
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.countRunningAndReadyPods()")
 	defer span.Finish()
 
 	span.SetTag("namespace", namespace)
@@ -345,7 +345,7 @@ func findPodsForStatefulSet(ctx context.Context, api kubernetes.Interface, names
 }
 
 func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interface, namespace, rolloutGroup string) (*appsv1.StatefulSetList, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "Find StatefulSets for rollout group")
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.findStatefulSetsForRolloutGroup()")
 	defer span.Finish()
 
 	span.SetTag("namespace", namespace)
@@ -469,14 +469,14 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 		return nil
 	}
 
-	span, ctx := opentracing.StartSpanFromContext(ctx, "Prepare pods for shutdown")
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.sendPrepareShutdownRequests()")
 	defer span.Finish()
 
 	g, _ := errgroup.WithContext(ctx)
 	for _, ep := range eps {
 		ep := ep // https://golang.org/doc/faq#closures_and_goroutines
 		g.Go(func() error {
-			logger, ctx := spanlogger.New(ctx, log.With(logger, "url", ep.url, "index", ep.index), "Prepare pod for shutdown", tenantResolver)
+			logger, ctx := spanlogger.New(ctx, log.With(logger, "url", ep.url, "index", ep.index), "admission.PreparePodForShutdown", tenantResolver)
 			defer logger.Span.Finish()
 
 			logger.SetTag("url", ep.url)

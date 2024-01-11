@@ -26,7 +26,7 @@ const (
 
 func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
 	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
-	spanLogger, ctx := spanlogger.New(ctx, logger, "No downscale", tenantResolver)
+	spanLogger, ctx := spanlogger.New(ctx, logger, "admission.NoDownscale()", tenantResolver)
 	defer spanLogger.Span.Finish()
 	logger = spanLogger
 
@@ -152,7 +152,7 @@ func allowErr(logger log.Logger, msg string, err error) *v1.AdmissionResponse {
 }
 
 func getResourceLabels(ctx context.Context, ar v1.AdmissionReview, api kubernetes.Interface) (map[string]string, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "Get resource labels")
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.getResourceLabels()")
 	defer span.Finish()
 
 	span.SetTag("namespace", ar.Request.Namespace)

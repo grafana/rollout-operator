@@ -190,7 +190,7 @@ func (c *RolloutController) enqueueReconcile() {
 }
 
 func (c *RolloutController) reconcile(ctx context.Context) error {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "RolloutController.reconcile")
+	span, ctx := opentracing.StartSpanFromContext(ctx, "RolloutController.reconcile()")
 	defer span.Finish()
 
 	level.Info(c.logger).Log("msg", "reconcile started")
