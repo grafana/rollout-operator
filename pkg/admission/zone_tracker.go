@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/grafana/dskit/spanlogger"
+	"github.com/opentracing/opentracing-go"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 
@@ -32,8 +34,14 @@ type zoneInfo struct {
 }
 
 // Use a ConfigMap instead of an annotation to track the last time zones were downscaled
-func (zt *zoneTracker) prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
-	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
+func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
+	logger, ctx := spanlogger.New(ctx, l, "zoneTracker.prepareDownscale()", tenantResolver)
+	defer logger.Span.Finish()
+
+	logger.SetSpanAndLogTag("object.name", ar.Request.Name)
+	logger.SetSpanAndLogTag("object.resource", ar.Request.Resource.Resource)
+	logger.SetSpanAndLogTag("object.namespace", ar.Request.Namespace)
+	logger.SetSpanAndLogTag("request.dry_run", *ar.Request.DryRun)
 
 	if *ar.Request.DryRun {
 		return &v1.AdmissionResponse{Allowed: true}
@@ -43,13 +51,14 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, logger log.Logger, 
 	if err != nil {
 		return allowErr(logger, "can't decode old object, allowing the change", err)
 	}
-	logger = log.With(logger, "request_gvk", oldInfo.gvk, "old_replicas", int32PtrStr(oldInfo.replicas))
+	logger.SetSpanAndLogTag("request.gvk", oldInfo.gvk)
+	logger.SetSpanAndLogTag("object.old_replicas", int32PtrStr(oldInfo.replicas))
 
 	newInfo, err := decodeAndReplicas(ar.Request.Object.Raw)
 	if err != nil {
 		return allowErr(logger, "can't decode new object, allowing the change", err)
 	}
-	logger = log.With(logger, "new_replicas", int32PtrStr(newInfo.replicas))
+	logger.SetSpanAndLogTag("object.new_replicas", int32PtrStr(newInfo.replicas))
 
 	// Continue if it's a downscale
 	response := checkReplicasChange(logger, oldInfo, newInfo)
@@ -154,6 +163,9 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, logger log.Logger, 
 
 // Create the ConfigMap and populate each zone with the current time as a starting point
 func (zt *zoneTracker) createConfigMap(ctx context.Context, stsList *appsv1.StatefulSetList) (*corev1.ConfigMap, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "zoneTracker.createConfigMap()")
+	defer span.Finish()
+
 	defaultInfo := &zoneInfo{LastDownscaled: time.Now().UTC().Format(time.RFC3339)}
 	zones := make(map[string]zoneInfo, len(stsList.Items))
 	for _, sts := range stsList.Items {
@@ -182,14 +194,32 @@ func (zt *zoneTracker) createConfigMap(ctx context.Context, stsList *appsv1.Stat
 	return zt.client.CoreV1().ConfigMaps(zt.namespace).Create(ctx, cm, metav1.CreateOptions{})
 }
 
+// Get the zoneTracker ConfigMap if it exists, or nil if it does not exist
+func (zt *zoneTracker) getConfigMap(ctx context.Context) (*corev1.ConfigMap, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "zoneTracker.getConfigMap()")
+	defer span.Finish()
+
+	cm, err := zt.client.CoreV1().ConfigMaps(zt.namespace).Get(ctx, zt.configMapName, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	return cm, nil
+}
+
 // Get the zoneTracker ConfigMap if it exists, otherwise create it
 func (zt *zoneTracker) getOrCreateConfigMap(ctx context.Context, stsList *appsv1.StatefulSetList) (*corev1.ConfigMap, error) {
-	cm, err := zt.client.CoreV1().ConfigMaps(zt.namespace).Get(ctx, zt.configMapName, metav1.GetOptions{})
-	if err == nil {
-		return cm, nil
-	}
-	if !k8serrors.IsNotFound(err) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "zoneTracker.getOrCreateConfigMap()")
+	defer span.Finish()
+
+	if cm, err := zt.getConfigMap(ctx); err != nil {
 		return nil, err
+	} else if cm != nil {
+		return cm, nil
 	}
 
 	return zt.createConfigMap(ctx, stsList)
@@ -217,6 +247,9 @@ func (zt *zoneTracker) loadZones(ctx context.Context, stsList *appsv1.StatefulSe
 
 // Save the zones map to the zoneTracker ConfigMap
 func (zt *zoneTracker) saveZones(ctx context.Context) error {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "zoneTracker.saveZones()")
+	defer span.Finish()
+
 	// Convert the zones map to ConfigMap data
 	data := make(map[string]string)
 	for zone, zi := range zt.zones {
