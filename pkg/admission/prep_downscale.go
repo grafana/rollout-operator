@@ -52,16 +52,14 @@ type httpClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
-	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
-	spanLogger, ctx := spanlogger.New(ctx, logger, "admission.prepareDownscale()", tenantResolver)
-	defer spanLogger.Span.Finish()
-	logger = spanLogger
+func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
+	logger, ctx := spanlogger.New(ctx, l, "admission.prepareDownscale()", tenantResolver)
+	defer logger.Span.Finish()
 
-	spanLogger.SetTag("object.name", ar.Request.Name)
-	spanLogger.SetTag("object.resource", ar.Request.Resource.Resource)
-	spanLogger.SetTag("object.namespace", ar.Request.Namespace)
-	spanLogger.SetTag("request.dry_run", *ar.Request.DryRun)
+	logger.SetSpanAndLogTag("object.name", ar.Request.Name)
+	logger.SetSpanAndLogTag("object.resource", ar.Request.Resource.Resource)
+	logger.SetSpanAndLogTag("object.namespace", ar.Request.Namespace)
+	logger.SetSpanAndLogTag("request.dry_run", *ar.Request.DryRun)
 
 	if *ar.Request.DryRun {
 		return &v1.AdmissionResponse{Allowed: true}
@@ -71,16 +69,14 @@ func prepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 	if err != nil {
 		return allowErr(logger, "can't decode old object, allowing the change", err)
 	}
-	logger = log.With(logger, "request_gvk", oldInfo.gvk, "old_replicas", int32PtrStr(oldInfo.replicas))
-	spanLogger.SetTag("request.gvk", oldInfo.gvk)
-	spanLogger.SetTag("object.old_replicas", int32PtrStr(oldInfo.replicas))
+	logger.SetSpanAndLogTag("request.gvk", oldInfo.gvk)
+	logger.SetSpanAndLogTag("object.old_replicas", int32PtrStr(oldInfo.replicas))
 
 	newInfo, err := decodeAndReplicas(ar.Request.Object.Raw)
 	if err != nil {
 		return allowErr(logger, "can't decode new object, allowing the change", err)
 	}
-	logger = log.With(logger, "new_replicas", int32PtrStr(newInfo.replicas))
-	spanLogger.SetTag("object.new_replicas", int32PtrStr(newInfo.replicas))
+	logger.SetSpanAndLogTag("object.new_replicas", int32PtrStr(newInfo.replicas))
 
 	// Continue if it's a downscale
 	response := checkReplicasChange(logger, oldInfo, newInfo)
@@ -476,11 +472,11 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 	for _, ep := range eps {
 		ep := ep // https://golang.org/doc/faq#closures_and_goroutines
 		g.Go(func() error {
-			logger, ctx := spanlogger.New(ctx, log.With(logger, "url", ep.url, "index", ep.index), "admission.PreparePodForShutdown", tenantResolver)
+			logger, ctx := spanlogger.New(ctx, logger, "admission.PreparePodForShutdown", tenantResolver)
 			defer logger.Span.Finish()
 
-			logger.SetTag("url", ep.url)
-			logger.SetTag("index", ep.index)
+			logger.SetSpanAndLogTag("url", ep.url)
+			logger.SetSpanAndLogTag("index", ep.index)
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+ep.url, nil)
 			if err != nil {

@@ -24,29 +24,25 @@ const (
 	NoDownscaleWebhookPath = "/admission/no-downscale"
 )
 
-func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-	logger = log.With(logger, "name", ar.Request.Name, "resource", ar.Request.Resource.Resource, "namespace", ar.Request.Namespace)
-	spanLogger, ctx := spanlogger.New(ctx, logger, "admission.NoDownscale()", tenantResolver)
-	defer spanLogger.Span.Finish()
-	logger = spanLogger
+func NoDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
+	logger, ctx := spanlogger.New(ctx, l, "admission.NoDownscale()", tenantResolver)
+	defer logger.Span.Finish()
 
-	spanLogger.SetTag("object.name", ar.Request.Name)
-	spanLogger.SetTag("object.resource", ar.Request.Resource.Resource)
-	spanLogger.SetTag("object.namespace", ar.Request.Namespace)
+	logger.SetSpanAndLogTag("object.name", ar.Request.Name)
+	logger.SetSpanAndLogTag("object.resource", ar.Request.Resource.Resource)
+	logger.SetSpanAndLogTag("object.namespace", ar.Request.Namespace)
 
 	oldObj, oldGVK, err := codecs.UniversalDeserializer().Decode(ar.Request.OldObject.Raw, nil, nil)
 	if err != nil {
 		return allowErr(logger, "can't decode old object, allowing the change", err)
 	}
-	logger = log.With(logger, "request_gvk", oldGVK)
-	spanLogger.SetTag("request.gvk", oldGVK)
+	logger.SetSpanAndLogTag("request.gvk", oldGVK)
 
 	oldReplicas, err := replicas(oldObj, oldGVK)
 	if err != nil {
 		return allowErr(logger, "can't get old replicas, allowing the change", err)
 	}
-	logger = log.With(logger, "old_replicas", int32PtrStr(oldReplicas))
-	spanLogger.SetTag("object.old_replicas", int32PtrStr(oldReplicas))
+	logger.SetSpanAndLogTag("object.old_replicas", int32PtrStr(oldReplicas))
 
 	newObj, newGVK, err := codecs.UniversalDeserializer().Decode(ar.Request.Object.Raw, nil, nil)
 	if err != nil {
@@ -57,8 +53,7 @@ func NoDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, 
 	if err != nil {
 		return allowErr(logger, "can't get new replicas, allowing the change", err)
 	}
-	logger = log.With(logger, "new_replicas", int32PtrStr(newReplicas))
-	spanLogger.SetTag("object.new_replicas", int32PtrStr(newReplicas))
+	logger.SetSpanAndLogTag("object.new_replicas", int32PtrStr(newReplicas))
 
 	// Both replicas are nil, nothing to warn about.
 	if oldReplicas == nil && newReplicas == nil {
