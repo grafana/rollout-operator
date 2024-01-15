@@ -143,7 +143,7 @@ func main() {
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
 
 	kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-		return instrumentation.NewKubernetesAPIClientTracer(&nethttp.Transport{RoundTripper: rt})
+		return instrumentation.InstrumentKubernetesAPIClient(&nethttp.Transport{RoundTripper: rt})
 	})
 
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)

@@ -6,15 +6,15 @@ import (
 	"net/http"
 )
 
-type kubernetesAPIClientTracer struct {
+type kubernetesAPIClientInstrumentation struct {
 	next http.RoundTripper
 }
 
-func NewKubernetesAPIClientTracer(next http.RoundTripper) http.RoundTripper {
-	return &kubernetesAPIClientTracer{next}
+func InstrumentKubernetesAPIClient(next http.RoundTripper) http.RoundTripper {
+	return &kubernetesAPIClientInstrumentation{next}
 }
 
-func (k *kubernetesAPIClientTracer) RoundTrip(req *http.Request) (*http.Response, error) {
+func (k *kubernetesAPIClientInstrumentation) RoundTrip(req *http.Request) (*http.Response, error) {
 	req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
 	defer ht.Finish()
 
