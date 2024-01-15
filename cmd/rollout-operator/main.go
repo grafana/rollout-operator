@@ -16,7 +16,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/tracing"
-	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -141,10 +140,7 @@ func main() {
 	// Build the Kubernetes client config.
 	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile)
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
-
-	kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-		return instrumentation.InstrumentKubernetesAPIClient(&nethttp.Transport{RoundTripper: rt})
-	})
+	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
 
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
 	check(errors.Wrap(err, "failed to create Kubernetes client"))
