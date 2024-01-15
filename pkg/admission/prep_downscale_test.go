@@ -600,52 +600,62 @@ func TestCheckReplicasChange(t *testing.T) {
 	logger := log.NewNopLogger()
 
 	tests := []struct {
-		name     string
-		oldInfo  *objectInfo
-		newInfo  *objectInfo
-		expected *v1.AdmissionResponse
+		name                string
+		oldInfo             *objectInfo
+		newInfo             *objectInfo
+		expected            *v1.AdmissionResponse
+		expectedNewReplicas int32
 	}{
 		{
-			name:     "both replicas nil",
-			oldInfo:  &objectInfo{},
-			newInfo:  &objectInfo{},
-			expected: &v1.AdmissionResponse{Allowed: true},
+			name:                "both replicas nil",
+			oldInfo:             &objectInfo{},
+			newInfo:             &objectInfo{},
+			expected:            &v1.AdmissionResponse{Allowed: true},
+			expectedNewReplicas: -1,
 		},
 		{
-			name:     "old replicas nil",
-			oldInfo:  &objectInfo{},
-			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
-			expected: &v1.AdmissionResponse{Allowed: true},
+			name:                "old replicas nil",
+			oldInfo:             &objectInfo{},
+			newInfo:             &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			expected:            &v1.AdmissionResponse{Allowed: true},
+			expectedNewReplicas: 3,
 		},
 		{
-			name:     "new replicas nil",
-			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
-			newInfo:  &objectInfo{},
-			expected: &v1.AdmissionResponse{Allowed: true},
+			name:                "new replicas nil",
+			oldInfo:             &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			newInfo:             &objectInfo{},
+			expected:            &v1.AdmissionResponse{Allowed: true},
+			expectedNewReplicas: -1,
 		},
 		{
-			name:     "upscale",
-			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
-			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(5); return &i }()},
-			expected: &v1.AdmissionResponse{Allowed: true},
+			name:                "upscale",
+			oldInfo:             &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			newInfo:             &objectInfo{replicas: func() *int32 { i := int32(5); return &i }()},
+			expected:            &v1.AdmissionResponse{Allowed: true},
+			expectedNewReplicas: 5,
 		},
 		{
-			name:     "no replicas change",
-			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
-			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
-			expected: &v1.AdmissionResponse{Allowed: true},
+			name:                "no replicas change",
+			oldInfo:             &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			newInfo:             &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			expected:            &v1.AdmissionResponse{Allowed: true},
+			expectedNewReplicas: 3,
 		},
 		{
-			name:     "downscale",
-			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(5); return &i }()},
-			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
-			expected: nil,
+			name:                "downscale",
+			oldInfo:             &objectInfo{replicas: func() *int32 { i := int32(5); return &i }()},
+			newInfo:             &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
+			expected:            nil,
+			expectedNewReplicas: 3,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := checkReplicasChange(logger, tt.oldInfo, tt.newInfo)
+			newReplicas, actual := checkReplicasChange(logger, tt.oldInfo, tt.newInfo)
+			if tt.expectedNewReplicas != newReplicas {
+				t.Errorf("newReplicas differ, expected: %d, got: %d", tt.expectedNewReplicas, newReplicas)
+			}
 			if (actual == nil && tt.expected != nil) || (actual != nil && tt.expected == nil) || (actual != nil && tt.expected != nil && actual.Allowed != tt.expected.Allowed) {
 				t.Errorf("checkReplicasChange() = %v, want %v", actual, tt.expected)
 			}

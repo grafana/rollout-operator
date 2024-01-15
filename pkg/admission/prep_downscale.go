@@ -79,8 +79,9 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	logger.SetSpanAndLogTag("object.new_replicas", int32PtrStr(newInfo.replicas))
 
 	// Continue if it's a downscale
-	response := checkReplicasChange(logger, oldInfo, newInfo)
+	_, response := checkReplicasChange(logger, oldInfo, newInfo)
 	if response != nil {
+		// TODO: if newReplicas (first returned value from checkReplicasChange) >= 0, and some pods in replica set (up to newReplicas) have "prepared-for-downscale" annotation set, we will call DELETE on prepare-for-downscale URL.
 		return response
 	}
 
@@ -364,8 +365,9 @@ type objectInfo struct {
 }
 
 type endpoint struct {
-	url   string
-	index int
+	podName string
+	url     string
+	index   int
 }
 
 // Decode the raw object and get the number of replicas
@@ -381,28 +383,32 @@ func decodeAndReplicas(raw []byte) (*objectInfo, error) {
 	return &objectInfo{obj, gvk, replicas}, nil
 }
 
-// Verify that the replicas change is a downscale and not an upscale, otherwise allow the change
-func checkReplicasChange(logger log.Logger, oldInfo, newInfo *objectInfo) *v1.AdmissionResponse {
+// Verify that the replicas change is a downscale and not an upscale, otherwise allow the change.
+// Returns new replicas, if available.
+func checkReplicasChange(logger log.Logger, oldInfo, newInfo *objectInfo) (int32, *v1.AdmissionResponse) {
 	// Both replicas are nil, nothing to warn about.
 	if oldInfo.replicas == nil && newInfo.replicas == nil {
 		level.Debug(logger).Log("msg", "no replicas change, allowing")
-		return &v1.AdmissionResponse{Allowed: true}
+		return -1, &v1.AdmissionResponse{Allowed: true}
 	}
 	// Changes from/to nil scale are not downscales strictly speaking.
-	if oldInfo.replicas == nil || newInfo.replicas == nil {
-		return allowWarn(logger, "old/new replicas is nil, allowing the change")
+	if newInfo.replicas == nil {
+		return -1, allowWarn(logger, "new replicas is nil, allowing the change")
+	}
+	if oldInfo.replicas == nil {
+		return *newInfo.replicas, allowWarn(logger, "new replicas is nil, allowing the change")
 	}
 	// If it's not a downscale, just log debug.
 	if *oldInfo.replicas < *newInfo.replicas {
 		level.Debug(logger).Log("msg", "upscale allowed")
-		return &v1.AdmissionResponse{Allowed: true}
+		return *newInfo.replicas, &v1.AdmissionResponse{Allowed: true}
 	}
 	if *oldInfo.replicas == *newInfo.replicas {
 		level.Debug(logger).Log("msg", "no replicas change, allowing")
-		return &v1.AdmissionResponse{Allowed: true}
+		return *newInfo.replicas, &v1.AdmissionResponse{Allowed: true}
 	}
 	// If none of the above conditions are met, it's a downscale.
-	return nil
+	return *newInfo.replicas, nil
 }
 
 func getLabelsAndAnnotations(ctx context.Context, ar v1.AdmissionReview, api kubernetes.Interface, info *objectInfo) (map[string]string, map[string]string, error) {
@@ -436,7 +442,7 @@ func getLabelsAndAnnotations(ctx context.Context, ar v1.AdmissionReview, api kub
 }
 
 func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, path string) []endpoint {
-	diff := (*oldInfo.replicas - *newInfo.replicas)
+	diff := *oldInfo.replicas - *newInfo.replicas
 	eps := make([]endpoint, diff)
 
 	// The DNS entry for a pod of a stateful set is
@@ -446,9 +452,9 @@ func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, 
 
 	for i := 0; i < int(diff); i++ {
 		index := int(*oldInfo.replicas) - i - 1 // nr in statefulset
-		eps[i].url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
-			ar.Request.Name, // pod name
-			index,
+		eps[i].podName = fmt.Sprintf("%v-%v", ar.Request.Name, index)
+		eps[i].url = fmt.Sprintf("%s.%v.%v.svc.cluster.local:%s/%s",
+			eps[i].podName,  // pod name
 			ar.Request.Name, // svc name
 			ar.Request.Namespace,
 			port,

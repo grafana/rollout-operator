@@ -14,11 +14,12 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/grafana/rollout-operator/pkg/config"
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 type zoneTracker struct {
@@ -61,7 +62,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 	logger.SetSpanAndLogTag("object.new_replicas", int32PtrStr(newInfo.replicas))
 
 	// Continue if it's a downscale
-	response := checkReplicasChange(logger, oldInfo, newInfo)
+	_, response := checkReplicasChange(logger, oldInfo, newInfo)
 	if response != nil {
 		return response
 	}
