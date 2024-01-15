@@ -134,7 +134,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
-	err = sendPrepareShutdownRequests(ctx, logger, client, eps)
+	err = sendPrepareShutdownRequests(ctx, logger, client, eps, false, api)
 	if err != nil {
 		// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
 		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)

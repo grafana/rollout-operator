@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"github.com/grafana/dskit/spanlogger"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
+	"github.com/prometheus/common/model"
 	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -114,6 +116,20 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		)
 	}
 
+	prepareDownscaleMinDelayBeforeShutdown := time.Duration(0)
+	{
+		delayStr := annotations[config.PrepareDownscaleMinDelayBeforeShutdown]
+		if delayStr != "" {
+			parsedDelay, err := model.ParseDuration(delayStr)
+			if err != nil {
+				level.Warn(logger).Log("msg", fmt.Sprintf("ignoring misconfigured %v annotation that cannot be parsed as duration", config.PrepareDownscaleMinDelayBeforeShutdown), "err", err)
+				// TODO: shall we abort downscale in this case?
+			} else {
+				prepareDownscaleMinDelayBeforeShutdown = time.Duration(parsedDelay)
+			}
+		}
+	}
+
 	rolloutGroup := lbls[config.RolloutGroupLabelKey]
 	if rolloutGroup != "" {
 		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, rolloutGroup)
@@ -157,13 +173,23 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	// Create a slice of endpoint addresses for pods to send HTTP POST requests to and to fail if any don't return 200
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
-	if err := sendPrepareShutdownRequests(ctx, logger, client, eps); err != nil {
+	useAndUpdateLastPrepareDownscaleTimestamp := prepareDownscaleMinDelayBeforeShutdown > 0
+	if err := sendPrepareShutdownRequests(ctx, logger, client, eps, useAndUpdateLastPrepareDownscaleTimestamp, api); err != nil {
 		// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
 		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
 		)
+	}
+
+	if prepareDownscaleMinDelayBeforeShutdown > 0 {
+		// Check last prepare-downscale timestamp for all affected pods, and compute maximum. If some pods don't have annotation set,
+		// or delay since the maximum hasn't been reached yet, we deny the downscale.
+		resp := checkPrepareDownscaleMinDelayBeforeShutdown(ctx, logger, eps, api, prepareDownscaleMinDelayBeforeShutdown, ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace)
+		if resp != nil {
+			return response
+		}
 	}
 
 	if err := addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name); err != nil {
@@ -182,6 +208,42 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 			Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is allowed -- all pods successfully prepared for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas),
 		},
 	}
+}
+
+func checkPrepareDownscaleMinDelayBeforeShutdown(ctx context.Context, logger log.Logger, eps []endpoint, api kubernetes.Interface, minDelay time.Duration, resourceType, resourceName, namespace string) interface{} {
+	if len(eps) == 0 {
+		return nil
+	}
+
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.checkPrepareDownscaleMinDelayBeforeShutdown()")
+	defer span.Finish()
+
+	var maxTime time.Time
+	for _, ep := range eps {
+		t, err := getLastPrepareDownscaleAnnotationOnPod(ctx, api, ep.namespace, ep.podName)
+		if err != nil {
+			level.Error(logger).Log("msg", fmt.Sprintf("failed to check %s annotation on pod", config.LastPrepareDownscaleAnnotationKey), "pod", ep.podName, "err", err)
+			return deny(fmt.Sprintf("downscale of %s/%s in %s not allowed, as %s cannot be verified for pod %s", resourceType, resourceName, namespace, config.PrepareDownscaleMinDelayBeforeShutdown, ep.podName))
+		}
+
+		if t.IsZero() {
+			level.Error(logger).Log("msg", fmt.Sprintf("%s annotation on pod is not set", config.LastPrepareDownscaleAnnotationKey), "pod", ep.podName)
+			return deny(fmt.Sprintf("downscale of %s/%s in %s not allowed, as %s has not been set for pod %s", resourceType, resourceName, namespace, config.LastPrepareDownscaleAnnotationKey, ep.podName))
+		}
+
+		if t.After(maxTime) {
+			maxTime = t
+		}
+	}
+
+	elapsedSinceMaxTime := time.Since(maxTime)
+	if elapsedSinceMaxTime < minDelay {
+		level.Warn(logger).Log("msg", fmt.Sprintf("%s has not been reached for all pods yet, rejecting downscale", config.PrepareDownscaleMinDelayBeforeShutdown), "minDelay", minDelay, "elapsed", elapsedSinceMaxTime)
+		return deny(fmt.Sprintf("downscale of %s/%s in %s not allowed, as %s has not been reached for all pods. elapsed time: %v", resourceType, resourceName, namespace, config.MinTimeBetweenZonesDownscaleLabelKey, elapsedSinceMaxTime))
+	}
+
+	level.Info(logger).Log("msg", fmt.Sprintf("%s has been reached for all pods, allowing downscale", config.PrepareDownscaleMinDelayBeforeShutdown), "minDelay", minDelay, "elapsed", elapsedSinceMaxTime)
+	return nil
 }
 
 // deny returns a *v1.AdmissionResponse with Allowed: false and the message provided formatted with as in fmt.Sprintf.
@@ -365,9 +427,10 @@ type objectInfo struct {
 }
 
 type endpoint struct {
-	podName string
-	url     string
-	index   int
+	namespace string
+	podName   string
+	url       string
+	index     int
 }
 
 // Decode the raw object and get the number of replicas
@@ -452,11 +515,12 @@ func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, 
 
 	for i := 0; i < int(diff); i++ {
 		index := int(*oldInfo.replicas) - i - 1 // nr in statefulset
+		eps[i].namespace = ar.Request.Namespace
 		eps[i].podName = fmt.Sprintf("%v-%v", ar.Request.Name, index)
 		eps[i].url = fmt.Sprintf("%s.%v.%v.svc.cluster.local:%s/%s",
 			eps[i].podName,  // pod name
 			ar.Request.Name, // svc name
-			ar.Request.Namespace,
+			eps[i].namespace,
 			port,
 			path,
 		)
@@ -466,7 +530,7 @@ func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, 
 	return eps
 }
 
-func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) error {
+func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint, useAndUpdateLastPrepareDownscaleTimestamp bool, api kubernetes.Interface) error {
 	if len(eps) == 0 {
 		return nil
 	}
@@ -481,12 +545,25 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 			logger, ctx := spanlogger.New(ctx, logger, "admission.PreparePodForShutdown", tenantResolver)
 			defer logger.Span.Finish()
 
+			logger.SetSpanAndLogTag("pod", ep.podName)
 			logger.SetSpanAndLogTag("url", ep.url)
 			logger.SetSpanAndLogTag("index", ep.index)
+
+			if useAndUpdateLastPrepareDownscaleTimestamp {
+				t, err := getLastPrepareDownscaleAnnotationOnPod(ctx, api, ep.namespace, ep.podName)
+				if err != nil {
+					level.Warn(logger).Log("msg", "failed to get pod annotations, continuing with prepare-shutdown", "err", err)
+					// Don't return error. prepare-shutdown is expected to be idempotent, so it's OK to call it multiple times.
+				} else if !t.IsZero() {
+					level.Info(logger).Log("msg", "prepare-shutdown endpoint was already called on pod, will not call it again", "pod", ep.podName, "lastPrepareDownscale", t.Format(time.RFC3339))
+					return nil
+				}
+			}
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+ep.url, nil)
 			if err != nil {
 				level.Error(logger).Log("msg", "error creating HTTP POST request", "err", err)
+				return err
 			}
 
 			req.Header.Set("Content-Type", "application/json")
@@ -508,6 +585,14 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 				return errors.Join(err, readError)
 			}
 			level.Debug(logger).Log("msg", "pod prepared for shutdown")
+
+			if useAndUpdateLastPrepareDownscaleTimestamp {
+				err := setLastPrepareDownscaleAnnotationOnPod(ctx, api, ep.namespace, ep.podName, time.Now())
+				if err != nil {
+					level.Warn(logger).Log("msg", fmt.Sprintf("failed to set %v annotation on the pod", config.LastPrepareDownscaleAnnotationKey), "err", err)
+					// Don't return error. In the worst case, we will call prepare-shutdown on this pod again.
+				}
+			}
 			return nil
 		})
 	}
@@ -524,4 +609,54 @@ func (n noTenantResolver) TenantID(ctx context.Context) (string, error) {
 
 func (n noTenantResolver) TenantIDs(ctx context.Context) ([]string, error) {
 	return nil, nil
+}
+
+func getLastPrepareDownscaleAnnotationOnPod(ctx context.Context, api kubernetes.Interface, namespace, podName string) (time.Time, error) {
+	anns, err := getPodAnnotations(ctx, api, namespace, podName)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	last := anns[config.LastPrepareDownscaleAnnotationKey]
+	if last == "" {
+		return time.Time{}, nil
+	}
+
+	return time.Parse(time.RFC3339, last)
+}
+
+func setLastPrepareDownscaleAnnotationOnPod(ctx context.Context, api kubernetes.Interface, namespace, podName string, t time.Time) error {
+	return setPodAnnotation(ctx, api, namespace, podName, config.LastPrepareDownscaleAnnotationKey, t.UTC().Format(time.RFC3339))
+}
+
+func getPodAnnotations(ctx context.Context, api kubernetes.Interface, namespace, podName string) (map[string]string, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.getPodAnnotation()")
+	defer span.Finish()
+
+	span.SetTag("object.namespace", namespace)
+	span.SetTag("object.name", podName)
+
+	pod, err := api.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return pod.Annotations, nil
+}
+
+func setPodAnnotation(ctx context.Context, api kubernetes.Interface, namespace, podName string, annotationName, annotationValue string) error {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.addPodAnnotation()")
+	defer span.Finish()
+
+	span.SetTag("object.namespace", namespace)
+	span.SetTag("object.name", podName)
+
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{annotationName: annotationValue}}})
+	if err != nil {
+		return fmt.Errorf("failed to encode annotations patch: %v", err)
+	}
+
+	client := api.CoreV1().Pods(namespace)
+	_, err = client.Patch(ctx, podName, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+	return err
 }
