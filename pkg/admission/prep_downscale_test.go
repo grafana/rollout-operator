@@ -66,23 +66,39 @@ func TestDownscaleDryRun(t *testing.T) {
 }
 
 func TestDownscaleWithMinDelayWithoutPreviousPrepareDownscaleCall(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("10m"), withMinTimeReached(false))
+	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("10m"), withMinDelaySincePrepareDownscaleReached(false))
 	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withMinDelayBeforeShutdown("10m")) // TODO: min delay is not implemented for zone-tracker.
 }
 
 func TestDownscaleWithMinDelayWithPreviousPrepareDownscaleCallButMinTimeNotReachedYet(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("10m"), withLastPreparedPodsTime(time.Now().Add(-5*time.Minute)), withMinTimeReached(false))
+	ts := time.Now().Add(-5 * time.Minute).UTC()
+	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("10m"), withLastPreparedPodsTime(ts.Format(time.RFC3339)), withMinDelaySincePrepareDownscaleReached(false))
 	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withMinDelayBeforeShutdown("10m")) // TODO: min delay is not implemented for zone-tracker.
 }
 
 func TestDownscaleWithMinDelayWithPreviousPrepareDownscaleCallAndMinTimeReached(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("10m"), withLastPreparedPodsTime(time.Now().Add(-time.Hour)), withMinTimeReached(true))
+	ts := time.Now().Add(-1 * time.Hour).UTC()
+	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("10m"), withLastPreparedPodsTime(ts.Format(time.RFC3339)), withMinDelaySincePrepareDownscaleReached(true))
 	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withMinDelayBeforeShutdown("10m")) // TODO: min delay is not implemented for zone-tracker.
 }
 
 func TestInvalidDownscaleMinDelay(t *testing.T) {
 	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("invalid"))                // Will be ignored.
 	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withMinDelayBeforeShutdown("invalid")) // TODO: min delay is not implemented for zone-tracker.
+}
+
+func TestUpscaleWithLastPreparedPodsTimeWithoutEnablingDeletion(t *testing.T) {
+	ts := time.Now().Add(-1 * time.Hour).UTC()
+
+	testPrepDownscaleWebhook(t, 2, 5, withLastPreparedPodsTime(ts.Format(time.RFC3339)), withCheckLastPreparedPodsTimeIsCleared(ts.Format(time.RFC3339)))
+	testPrepDownscaleWebhookWithZoneTracker(t, 2, 5) // TODO: feature not implemented for zone-tracker.
+}
+
+func TestUpscaleWithLastPreparedPodsTimeWithDeletionEnabled(t *testing.T) {
+	ts := time.Now().Add(-1 * time.Hour).UTC()
+
+	testPrepDownscaleWebhook(t, 2, 5, withLastPreparedPodsTime(ts.Format(time.RFC3339)), withDeletePrepareDownscaleEnabled("true"), withCheckLastPreparedPodsTimeIsCleared(""))
+	testPrepDownscaleWebhookWithZoneTracker(t, 2, 5) // TODO: feature not implemented for zone-tracker.
 }
 
 func newDebugLogger() log.Logger {
@@ -95,13 +111,16 @@ func newDebugLogger() log.Logger {
 }
 
 type testParams struct {
-	statusCode             int
-	stsAnnotated           bool
-	downscaleInProgress    bool
-	allowed                bool
-	dryRun                 bool
-	minDelayBeforeShutdown string
-	lastPreparedPodsTime   string
+	statusCode                    int
+	stsAnnotated                  bool
+	downscaleInProgress           bool
+	allowed                       bool
+	dryRun                        bool
+	minDelayBeforeShutdown        string
+	lastPreparedPodsTime          string // Set on pods before the test.
+	deletePrepareDownscaleEnabled string
+	checkLastPreparedPodsTime     bool // If enabled, expectedLastPreparedPodsTime is checked on pods after downscale.
+	expectedLastPreparedPodsTime  string
 }
 
 type optionFunc func(*testParams)
@@ -141,29 +160,44 @@ func withDownscaleInProgress(inProgress bool) optionFunc {
 	}
 }
 
-func withMinTimeReached(reached bool) optionFunc {
+func withMinDelaySincePrepareDownscaleReached(minDelay bool) optionFunc {
 	return func(tp *testParams) {
-		if !reached {
+		if !minDelay {
 			tp.allowed = false
 		}
 	}
 }
 
-func withLastPreparedPodsTime(t time.Time) optionFunc {
+func withLastPreparedPodsTime(input string) optionFunc {
 	return func(tp *testParams) {
-		tp.lastPreparedPodsTime = t.UTC().Format(time.RFC3339)
+		tp.lastPreparedPodsTime = input
+	}
+}
+
+func withCheckLastPreparedPodsTimeIsCleared(expected string) optionFunc {
+	return func(tp *testParams) {
+		tp.checkLastPreparedPodsTime = true
+		tp.expectedLastPreparedPodsTime = expected
+	}
+}
+
+func withDeletePrepareDownscaleEnabled(input string) optionFunc {
+	return func(tp *testParams) {
+		tp.deletePrepareDownscaleEnabled = input
 	}
 }
 
 type templateParams struct {
-	Replicas                    int
-	DownScalePathKey            string
-	DownScalePath               string
-	DownScalePortKey            string
-	DownScalePort               string
-	DownScaleLabelKey           string
-	MinDelayBeforeShutdownKey   string
-	MinDelayBeforeShutdownValue string
+	Replicas                     int
+	DownScalePathKey             string
+	DownScalePath                string
+	DownScalePortKey             string
+	DownScalePort                string
+	DownScaleLabelKey            string
+	MinDelayBeforeShutdownKey    string
+	MinDelayBeforeShutdownValue  string
+	DeleteDownscaleEndpointKey   string
+	DeleteDownscaleEndpointValue string
 }
 
 type fakeHttpClient struct {
@@ -227,6 +261,13 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		newParams.MinDelayBeforeShutdownValue = params.minDelayBeforeShutdown
 	}
 
+	if params.deletePrepareDownscaleEnabled != "" {
+		oldParams.DeleteDownscaleEndpointKey = config.PrepareDownscaleDeleteEnabledLabelKey
+		oldParams.DeleteDownscaleEndpointValue = params.deletePrepareDownscaleEnabled
+		newParams.DeleteDownscaleEndpointKey = config.PrepareDownscaleDeleteEnabledLabelKey
+		newParams.DeleteDownscaleEndpointValue = params.deletePrepareDownscaleEnabled
+	}
+
 	rawObject, err := statefulSetTemplate(newParams)
 	require.NoError(t, err)
 
@@ -269,6 +310,16 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 				Namespace: namespace,
 				UID:       types.UID(stsName),
 				Labels:    map[string]string{config.RolloutGroupLabelKey: "ingester"},
+			},
+			// this is needed for pods lookup to work.
+			Spec: appsv1.StatefulSetSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"name": stsName,
+						},
+					},
+				},
 			},
 		},
 		&apps.StatefulSet{
@@ -319,6 +370,9 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 				Name:      podName,
 				Namespace: namespace,
 				UID:       types.UID(podName),
+				Labels: map[string]string{
+					"name": stsName,
+				},
 			},
 		}
 		if params.lastPreparedPodsTime != "" {
@@ -341,6 +395,29 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		require.NoError(t, err)
 		require.NotNil(t, updatedSts.Annotations)
 		require.NotNil(t, updatedSts.Annotations[config.LastDownscaleAnnotationKey])
+	}
+
+	if params.checkLastPreparedPodsTime {
+		sts, err := api.AppsV1().StatefulSets(namespace).Get(ctx, stsName, metav1.GetOptions{})
+		require.NoError(t, err)
+		pods, err := findPodsForStatefulSet(context.Background(), api, namespace, sts)
+		require.NoError(t, err)
+		require.Len(t, pods.Items, oldReplicas)
+
+		for _, p := range pods.Items {
+			ann, exists := p.Annotations[config.LastPrepareDownscaleAnnotationKey]
+			if exists {
+				if params.expectedLastPreparedPodsTime == "" {
+					require.Failf(t, "annotation test", "unexpected annotation %s exists on pod %s", config.LastPrepareDownscaleAnnotationKey, p.Name)
+				} else {
+					require.Equal(t, params.expectedLastPreparedPodsTime, ann, "annotation test")
+				}
+			} else { // annotation doesn't exist
+				if params.expectedLastPreparedPodsTime != "" {
+					require.Failf(t, "annotation test", "expected annotation %s doesn't exist on pod %s", config.LastPrepareDownscaleAnnotationKey, p.Name)
+				}
+			}
+		}
 	}
 }
 
@@ -495,6 +572,7 @@ metadata:
     {{.DownScalePathKey}}: {{.DownScalePath}}
     {{.DownScalePortKey}}: "{{.DownScalePort}}"
     {{ if .MinDelayBeforeShutdownKey }}{{.MinDelayBeforeShutdownKey}}: "{{.MinDelayBeforeShutdownValue}}"{{ end }}
+    {{ if .DeleteDownscaleEndpointKey }}{{.DeleteDownscaleEndpointKey}}: "{{.DeleteDownscaleEndpointValue}}"{{ end }}
 spec:
   selector:
     matchLabels:
@@ -784,7 +862,7 @@ func TestGetLabelsAndAnnotations(t *testing.T) {
 	}
 }
 
-func TestCreateEndpoints(t *testing.T) {
+func TestCreatePrepareDownscaleEndpointsFromAdmissionReview(t *testing.T) {
 	ar := v1.AdmissionReview{
 		Request: &v1.AdmissionRequest{
 			Name:      "test",
@@ -812,12 +890,16 @@ func TestCreateEndpoints(t *testing.T) {
 			path: "prepare-downscale",
 			expected: []endpoint{
 				{
-					url:   "test-4.test.default.svc.cluster.local:8080/prepare-downscale",
-					index: 4,
+					namespace: "default",
+					podName:   "test-3",
+					url:       "http://test-3.test.default.svc.cluster.local:8080/prepare-downscale",
+					index:     3,
 				},
 				{
-					url:   "test-3.test.default.svc.cluster.local:8080/prepare-downscale",
-					index: 3,
+					namespace: "default",
+					podName:   "test-4",
+					url:       "http://test-4.test.default.svc.cluster.local:8080/prepare-downscale",
+					index:     4,
 				},
 			},
 		},
@@ -825,13 +907,67 @@ func TestCreateEndpoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := createEndpoints(ar, tt.oldInfo, tt.newInfo, tt.port, tt.path)
+			actual := createPrepareDownscaleEndpointsFromAdmissionReview(ar, tt.oldInfo, tt.newInfo, tt.port, tt.path)
 			if len(actual) != len(tt.expected) {
 				t.Errorf("createEndpoints() = %v, want %v", actual, tt.expected)
 				return
 			}
-			for i, ep := range actual {
-				if ep.url != tt.expected[i].url || ep.index != tt.expected[i].index {
+			for i := range actual {
+				if tt.expected[i] != actual[i] {
+					t.Errorf("createEndpoints() = %v, want %v", actual, tt.expected)
+					return
+				}
+			}
+		})
+	}
+}
+
+func TestCreateEndpoints(t *testing.T) {
+	tests := []struct {
+		name     string
+		from, to int
+		port     string
+		path     string
+		expected []endpoint
+	}{
+		{
+			name: "3 pods",
+			from: 2,
+			to:   5,
+			port: "8080",
+			path: "prepare-downscale",
+			expected: []endpoint{
+				{
+					namespace: "default",
+					podName:   "test-2",
+					url:       "http://test-2.test.default.svc.cluster.local:8080/prepare-downscale",
+					index:     2,
+				},
+				{
+					namespace: "default",
+					podName:   "test-3",
+					url:       "http://test-3.test.default.svc.cluster.local:8080/prepare-downscale",
+					index:     3,
+				},
+				{
+					namespace: "default",
+					podName:   "test-4",
+					url:       "http://test-4.test.default.svc.cluster.local:8080/prepare-downscale",
+					index:     4,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := createEndpoints("default", "test", tt.from, tt.to, tt.port, tt.path)
+			if len(actual) != len(tt.expected) {
+				t.Errorf("createEndpoints() = %v, want %v", actual, tt.expected)
+				return
+			}
+			for i := range actual {
+				if tt.expected[i] != actual[i] {
 					t.Errorf("createEndpoints() = %v, want %v", actual, tt.expected)
 					return
 				}

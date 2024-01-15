@@ -26,6 +26,11 @@ const (
 	// LastPrepareDownscaleAnnotationKey is a timestamp when prepare-downscale was called last time on the pod. (UTC, time.RFC3339 format)
 	LastPrepareDownscaleAnnotationKey = "grafana.com/last-prepare-downscale"
 
+	// PrepareDownscaleDeleteEnabledLabelKey is boolean option that enables calling "DELETE /prepare-downscale"
+	// when dowscale is canceled during "min delay" period.
+	PrepareDownscaleDeleteEnabledLabelKey   = "grafana.com/delete-prepare-downscale-enabled"
+	PrepareDownscaleDeleteEnabledLabelValue = "true"
+
 	// RolloutGroupLabelKey is the group to which multiple statefulsets belong and must be operated on together.
 	RolloutGroupLabelKey = "rollout-group"
 	// RolloutMaxUnavailableAnnotationKey is the max number of pods in each statefulset that may be stopped at

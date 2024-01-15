@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/go-openapi/jsonpointer"
 	"github.com/grafana/dskit/spanlogger"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
@@ -81,8 +82,13 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	logger.SetSpanAndLogTag("object.new_replicas", int32PtrStr(newInfo.replicas))
 
 	// Continue if it's a downscale
-	if _, response := checkReplicasChange(logger, oldInfo, newInfo); response != nil {
-		// TODO: if newReplicas (first returned value from checkReplicasChange) >= 0, and some pods in replica set (up to newReplicas) have "prepared-for-downscale" annotation set, we will call DELETE on prepare-for-downscale URL.
+	if newReplicas, response := checkReplicasChange(logger, oldInfo, newInfo); response != nil {
+		if newReplicas >= 0 {
+			// Let's see if any pods with index <= newReplicas have config.LastPrepareDownscaleAnnotationKey annotation set. If so,
+			// we will call DELETE on prepare-downscale endpoint, and delete the annotation.
+			unpreparePodsForDownscale(ctx, logger, api, ar, oldInfo, int(newReplicas), client)
+		}
+
 		return response
 	}
 
@@ -170,7 +176,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 
 	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP POST requests to and to fail if any don't return 200
-	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
+	eps := createPrepareDownscaleEndpointsFromAdmissionReview(ar, oldInfo, newInfo, port, path)
 
 	useAndUpdateLastPrepareDownscaleTimestamp := prepareDownscaleMinDelayBeforeShutdown > 0
 	if err := sendPrepareShutdownRequests(ctx, logger, client, eps, useAndUpdateLastPrepareDownscaleTimestamp, api); err != nil {
@@ -206,6 +212,97 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		Result: &metav1.Status{
 			Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is allowed -- all pods successfully prepared for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas),
 		},
+	}
+}
+
+// This function will do HTTP DELETE on prepare-downscale endpoint for all pods up to newReplicas.
+// This feature must be enabled by setting config.PrepareDownscaleDeleteEnabledLabelKey to true.
+// Call is only done on pods that have config.LastPrepareDownscaleAnnotationKey annotation set. This annotation is deleted after successful call to DELETE.
+func unpreparePodsForDownscale(ctx context.Context, logger log.Logger, api kubernetes.Interface, ar v1.AdmissionReview, oldInfo *objectInfo, newReplicas int, client httpClient) {
+	lbls, annotations, err := getLabelsAndAnnotations(ctx, ar, api, oldInfo)
+	if err != nil {
+		level.Warn(logger).Log("msg", "failed to read annotations, can't call DELETE on prepare-downscale endpoints", "err", err)
+		return
+	}
+
+	if lbls[config.PrepareDownscaleDeleteEnabledLabelKey] != config.PrepareDownscaleDeleteEnabledLabelValue {
+		// Calling deletion on prepare-downscale endpoint is not enabled on this resource.
+		return
+	}
+
+	port := annotations[config.PrepareDownscalePortAnnotationKey]
+	if port == "" {
+		// Prepare-downscale port is not configured
+		return
+	}
+
+	path := annotations[config.PrepareDownscalePathAnnotationKey]
+	if path == "" {
+		// Prepare-downscale path is not configured
+		return
+	}
+
+	endpoints := createEndpoints(ar.Request.Namespace, ar.Request.Name, 0, newReplicas, port, path)
+
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.unpreparePodsForDownscale()")
+	defer span.Finish()
+
+	g, _ := errgroup.WithContext(ctx)
+	for _, ep := range endpoints {
+		ep := ep // https://golang.org/doc/faq#closures_and_goroutines
+		g.Go(func() error {
+			logger, ctx := spanlogger.New(ctx, logger, "admission.UnpreparePodForShutdown", tenantResolver)
+			defer logger.Span.Finish()
+
+			logger.SetSpanAndLogTag("pod", ep.podName)
+			logger.SetSpanAndLogTag("url", ep.url)
+			logger.SetSpanAndLogTag("index", ep.index)
+
+			t, err := getLastPrepareDownscaleAnnotationOnPod(ctx, api, ep.namespace, ep.podName)
+			switch {
+			case err != nil:
+				level.Warn(logger).Log("msg", "failed to get pod annotations, will call DELETE prepare-downscale", "pod", ep.podName, "err", err)
+
+			case t.IsZero():
+				level.Info(logger).Log("msg", "previous prepare-downscale endpoint call not found for pod, skipping DELETE prepare-downscale", "pod", ep.podName)
+				return nil
+
+			default:
+				level.Info(logger).Log("msg", "found previous prepare-downscale endpoint call for pod, will call DELETE prepare-downscale", "pod", ep.podName, "lastPrepareDownscale", t.Format(time.RFC3339))
+			}
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodDelete, ep.url, nil)
+			if err != nil {
+				level.Error(logger).Log("msg", "error creating HTTP POST request", "pod", ep.podName, "err", err)
+				return nil
+			}
+
+			req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
+			defer ht.Finish()
+
+			resp, err := client.Do(req)
+			if err != nil {
+				level.Error(logger).Log("msg", "error sending HTTP DELETE request", "pod", ep.podName, "err", err)
+				return nil
+			}
+
+			defer resp.Body.Close()
+
+			if resp.StatusCode/100 != 2 {
+				body, _ := io.ReadAll(resp.Body)
+				level.Error(logger).Log("msg", "HTTP DELETE request on downscale endpoint returned non-2xx status code", "status", resp.StatusCode, "response_body", string(body))
+				return nil
+			}
+
+			if err := deleteLastPrepareDownscaleAnnotationOnPod(ctx, api, ep.namespace, ep.podName); err != nil {
+				level.Warn(logger).Log("msg", fmt.Sprintf("failed to delete %v annotation on the pod", config.LastPrepareDownscaleAnnotationKey), "pod", ep.podName, "err", err)
+			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		level.Warn(logger).Log("msg", "failed to clean up (DELETE) previous prepare-downscale calls", "err", err)
 	}
 }
 
@@ -503,27 +600,34 @@ func getLabelsAndAnnotations(ctx context.Context, ar v1.AdmissionReview, api kub
 	return lbls, annotations, nil
 }
 
-func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, path string) []endpoint {
-	diff := *oldInfo.replicas - *newInfo.replicas
-	eps := make([]endpoint, diff)
+func createPrepareDownscaleEndpointsFromAdmissionReview(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, path string) []endpoint {
+	// We're assuming downscale, ie. newInfo.replicas < oldInfo.replicas.
+	return createEndpoints(ar.Request.Namespace, ar.Request.Name, int(*newInfo.replicas), int(*oldInfo.replicas), port, path)
+}
+
+// Create prepare-downscale endpoints for pods with index in [from, to) range.
+func createEndpoints(namespace, serviceName string, from, to int, port, path string) []endpoint {
+	eps := make([]endpoint, 0, to-from)
 
 	// The DNS entry for a pod of a stateful set is
 	// ingester-zone-a-0.$(servicename).$(namespace).svc.cluster.local
 	// The service in this case is ingester-zone-a as well.
 	// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
 
-	for i := 0; i < int(diff); i++ {
-		index := int(*oldInfo.replicas) - i - 1 // nr in statefulset
-		eps[i].namespace = ar.Request.Namespace
-		eps[i].podName = fmt.Sprintf("%v-%v", ar.Request.Name, index)
-		eps[i].url = fmt.Sprintf("%s.%v.%v.svc.cluster.local:%s/%s",
-			eps[i].podName,  // pod name
-			ar.Request.Name, // svc name
-			eps[i].namespace,
+	for index := from; index < to; index++ {
+		ep := endpoint{
+			namespace: namespace,
+			podName:   fmt.Sprintf("%v-%v", serviceName, index),
+			index:     index,
+		}
+		ep.url = fmt.Sprintf("http://%s.%v.%v.svc.cluster.local:%s/%s",
+			ep.podName,  // pod name
+			serviceName, // svc name
+			ep.namespace,
 			port,
 			path,
 		)
-		eps[i].index = index
+		eps = append(eps, ep)
 	}
 
 	return eps
@@ -551,15 +655,15 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 			if useAndUpdateLastPrepareDownscaleTimestamp {
 				t, err := getLastPrepareDownscaleAnnotationOnPod(ctx, api, ep.namespace, ep.podName)
 				if err != nil {
-					level.Warn(logger).Log("msg", "failed to get pod annotations, continuing with prepare-shutdown", "err", err)
-					// Don't return error. prepare-shutdown is expected to be idempotent, so it's OK to call it multiple times.
+					level.Warn(logger).Log("msg", "failed to get pod annotations, continuing with prepare-downscale", "err", err)
+					// Don't return error. prepare-downscale is expected to be idempotent, so it's OK to call it multiple times.
 				} else if !t.IsZero() {
-					level.Info(logger).Log("msg", "prepare-shutdown endpoint was already called on pod, will not call it again", "pod", ep.podName, "lastPrepareDownscale", t.Format(time.RFC3339))
+					level.Info(logger).Log("msg", "prepare-downscale endpoint was already called on pod, will not call it again", "pod", ep.podName, "lastPrepareDownscale", t.Format(time.RFC3339))
 					return nil
 				}
 			}
 
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+ep.url, nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.url, nil)
 			if err != nil {
 				level.Error(logger).Log("msg", "error creating HTTP POST request", "err", err)
 				return err
@@ -588,8 +692,8 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 			if useAndUpdateLastPrepareDownscaleTimestamp {
 				err := setLastPrepareDownscaleAnnotationOnPod(ctx, api, ep.namespace, ep.podName, time.Now())
 				if err != nil {
-					level.Warn(logger).Log("msg", fmt.Sprintf("failed to set %v annotation on the pod", config.LastPrepareDownscaleAnnotationKey), "err", err)
-					// Don't return error. In the worst case, we will call prepare-shutdown on this pod again.
+					level.Warn(logger).Log("msg", fmt.Sprintf("failed to set %v annotation on the pod", config.LastPrepareDownscaleAnnotationKey), "err", err, "pod", ep.podName)
+					// Don't return error. In the worst case, we will call prepare-downscale on this pod again.
 				}
 			}
 			return nil
@@ -624,10 +728,6 @@ func getLastPrepareDownscaleAnnotationOnPod(ctx context.Context, api kubernetes.
 	return time.Parse(time.RFC3339, last)
 }
 
-func setLastPrepareDownscaleAnnotationOnPod(ctx context.Context, api kubernetes.Interface, namespace, podName string, t time.Time) error {
-	return setPodAnnotation(ctx, api, namespace, podName, config.LastPrepareDownscaleAnnotationKey, t.UTC().Format(time.RFC3339))
-}
-
 func getPodAnnotations(ctx context.Context, api kubernetes.Interface, namespace, podName string) (map[string]string, error) {
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.getPodAnnotation()")
 	defer span.Finish()
@@ -641,6 +741,14 @@ func getPodAnnotations(ctx context.Context, api kubernetes.Interface, namespace,
 	}
 
 	return pod.Annotations, nil
+}
+
+func setLastPrepareDownscaleAnnotationOnPod(ctx context.Context, api kubernetes.Interface, namespace, podName string, t time.Time) error {
+	return setPodAnnotation(ctx, api, namespace, podName, config.LastPrepareDownscaleAnnotationKey, t.UTC().Format(time.RFC3339))
+}
+
+func deleteLastPrepareDownscaleAnnotationOnPod(ctx context.Context, api kubernetes.Interface, namespace, podName string) error {
+	return deleteAnnotationFromPod(ctx, api, namespace, podName, config.LastPrepareDownscaleAnnotationKey)
 }
 
 func setPodAnnotation(ctx context.Context, api kubernetes.Interface, namespace, podName string, annotationName, annotationValue string) error {
@@ -657,5 +765,35 @@ func setPodAnnotation(ctx context.Context, api kubernetes.Interface, namespace, 
 
 	client := api.CoreV1().Pods(namespace)
 	_, err = client.Patch(ctx, podName, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
+func deleteAnnotationFromPod(ctx context.Context, api kubernetes.Interface, namespace, podName, annotation string) error {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.deleteAnnotationFromPod()")
+	defer span.Finish()
+
+	span.SetTag("object.namespace", namespace)
+	span.SetTag("object.name", podName)
+	span.SetTag("object.annotation", annotation)
+
+	type jsonPatchOp struct {
+		Op   string `json:"op"`
+		Path string `json:"path"`
+	}
+
+	// Create JSONPatch
+	var patch []jsonPatchOp
+	patch = append(patch, jsonPatchOp{
+		Op:   "remove",
+		Path: fmt.Sprintf("/metadata/annotations/%s", jsonpointer.Escape(annotation)),
+	})
+
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to encode json patch: %v", err)
+	}
+
+	client := api.CoreV1().Pods(namespace)
+	_, err = client.Patch(ctx, podName, types.JSONPatchType, patchBytes, metav1.PatchOptions{})
 	return err
 }

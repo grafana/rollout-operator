@@ -132,7 +132,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 
 	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
-	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
+	eps := createPrepareDownscaleEndpointsFromAdmissionReview(ar, oldInfo, newInfo, port, path)
 
 	err = sendPrepareShutdownRequests(ctx, logger, client, eps, false, api)
 	if err != nil {
