@@ -3,16 +3,16 @@ package admission
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
-	"github.com/grafana/rollout-operator/pkg/config"
 	apps "k8s.io/api/apps/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 func TestZoneTracker(t *testing.T) {
@@ -281,7 +281,6 @@ func TestLastDownscaledNonExistentZone(t *testing.T) {
 	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
 
 	time, _ := zt.lastDownscaled("nonexistentzone")
-	fmt.Printf("time: %v\n", time)
 	if time != "" {
 		t.Errorf("lastDownscaled did not handle non-existent zone correctly")
 	}

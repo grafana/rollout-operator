@@ -3,6 +3,7 @@ package admission
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -64,6 +65,26 @@ func TestDownscaleDryRun(t *testing.T) {
 	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withDryRun())
 }
 
+func TestDownscaleWithMinDelayWithoutPreviousPrepareDownscaleCall(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("10m"), withMinTimeReached(false))
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withMinDelayBeforeShutdown("10m")) // TODO: min delay is not implemented for zone-tracker.
+}
+
+func TestDownscaleWithMinDelayWithPreviousPrepareDownscaleCallButMinTimeNotReachedYet(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("10m"), withLastPreparedPodsTime(time.Now().Add(-5*time.Minute)), withMinTimeReached(false))
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withMinDelayBeforeShutdown("10m")) // TODO: min delay is not implemented for zone-tracker.
+}
+
+func TestDownscaleWithMinDelayWithPreviousPrepareDownscaleCallAndMinTimeReached(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("10m"), withLastPreparedPodsTime(time.Now().Add(-time.Hour)), withMinTimeReached(true))
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withMinDelayBeforeShutdown("10m")) // TODO: min delay is not implemented for zone-tracker.
+}
+
+func TestInvalidDownscaleMinDelay(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 3, withMinDelayBeforeShutdown("invalid"))                // Will be ignored.
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withMinDelayBeforeShutdown("invalid")) // TODO: min delay is not implemented for zone-tracker.
+}
+
 func newDebugLogger() log.Logger {
 	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	var options []level.Option
@@ -74,11 +95,13 @@ func newDebugLogger() log.Logger {
 }
 
 type testParams struct {
-	statusCode          int
-	stsAnnotated        bool
-	downscaleInProgress bool
-	allowed             bool
-	dryRun              bool
+	statusCode             int
+	stsAnnotated           bool
+	downscaleInProgress    bool
+	allowed                bool
+	dryRun                 bool
+	minDelayBeforeShutdown string
+	lastPreparedPodsTime   string
 }
 
 type optionFunc func(*testParams)
@@ -90,6 +113,12 @@ func withStatusCode(statusCode int) optionFunc {
 			tp.allowed = false
 			tp.stsAnnotated = false
 		}
+	}
+}
+
+func withMinDelayBeforeShutdown(val string) optionFunc {
+	return func(tp *testParams) {
+		tp.minDelayBeforeShutdown = val
 	}
 }
 
@@ -112,13 +141,29 @@ func withDownscaleInProgress(inProgress bool) optionFunc {
 	}
 }
 
+func withMinTimeReached(reached bool) optionFunc {
+	return func(tp *testParams) {
+		if !reached {
+			tp.allowed = false
+		}
+	}
+}
+
+func withLastPreparedPodsTime(t time.Time) optionFunc {
+	return func(tp *testParams) {
+		tp.lastPreparedPodsTime = t.UTC().Format(time.RFC3339)
+	}
+}
+
 type templateParams struct {
-	Replicas          int
-	DownScalePathKey  string
-	DownScalePath     string
-	DownScalePortKey  string
-	DownScalePort     string
-	DownScaleLabelKey string
+	Replicas                    int
+	DownScalePathKey            string
+	DownScalePath               string
+	DownScalePortKey            string
+	DownScalePort               string
+	DownScaleLabelKey           string
+	MinDelayBeforeShutdownKey   string
+	MinDelayBeforeShutdownValue string
 }
 
 type fakeHttpClient struct {
@@ -173,6 +218,13 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		DownScalePortKey:  config.PrepareDownscalePortAnnotationKey,
 		DownScalePort:     u.Port(),
 		DownScaleLabelKey: config.PrepareDownscaleLabelKey,
+	}
+
+	if params.minDelayBeforeShutdown != "" {
+		oldParams.MinDelayBeforeShutdownKey = config.PrepareDownscaleMinDelayBeforeShutdown
+		oldParams.MinDelayBeforeShutdownValue = params.minDelayBeforeShutdown
+		newParams.MinDelayBeforeShutdownKey = config.PrepareDownscaleMinDelayBeforeShutdown
+		newParams.MinDelayBeforeShutdownValue = params.minDelayBeforeShutdown
 	}
 
 	rawObject, err := statefulSetTemplate(newParams)
@@ -254,6 +306,29 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 			},
 		)
 	}
+
+	// Add individual pods for "main" statefulset.
+	for i := 0; i < oldReplicas; i++ {
+		podName := fmt.Sprintf("%s-%d", stsName, i)
+		pod := &corev1.Pod{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "Pod",
+				APIVersion: "v1",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: namespace,
+				UID:       types.UID(podName),
+			},
+		}
+		if params.lastPreparedPodsTime != "" {
+			pod.ObjectMeta.Annotations = map[string]string{
+				config.LastPrepareDownscaleAnnotationKey: params.lastPreparedPodsTime,
+			}
+		}
+		objects = append(objects, pod)
+	}
+
 	api := fake.NewSimpleClientset(objects...)
 	f := &fakeHttpClient{statusCode: params.statusCode}
 
@@ -419,6 +494,7 @@ metadata:
   annotations:
     {{.DownScalePathKey}}: {{.DownScalePath}}
     {{.DownScalePortKey}}: "{{.DownScalePort}}"
+    {{ if .MinDelayBeforeShutdownKey }}{{.MinDelayBeforeShutdownKey}}: "{{.MinDelayBeforeShutdownValue}}"{{ end }}
 spec:
   selector:
     matchLabels:

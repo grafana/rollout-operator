@@ -81,8 +81,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	logger.SetSpanAndLogTag("object.new_replicas", int32PtrStr(newInfo.replicas))
 
 	// Continue if it's a downscale
-	_, response := checkReplicasChange(logger, oldInfo, newInfo)
-	if response != nil {
+	if _, response := checkReplicasChange(logger, oldInfo, newInfo); response != nil {
 		// TODO: if newReplicas (first returned value from checkReplicasChange) >= 0, and some pods in replica set (up to newReplicas) have "prepared-for-downscale" annotation set, we will call DELETE on prepare-for-downscale URL.
 		return response
 	}
@@ -188,7 +187,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		// or delay since the maximum hasn't been reached yet, we deny the downscale.
 		resp := checkPrepareDownscaleMinDelayBeforeShutdown(ctx, logger, eps, api, prepareDownscaleMinDelayBeforeShutdown, ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace)
 		if resp != nil {
-			return response
+			return resp
 		}
 	}
 
@@ -210,7 +209,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	}
 }
 
-func checkPrepareDownscaleMinDelayBeforeShutdown(ctx context.Context, logger log.Logger, eps []endpoint, api kubernetes.Interface, minDelay time.Duration, resourceType, resourceName, namespace string) interface{} {
+func checkPrepareDownscaleMinDelayBeforeShutdown(ctx context.Context, logger log.Logger, eps []endpoint, api kubernetes.Interface, minDelay time.Duration, resourceType, resourceName, namespace string) *v1.AdmissionResponse {
 	if len(eps) == 0 {
 		return nil
 	}
