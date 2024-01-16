@@ -20,9 +20,9 @@ const (
 	PrepareDownscaleLabelKey   = "grafana.com/prepare-downscale"
 	PrepareDownscaleLabelValue = "true"
 
-	// PrepareDownscaleMinDelayBeforeShutdown is minimum duration between call to prepare-downscale endpoint, and when downscale is actually
+	// PrepareDownscaleMinDelayBeforeShutdownAnnotationKey is minimum duration between call to prepare-downscale endpoint, and when downscale is actually
 	// performed.
-	PrepareDownscaleMinDelayBeforeShutdown = "grafana.com/prepare-downscale-min-delay-before-shutdown"
+	PrepareDownscaleMinDelayBeforeShutdownAnnotationKey = "grafana.com/prepare-downscale-min-delay-before-shutdown"
 	// LastPrepareDownscaleAnnotationKey is a timestamp when prepare-downscale was called last time on the pod. (UTC, time.RFC3339 format)
 	LastPrepareDownscaleAnnotationKey = "grafana.com/last-prepare-downscale"
 

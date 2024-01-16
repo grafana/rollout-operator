@@ -124,11 +124,11 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 
 	prepareDownscaleMinDelayBeforeShutdown := time.Duration(0)
 	{
-		delayStr := annotations[config.PrepareDownscaleMinDelayBeforeShutdown]
+		delayStr := annotations[config.PrepareDownscaleMinDelayBeforeShutdownAnnotationKey]
 		if delayStr != "" {
 			parsedDelay, err := model.ParseDuration(delayStr)
 			if err != nil {
-				level.Warn(logger).Log("msg", fmt.Sprintf("ignoring misconfigured %v annotation that cannot be parsed as duration", config.PrepareDownscaleMinDelayBeforeShutdown), "err", err)
+				level.Warn(logger).Log("msg", fmt.Sprintf("ignoring misconfigured %v annotation that cannot be parsed as duration", config.PrepareDownscaleMinDelayBeforeShutdownAnnotationKey), "err", err)
 				// TODO: shall we abort downscale in this case?
 			} else {
 				prepareDownscaleMinDelayBeforeShutdown = time.Duration(parsedDelay)
@@ -326,7 +326,7 @@ func checkPrepareDownscaleMinDelayBeforeShutdown(ctx context.Context, logger log
 		t, err := getLastPrepareDownscaleAnnotationOnPod(ctx, api, ep.namespace, ep.podName)
 		if err != nil {
 			level.Error(logger).Log("msg", fmt.Sprintf("failed to check %s annotation on pod", config.LastPrepareDownscaleAnnotationKey), "pod", ep.podName, "err", err)
-			return deny(fmt.Sprintf("downscale of %s/%s in %s not allowed, as %s cannot be verified for pod %s", resourceType, resourceName, namespace, config.PrepareDownscaleMinDelayBeforeShutdown, ep.podName))
+			return deny(fmt.Sprintf("downscale of %s/%s in %s not allowed, as %s cannot be verified for pod %s", resourceType, resourceName, namespace, config.PrepareDownscaleMinDelayBeforeShutdownAnnotationKey, ep.podName))
 		}
 
 		if t.IsZero() {
@@ -341,11 +341,11 @@ func checkPrepareDownscaleMinDelayBeforeShutdown(ctx context.Context, logger log
 
 	elapsedSinceMaxTime := time.Since(maxTime)
 	if elapsedSinceMaxTime < minDelay {
-		level.Warn(logger).Log("msg", fmt.Sprintf("%s has not been reached for all pods yet, rejecting downscale", config.PrepareDownscaleMinDelayBeforeShutdown), "minDelay", minDelay, "elapsed", elapsedSinceMaxTime)
+		level.Warn(logger).Log("msg", fmt.Sprintf("%s has not been reached for all pods yet, rejecting downscale", config.PrepareDownscaleMinDelayBeforeShutdownAnnotationKey), "minDelay", minDelay, "elapsed", elapsedSinceMaxTime)
 		return deny(fmt.Sprintf("downscale of %s/%s in %s not allowed, as %s has not been reached for all pods. elapsed time: %v", resourceType, resourceName, namespace, config.MinTimeBetweenZonesDownscaleLabelKey, elapsedSinceMaxTime))
 	}
 
-	level.Info(logger).Log("msg", fmt.Sprintf("%s has been reached for all pods, allowing downscale", config.PrepareDownscaleMinDelayBeforeShutdown), "minDelay", minDelay, "elapsed", elapsedSinceMaxTime)
+	level.Info(logger).Log("msg", fmt.Sprintf("%s has been reached for all pods, allowing downscale", config.PrepareDownscaleMinDelayBeforeShutdownAnnotationKey), "minDelay", minDelay, "elapsed", elapsedSinceMaxTime)
 	return nil
 }
 

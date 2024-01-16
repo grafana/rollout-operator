@@ -262,9 +262,9 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	}
 
 	if params.minDelayBeforeShutdown != "" {
-		oldParams.MinDelayBeforeShutdownKey = config.PrepareDownscaleMinDelayBeforeShutdown
+		oldParams.MinDelayBeforeShutdownKey = config.PrepareDownscaleMinDelayBeforeShutdownAnnotationKey
 		oldParams.MinDelayBeforeShutdownValue = params.minDelayBeforeShutdown
-		newParams.MinDelayBeforeShutdownKey = config.PrepareDownscaleMinDelayBeforeShutdown
+		newParams.MinDelayBeforeShutdownKey = config.PrepareDownscaleMinDelayBeforeShutdownAnnotationKey
 		newParams.MinDelayBeforeShutdownValue = params.minDelayBeforeShutdown
 	}
 
