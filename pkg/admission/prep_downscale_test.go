@@ -101,6 +101,13 @@ func TestUpscaleWithLastPreparedPodsTimeWithDeletionEnabled(t *testing.T) {
 	testPrepDownscaleWebhookWithZoneTracker(t, 2, 5) // TODO: feature not implemented for zone-tracker.
 }
 
+func TestUpscaleWithLastPreparedPodsTimeWithDeletionDisabled(t *testing.T) {
+	ts := time.Now().Add(-1 * time.Hour).UTC()
+
+	testPrepDownscaleWebhook(t, 2, 5, withLastPreparedPodsTime(ts.Format(time.RFC3339)), withDeletePrepareDownscaleEnabled("false"), withCheckLastPreparedPodsTimeIsCleared(ts.Format(time.RFC3339)))
+	testPrepDownscaleWebhookWithZoneTracker(t, 2, 5) // TODO: feature not implemented for zone-tracker.
+}
+
 func newDebugLogger() log.Logger {
 	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	var options []level.Option
@@ -262,9 +269,9 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	}
 
 	if params.deletePrepareDownscaleEnabled != "" {
-		oldParams.DeleteDownscaleEndpointKey = config.PrepareDownscaleDeleteEnabledLabelKey
+		oldParams.DeleteDownscaleEndpointKey = config.PrepareDownscaleDeleteEnabledAnnotationKey
 		oldParams.DeleteDownscaleEndpointValue = params.deletePrepareDownscaleEnabled
-		newParams.DeleteDownscaleEndpointKey = config.PrepareDownscaleDeleteEnabledLabelKey
+		newParams.DeleteDownscaleEndpointKey = config.PrepareDownscaleDeleteEnabledAnnotationKey
 		newParams.DeleteDownscaleEndpointValue = params.deletePrepareDownscaleEnabled
 	}
 

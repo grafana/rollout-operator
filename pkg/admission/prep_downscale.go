@@ -21,6 +21,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -216,16 +217,16 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 }
 
 // This function will do HTTP DELETE on prepare-downscale endpoint for all pods up to newReplicas.
-// This feature must be enabled by setting config.PrepareDownscaleDeleteEnabledLabelKey to true.
+// This feature must be enabled by setting config.PrepareDownscaleDeleteEnabledAnnotationKey to true.
 // Call is only done on pods that have config.LastPrepareDownscaleAnnotationKey annotation set. This annotation is deleted after successful call to DELETE.
-func unpreparePodsForDownscale(ctx context.Context, logger log.Logger, api kubernetes.Interface, ar v1.AdmissionReview, oldInfo *objectInfo, newReplicas int, client httpClient) {
-	lbls, annotations, err := getLabelsAndAnnotations(ctx, ar, api, oldInfo)
+func unpreparePodsForDownscale(ctx context.Context, logger log.Logger, api kubernetes.Interface, ar v1.AdmissionReview, oldInfo *objectInfo, replicas int, client httpClient) {
+	_, annotations, err := getLabelsAndAnnotations(ctx, ar, api, oldInfo)
 	if err != nil {
 		level.Warn(logger).Log("msg", "failed to read annotations, can't call DELETE on prepare-downscale endpoints", "err", err)
 		return
 	}
 
-	if lbls[config.PrepareDownscaleDeleteEnabledLabelKey] != config.PrepareDownscaleDeleteEnabledLabelValue {
+	if annotations[config.PrepareDownscaleDeleteEnabledAnnotationKey] != config.PrepareDownscaleDeleteEnabledAnnotationValue {
 		// Calling deletion on prepare-downscale endpoint is not enabled on this resource.
 		return
 	}
@@ -242,7 +243,7 @@ func unpreparePodsForDownscale(ctx context.Context, logger log.Logger, api kuber
 		return
 	}
 
-	endpoints := createEndpoints(ar.Request.Namespace, ar.Request.Name, 0, newReplicas, port, path)
+	endpoints := createEndpoints(ar.Request.Namespace, ar.Request.Name, 0, replicas, port, path)
 
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.unpreparePodsForDownscale()")
 	defer span.Finish()
@@ -261,14 +262,18 @@ func unpreparePodsForDownscale(ctx context.Context, logger log.Logger, api kuber
 			t, err := getLastPrepareDownscaleAnnotationOnPod(ctx, api, ep.namespace, ep.podName)
 			switch {
 			case err != nil:
-				level.Warn(logger).Log("msg", "failed to get pod annotations, will call DELETE prepare-downscale", "pod", ep.podName, "err", err)
+				if k8serrors.IsNotFound(err) {
+					level.Info(logger).Log("msg", "pod not found, skipping DELETE prepare-downscale", "pod", ep.podName)
+					return nil
+				}
+				level.Warn(logger).Log("msg", "failed to get pod annotations, calling DELETE prepare-downscale", "pod", ep.podName, "err", err)
 
 			case t.IsZero():
 				level.Info(logger).Log("msg", "previous prepare-downscale endpoint call not found for pod, skipping DELETE prepare-downscale", "pod", ep.podName)
 				return nil
 
 			default:
-				level.Info(logger).Log("msg", "found previous prepare-downscale endpoint call for pod, will call DELETE prepare-downscale", "pod", ep.podName, "lastPrepareDownscale", t.Format(time.RFC3339))
+				level.Info(logger).Log("msg", "found previous prepare-downscale endpoint call for pod, will calling DELETE prepare-downscale", "pod", ep.podName, "lastPrepareDownscale", t.Format(time.RFC3339))
 			}
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodDelete, ep.url, nil)
@@ -290,9 +295,11 @@ func unpreparePodsForDownscale(ctx context.Context, logger log.Logger, api kuber
 
 			if resp.StatusCode/100 != 2 {
 				body, _ := io.ReadAll(resp.Body)
-				level.Error(logger).Log("msg", "HTTP DELETE request on downscale endpoint returned non-2xx status code", "status", resp.StatusCode, "response_body", string(body))
+				level.Error(logger).Log("msg", "DELETE prepare-downscale on pod returned non-2xx status code", "status", resp.StatusCode, "response_body", string(body))
 				return nil
 			}
+
+			level.Warn(logger).Log("msg", "called DELETE prepare-downscale on pod", "pod", ep.podName, "status", resp.StatusCode)
 
 			if err := deleteLastPrepareDownscaleAnnotationOnPod(ctx, api, ep.namespace, ep.podName); err != nil {
 				level.Warn(logger).Log("msg", fmt.Sprintf("failed to delete %v annotation on the pod", config.LastPrepareDownscaleAnnotationKey), "pod", ep.podName, "err", err)
