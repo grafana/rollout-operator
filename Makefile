@@ -25,12 +25,12 @@ rollout-operator: $(GO_FILES) ## Build the rollout-operator binary
 rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary with boringcrypto
 	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -tags netgo ./cmd/rollout-operator
 
-.PHONY: build-image 
+.PHONY: build-image
 build-image: clean ## Build the rollout-operator image
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: build-image-boringcrypto
-build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto 
+build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto
 	# Tags with the regular image repo for integration testing
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
@@ -65,6 +65,10 @@ integration/mock-service/.uptodate:
 .PHONY: lint
 lint: ## Run golangci-lint
 	golangci-lint run --timeout=5m
+
+.PHONY: fix-lint
+fix-lint: ## Automatically fix linting issues where possible
+	golangci-lint run --timeout=5m --fix
 
 .PHONY: clean
 clean: ## Run go clean and remove the rollout-operator binary

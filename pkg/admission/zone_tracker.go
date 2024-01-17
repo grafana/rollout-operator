@@ -11,14 +11,14 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/spanlogger"
 	"github.com/opentracing/opentracing-go"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/client-go/kubernetes"
-
-	"github.com/grafana/rollout-operator/pkg/config"
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 type zoneTracker struct {
