@@ -66,6 +66,10 @@ integration/mock-service/.uptodate:
 lint: ## Run golangci-lint
 	golangci-lint run --timeout=5m
 
+.PHONY: fix-lint
+fix-lint: ## Automatically fix linting issues where possible
+	golangci-lint run --timeout=5m --fix
+
 .PHONY: clean
 clean: ## Run go clean and remove the rollout-operator binary
 	rm -f rollout-operator
