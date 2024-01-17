@@ -1,15 +1,16 @@
 package instrumentation
 
 import (
+	"net/http"
+	"strconv"
+	"time"
+
 	"github.com/grafana/dskit/instrument"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"k8s.io/client-go/rest"
-	"net/http"
-	"strconv"
-	"time"
 )
 
 type kubernetesAPIClientInstrumentation struct {
