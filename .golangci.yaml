@@ -5,6 +5,7 @@ run:
 linters:
   enable:
     - gci
+    - gofmt
 
 linters-settings:
   errcheck:
