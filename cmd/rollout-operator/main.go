@@ -23,6 +23,8 @@ import (
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/client-go/kubernetes"
+	// Required to get the GCP auth provider working.
+	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -30,8 +32,6 @@ import (
 	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
-	// Required to get the GCP auth provider working.
-	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 )
 
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)

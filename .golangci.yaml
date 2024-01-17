@@ -1,6 +1,11 @@
 run:
   build-tags:
     - requires_docker
+
+linters:
+  enable:
+    - gci
+
 linters-settings:
   errcheck:
     # Use exclude-functions instead of exclude, since the GitHub Action's caching is broken.
@@ -8,3 +13,11 @@ linters-settings:
     # entry and ignore the changes in said file (thus breaking CI).
     exclude-functions:
       - (github.com/go-kit/log.Logger).Log
+
+  gci:
+    skip-generated: true
+    custom-order: true
+    sections:
+      - standard
+      - default
+      - prefix(github.com/grafana/rollout-operator)
