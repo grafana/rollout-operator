@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Add metrics for Kubernetes control plane calls. #118
+* [ENHANCEMENT] Add metrics for Kubernetes control plane calls. #118 #123
 
 ## v0.11.0
 

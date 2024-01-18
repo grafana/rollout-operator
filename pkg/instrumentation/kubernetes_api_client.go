@@ -1,7 +1,9 @@
 package instrumentation
 
 import (
+	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -44,7 +46,48 @@ func (k *kubernetesAPIClientInstrumentation) RoundTrip(req *http.Request) (*http
 
 	resp, err := k.next.RoundTrip(req)
 	duration := time.Since(start)
-	instrument.ObserveWithExemplar(req.Context(), k.hist.WithLabelValues(req.URL.EscapedPath(), req.Method, strconv.Itoa(resp.StatusCode)), duration.Seconds())
+	instrument.ObserveWithExemplar(req.Context(), k.hist.WithLabelValues(urlToResourceDescription(req.URL.EscapedPath()), req.Method, strconv.Itoa(resp.StatusCode)), duration.Seconds())
 
 	return resp, err
+}
+
+var (
+	// Reference: https://kubernetes.io/docs/reference/using-api/api-concepts/#resource-uris
+	groupAndVersion      = `(/api|/apis/(?P<group>[^/]+))/(?P<version>[^/]+)`
+	typeAndName          = `(?P<type>[^/]+)(/(?P<name>[^/]+)(/(?P<subresource>[^/]+))?)?`
+	namespacedPattern    = regexp.MustCompile(`^` + groupAndVersion + `/namespaces/[^/]+/` + typeAndName + `$`)
+	nonNamespacedPattern = regexp.MustCompile(`^` + groupAndVersion + `/` + typeAndName + `$`)
+)
+
+func urlToResourceDescription(path string) string {
+	match := namespacedPattern.FindStringSubmatch(path)
+	pattern := namespacedPattern
+
+	if match == nil {
+		match = nonNamespacedPattern.FindStringSubmatch(path)
+		pattern = nonNamespacedPattern
+
+		if match == nil {
+			// Path doesn't follow either expected pattern, give up.
+			return path
+		}
+	}
+
+	group := match[pattern.SubexpIndex("group")]
+	version := match[pattern.SubexpIndex("version")]
+	resourceType := match[pattern.SubexpIndex("type")]
+	name := match[pattern.SubexpIndex("name")]
+	subresourceType := match[pattern.SubexpIndex("subresource")]
+
+	if group == "" {
+		group = "core"
+	}
+
+	if subresourceType != "" {
+		return fmt.Sprintf("%s/%s/%s object %s subresource", group, version, resourceType, subresourceType)
+	} else if name == "" {
+		return fmt.Sprintf("%s/%s/%s collection", group, version, resourceType)
+	} else {
+		return fmt.Sprintf("%s/%s/%s object", group, version, resourceType)
+	}
 }
