@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [BUGFIX] Consider missing pods as not ready. #127
+
 ## v0.12.0
 
 * [ENHANCEMENT] Add metrics for Kubernetes control plane calls. #118 #123
