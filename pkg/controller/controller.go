@@ -404,7 +404,7 @@ func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (boo
 		)
 		return true, nil
 	}
-	
+
 	// The number of ready replicas reported by the StatefulSet matches the total number of
 	// replicas. However, there's still no guarantee that all pods are running. For example,
 	// a terminating pod (which we don't consider "ready") may have not yet failed the
