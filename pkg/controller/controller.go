@@ -411,7 +411,7 @@ func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (boo
 		return true, nil
 	}
 
-	notReadyPods := c.listNotReadyPodsByStatefulSet(pods)
+	notReadyPods := notRunningAndReady(pods)
 	if len(notReadyPods) == 0 {
 		return false, nil
 	}
@@ -439,7 +439,7 @@ func (c *RolloutController) listPodsByStatefulSet(sts *v1.StatefulSet) ([]*corev
 	return pods, nil
 }
 
-func (c *RolloutController) listNotReadyPodsByStatefulSet(pods []*corev1.Pod) []*corev1.Pod {
+func notRunningAndReady(pods []*corev1.Pod) []*corev1.Pod {
 	// Build a list of not-ready ones.
 	// We don't pre-allocate this list because most of the time we expect all pods are running and ready.
 	var notReady []*corev1.Pod
