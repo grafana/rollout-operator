@@ -387,15 +387,30 @@ func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (boo
 		return true, nil
 	}
 
+	// First we check that we see at least the number of pods desired by the Replicas field.
+	// Sometimes it takes a while until pods are created after terminating them.
+	// We consider the missing pods as not ready.
+	pods, err := c.listPodsByStatefulSet(sts)
+	if err != nil {
+		return false, err
+	}
+
+	if len(pods) < int(sts.Status.Replicas) {
+		level.Info(c.logger).Log(
+			"msg", "StatefulSet status is reporting all pods ready, but the rollout operator found less pods than expected",
+			"statefulset", sts.Name,
+			"expected_replicas", sts.Status.Replicas,
+			"found_pods", len(pods),
+		)
+		return true, nil
+	}
+
 	// The number of ready replicas reported by the StatefulSet matches the total number of
 	// replicas. However, there's still no guarantee that all pods are running. For example,
 	// a terminating pod (which we don't consider "ready") may have not yet failed the
 	// readiness probe for the consecutive number of times required to switch its status
 	// to not-ready. For this reason, we list all StatefulSet pods and check them one-by-one.
-	notReadyPods, err := c.listNotReadyPodsByStatefulSet(sts)
-	if err != nil {
-		return false, err
-	}
+	notReadyPods := notRunningAndReady(pods)
 	if len(notReadyPods) == 0 {
 		return false, nil
 	}
@@ -404,27 +419,30 @@ func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (boo
 	level.Info(c.logger).Log(
 		"msg", "StatefulSet status is reporting all pods ready, but the rollout operator has found some not-Ready pods",
 		"statefulset", sts.Name,
-		"not_ready_pods", strings.Join(util.PodNames(notReadyPods), " "))
+		"not_ready_pods", strings.Join(util.PodNames(notReadyPods), " "),
+	)
 
 	return true, nil
 }
 
-func (c *RolloutController) listNotReadyPodsByStatefulSet(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
+func (c *RolloutController) listPodsByStatefulSet(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
 	// Select all pods belonging to the input StatefulSet.
 	podsSelector := labels.NewSelector().Add(
 		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
 
-	all, err := c.listPods(podsSelector)
+	pods, err := c.listPods(podsSelector)
 	if err != nil {
 		return nil, err
 	}
+	return pods, nil
+}
 
-	// Build a list of not-ready ones. We don't pre-allocate this list because most of the time we
-	// expect all pods are running and ready.
+func notRunningAndReady(pods []*corev1.Pod) []*corev1.Pod {
+	// Build a list of not-ready ones.
+	// We don't pre-allocate this list because most of the time we expect all pods are running and ready.
 	var notReady []*corev1.Pod
-
-	for _, pod := range all {
+	for _, pod := range pods {
 		if !util.IsPodRunningAndReady(pod) {
 			notReady = append(notReady, pod)
 		}
@@ -432,8 +450,7 @@ func (c *RolloutController) listNotReadyPodsByStatefulSet(sts *v1.StatefulSet) (
 
 	// Sort pods in order to provide a deterministic behaviour.
 	util.SortPods(notReady)
-
-	return notReady, nil
+	return notReady
 }
 
 // listPods returns pods matching the provided labels selector. Please remember to call
