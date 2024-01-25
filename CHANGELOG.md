@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.13.0
+
 * [BUGFIX] Consider missing pods as not ready. #127
 
 ## v0.12.0
@@ -57,7 +59,7 @@
 
 * [ENHANCEMENT] Update Go to `1.21`. #77
 * [ENHANCEMENT] Updated dependencies, including: #78
-  * `github.com/k3d-io/k3d/v5` from `v5.5.2` to `v5.6.0` 
+  * `github.com/k3d-io/k3d/v5` from `v5.5.2` to `v5.6.0`
   * `k8s.io/api` from `v0.27.4` to `v0.28.1`
   * `k8s.io/apimachinery` from `v0.27.4` to `v0.28.1`
   * `k8s.io/client-go` from `v0.27.4` to `v0.28.1`
@@ -65,7 +67,7 @@
 ## v0.7.0
 
 * [ENHANCEMENT] Updated dependencies, including: #70
-  * `github.com/k3d-io/k3d/v5` from `v5.5.1` to `v5.5.2` 
+  * `github.com/k3d-io/k3d/v5` from `v5.5.1` to `v5.5.2`
   * `github.com/prometheus/client_golang` from `v1.15.1` to `v1.16.0`
   * `github.com/sirupsen/logrus` from `v1.9.2` to `v1.9.3`
   * `golang.org/x/sync` from `v0.2.0` to `v0.3.0`
