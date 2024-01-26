@@ -339,11 +339,11 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 
 		if currentReplicas == desiredReplicas {
 			// No change in the number of replicas: don't log because this will be the result most of the time.
-			// TODO: update scaleObj.Status.Replicas, if it differs from currentReplicas.
+			// TODO: if scaleObj is not nil, update scaleObj.Status.Replicas, if it differs from currentReplicas.
 			continue
 		}
 
-		direction := "down"
+		direction := ""
 		if desiredReplicas > currentReplicas {
 			direction = "up"
 		} else if desiredReplicas < currentReplicas {
@@ -359,8 +359,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 			return false, err
 		}
 
-		// TODO: update scaleObj.Status.Replicas, if it differs from desiredReplicas.
-
+		// TODO: if scaleObj is not nil, update scaleObj.Status.Replicas, if it differs from currentReplicas.
 		return true, nil
 	}
 
