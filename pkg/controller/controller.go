@@ -16,6 +16,7 @@ import (
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
@@ -24,6 +25,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	listersv1 "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/grafana/rollout-operator/pkg/config"
@@ -46,6 +48,8 @@ type RolloutController struct {
 	podsFactory          informers.SharedInformerFactory
 	podLister            corelisters.PodLister
 	podsInformer         cache.SharedIndexInformer
+	restMapper           meta.RESTMapper
+	scaleClient          scale.ScalesGetter
 	logger               log.Logger
 
 	// This bool is true if we should trigger a reconcile.
@@ -65,7 +69,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, namespace string, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -90,6 +94,8 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 		podsFactory:          podsFactory,
 		podLister:            podsInformer.Lister(),
 		podsInformer:         podsInformer.Informer(),
+		restMapper:           restMapper,
+		scaleClient:          scaleClient,
 		logger:               logger,
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
@@ -314,46 +320,48 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 	// are up-to-date on the models. If we modify the StatefulSet, they no longer are.
 	for _, sts := range sets {
 		currentReplicas := *sts.Spec.Replicas
+		reason := "to match leader"
 		desiredReplicas, err := desiredStsReplicas(groupName, sts, sets, c.logger)
 		if err != nil {
 			return false, err
 		}
 
-		if desiredReplicas > currentReplicas {
-			level.Info(c.logger).Log(
-				"msg", "scaling up statefulset to match leader",
-				"group", groupName,
-				"name", sts.GetName(),
-				"replicas", desiredReplicas,
-			)
-
-			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, desiredReplicas)
-			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+		if currentReplicas == desiredReplicas {
+			scaleObj, targetResource, err := getCustomScaleResourceForStatefulset(ctx, sts, c.restMapper, c.scaleClient)
 			if err != nil {
-				// If the patch failed, don't consider the statefulsets changed
 				return false, err
 			}
-
-			return true, nil
-		} else if desiredReplicas < currentReplicas {
-			level.Info(c.logger).Log(
-				"msg", "scaling down statefulset to match leader",
-				"group", groupName,
-				"name", sts.GetName(),
-				"replicas", desiredReplicas,
-			)
-
-			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, desiredReplicas)
-			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
-			if err != nil {
-				// If the patch failed, don't consider the statefulsets changed
-				return false, err
+			if scaleObj != nil {
+				desiredReplicas = scaleObj.Spec.Replicas
+				reason = fmt.Sprintf("to match target resource %s", targetResource)
 			}
-
-			return true, nil
 		}
 
-		// No change in the number of replicas: don't log because this will be the result most of the time.
+		if currentReplicas == desiredReplicas {
+			// No change in the number of replicas: don't log because this will be the result most of the time.
+			// TODO: update scaleObj.Status.Replicas, if it differs from currentReplicas.
+			continue
+		}
+
+		direction := "down"
+		if desiredReplicas > currentReplicas {
+			direction = "up"
+		} else if desiredReplicas < currentReplicas {
+			direction = "down"
+		}
+
+		level.Info(c.logger).Log("msg", fmt.Sprintf("scaling %s statefulset %s", direction, reason), "group", groupName, "name", sts.GetName(), "currentReplicas", currentReplicas, "desiredReplicas", desiredReplicas)
+
+		patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, desiredReplicas)
+		_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+		if err != nil {
+			// If the patch failed, don't consider the statefulsets changed
+			return false, err
+		}
+
+		// TODO: update scaleObj.Status.Replicas, if it differs from desiredReplicas.
+
+		return true, nil
 	}
 
 	return false, nil

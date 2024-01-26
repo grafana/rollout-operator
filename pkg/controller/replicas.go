@@ -11,6 +11,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/config"
 )
 
+// desiredStsReplicas returns desired replicas for statefulset based on leader-replicas, and minimum time between zone downscales.
 func desiredStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulSet, logger log.Logger) (int32, error) {
 	followerReplicas := *sts.Spec.Replicas
 	leader, err := getLeaderForStatefulSet(sts, all)

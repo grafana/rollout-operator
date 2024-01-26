@@ -22,7 +22,11 @@ import (
 	"github.com/prometheus/common/model"
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/admission/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/scale"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+
 	// Required to get the GCP auth provider working.
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
@@ -142,14 +146,31 @@ func main() {
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
 	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
 
-	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
+	if kubeConfig.UserAgent == "" {
+		kubeConfig.UserAgent = rest.DefaultKubernetesUserAgent()
+	}
+
+	// share the transport between all clients
+	httpClient, err := rest.HTTPClientFor(kubeConfig)
 	check(errors.Wrap(err, "failed to create Kubernetes client"))
+
+	kubeClient, err := kubernetes.NewForConfigAndClient(kubeConfig, httpClient)
+	check(errors.Wrap(err, "failed to create Kubernetes client"))
+
+	restMapper, err := apiutil.NewDynamicRESTMapper(kubeConfig, httpClient)
+	check(errors.Wrap(err, "failed to create REST Mapper"))
+
+	// we don't use cached discovery because DiscoveryScaleKindResolver does its own caching,
+	// so we want to re-fetch every time when we actually ask for it
+	scaleKindResolver := scale.NewDiscoveryScaleKindResolver(kubeClient.Discovery())
+	scaleClient, err := scale.NewForConfig(kubeConfig, restMapper, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
+	check(errors.Wrap(err, "failed to init scaleClient"))
 
 	// Start TLS server if enabled.
 	maybeStartTLSServer(cfg, logger, kubeClient, restart, metrics)
 
 	// Init the controller.
-	c := controller.NewRolloutController(kubeClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
+	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
 	check(errors.Wrap(c.Init(), "failed to init controller"))
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).
