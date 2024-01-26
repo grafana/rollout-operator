@@ -15,10 +15,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/apps/v1"
+	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
@@ -326,20 +328,34 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 			return false, err
 		}
 
+		// Parameters for updating scale subresource of target resource. (Only valid if scaleObj != nil).
+		var (
+			scaleObj   *autoscalingv1.Scale
+			targetGVR  schema.GroupVersionResource
+			targetName string
+		)
+
 		if currentReplicas == desiredReplicas {
-			scaleObj, targetResource, err := getCustomScaleResourceForStatefulset(ctx, sts, c.restMapper, c.scaleClient)
+			scaleObj, targetGVR, targetName, err = getCustomScaleResourceForStatefulset(ctx, sts, c.restMapper, c.scaleClient)
 			if err != nil {
 				return false, err
 			}
 			if scaleObj != nil {
 				desiredReplicas = scaleObj.Spec.Replicas
-				reason = fmt.Sprintf("to match target resource %s", targetResource)
+				reason = fmt.Sprintf("to match target resource %s/%s", targetGVR.Resource, targetName)
 			}
 		}
 
 		if currentReplicas == desiredReplicas {
+			// Make sure that scaleObject's status.replicas field is up-to-date.
+			if scaleObj != nil && scaleObj.Status.Replicas != desiredReplicas {
+				err := updateScaleStatusReplicas(ctx, c.scaleClient, sts.Namespace, targetGVR, targetName, desiredReplicas)
+				if err != nil {
+					return false, fmt.Errorf("failed to update target resource status.replicas: %w", err)
+				}
+			}
+
 			// No change in the number of replicas: don't log because this will be the result most of the time.
-			// TODO: if scaleObj is not nil, update scaleObj.Status.Replicas, if it differs from currentReplicas.
 			continue
 		}
 
@@ -359,7 +375,13 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 			return false, err
 		}
 
-		// TODO: if scaleObj is not nil, update scaleObj.Status.Replicas, if it differs from currentReplicas.
+		// Make sure that scaleObject's status.replicas field is up-to-date.
+		if scaleObj != nil && scaleObj.Status.Replicas != desiredReplicas {
+			err := updateScaleStatusReplicas(ctx, c.scaleClient, sts.Namespace, targetGVR, targetName, desiredReplicas)
+			if err != nil {
+				return false, fmt.Errorf("failed to update target resource status.replicas: %w", err)
+			}
+		}
 		return true, nil
 	}
 

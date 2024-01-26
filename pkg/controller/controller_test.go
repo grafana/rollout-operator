@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,17 +42,19 @@ func TestRolloutController_Reconcile(t *testing.T) {
 	customResourceGVK := schema.GroupVersionKind{Group: "my.group", Version: "v1", Kind: "CustomResource"}
 
 	tests := map[string]struct {
-		statefulSets                []runtime.Object
-		pods                        []runtime.Object
-		customResourceScaleReplicas int
-		kubePatchErr                error
-		kubeDeleteErr               error
-		kubeUpdateErr               error
-		getScaleErr                 error
-		expectedDeletedPods         []string
-		expectedUpdatedSets         []string
-		expectedPatchedSets         map[string][]string
-		expectedErr                 string
+		statefulSets                      []runtime.Object
+		pods                              []runtime.Object
+		customResourceScaleSpecReplicas   int
+		customResourceScaleStatusReplicas int
+		kubePatchErr                      error
+		kubeDeleteErr                     error
+		kubeUpdateErr                     error
+		getScaleErr                       error
+		expectedDeletedPods               []string
+		expectedUpdatedSets               []string
+		expectedPatchedSets               map[string][]string
+		expectedPatchedStatuses           map[string][]string
+		expectedErr                       string
 	}{
 		"should return error if some StatefulSet don't have OnDelete update strategy": {
 			statefulSets: []runtime.Object{
@@ -340,7 +343,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
 			},
-			expectedPatchedSets: map[string][]string{"ingester-zone-b": []string{`{"spec":{"replicas":2}}`}},
+			expectedPatchedSets: map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":2}}`}},
 		},
 		"should not return early and should delete pods if StatefulSet replicas cannot be scaled down": {
 			statefulSets: []runtime.Object{
@@ -398,8 +401,10 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
 				})),
 			},
-			customResourceScaleReplicas: 5,
-			expectedPatchedSets:         map[string][]string{"ingester-zone-b": []string{`{"spec":{"replicas":5}}`}},
+			customResourceScaleSpecReplicas:   5,
+			customResourceScaleStatusReplicas: 2,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":5}}`}},
+			expectedPatchedStatuses:           map[string][]string{"my.group/v1/customresources/test/scale": {`{"status":{"replicas":5}}`}},
 		},
 		"should return early and scale down statefulset based on target custom resource": {
 			statefulSets: []runtime.Object{
@@ -409,8 +414,34 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
 				})),
 			},
-			customResourceScaleReplicas: 2,
-			expectedPatchedSets:         map[string][]string{"ingester-zone-b": []string{`{"spec":{"replicas":2}}`}},
+			customResourceScaleSpecReplicas:   2,
+			customResourceScaleStatusReplicas: 3,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":2}}`}},
+			expectedPatchedStatuses:           map[string][]string{"my.group/v1/customresources/test/scale": {`{"status":{"replicas":2}}`}},
+		},
+		"should patch scale subresource status.replicas if it doesn't match statefulset": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+				})),
+			},
+			customResourceScaleSpecReplicas:   3,
+			customResourceScaleStatusReplicas: 5,
+			expectedPatchedSets:               nil,
+			expectedPatchedStatuses:           map[string][]string{"my.group/v1/customresources/test/scale": {`{"status":{"replicas":3}}`}},
+		},
+		"should NOT patch scale subresource status.replicas if it already matches statefulset": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+				})),
+			},
+			customResourceScaleSpecReplicas:   3,
+			customResourceScaleStatusReplicas: 3,
 		},
 		"should not fail if scaling based on custom resource fails due to invalid custom resource": {
 			statefulSets: []runtime.Object{
@@ -480,7 +511,6 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 			// Inject a hook to track all patched StatefulSets or return mocked errors.
 			var patchedStsNames map[string][]string
-
 			kubeClient.PrependReactor("patch", "*", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
 				if testData.kubePatchErr != nil {
 					return true, nil, testData.kubePatchErr
@@ -510,10 +540,24 @@ func TestRolloutController_Reconcile(t *testing.T) {
 						Namespace: action.GetNamespace(),
 					},
 					Spec: autoscalingv1.ScaleSpec{
-						Replicas: int32(testData.customResourceScaleReplicas),
+						Replicas: int32(testData.customResourceScaleSpecReplicas),
+					},
+					Status: autoscalingv1.ScaleStatus{
+						Replicas: int32(testData.customResourceScaleStatusReplicas),
 					},
 				}
 				return true, obj, nil
+			})
+
+			var patchedStatuses map[string][]string
+			scaleClient.AddReactor("patch", "*", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
+				patchAction := action.(ktesting.PatchAction)
+				name := path.Join(patchAction.GetResource().Group, patchAction.GetResource().Version, patchAction.GetResource().Resource, patchAction.GetName(), patchAction.GetSubresource())
+				if patchedStatuses == nil {
+					patchedStatuses = map[string][]string{}
+				}
+				patchedStatuses[name] = append(patchedStatuses[name], string(action.(ktesting.PatchAction).GetPatch()))
+				return false, nil, nil
 			})
 
 			// Create the controller and start informers.
@@ -539,6 +583,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 			// Assert patched StatefulSets.
 			assert.Equal(t, testData.expectedPatchedSets, patchedStsNames)
+			assert.Equal(t, testData.expectedPatchedStatuses, patchedStatuses)
 
 			for _, sts := range updatedSets {
 				// We expect the update hash to be stored as current revision when the StatefulSet is updated.
