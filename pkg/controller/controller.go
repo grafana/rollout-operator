@@ -350,16 +350,9 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 		}
 
 		if currentReplicas == desiredReplicas {
-			// Make sure that scaleObject's status.replicas field is up-to-date.
-			if scaleObj != nil && scaleObj.Status.Replicas != desiredReplicas {
-				level.Info(c.logger).Log("msg", "updating status.replicas on resource to match current replicas of statefulset", "resource", fmt.Sprintf("%s/%s", targetGVR.Resource, targetName), "name", sts.GetName(), "replicas", desiredReplicas)
-
-				err := updateResourceStatusReplicas(ctx, c.dynamicClient, sts.Namespace, targetGVR, targetName, desiredReplicas)
-				if err != nil {
-					return false, fmt.Errorf("failed to update resource %s/%s status.replicas: %w", targetGVR.Resource, targetName, err)
-				}
+			if err := updateStatusReplicasOnMirroredResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, targetGVR, targetName, desiredReplicas); err != nil {
+				return false, nil
 			}
-
 			// No change in the number of replicas: don't log because this will be the result most of the time.
 			continue
 		}
@@ -384,9 +377,8 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 		if scaleObj != nil && scaleObj.Status.Replicas != desiredReplicas {
 			level.Info(c.logger).Log("msg", "updating status.replicas on resource to match current replicas of statefulset", "resource", fmt.Sprintf("%s/%s", targetGVR.Resource, targetName), "name", sts.GetName(), "replicas", desiredReplicas)
 
-			err := updateResourceStatusReplicas(ctx, c.dynamicClient, sts.Namespace, targetGVR, targetName, desiredReplicas)
-			if err != nil {
-				return false, fmt.Errorf("failed to update resource %s/%s status.replicas: %w", targetGVR.Resource, targetName, err)
+			if err := updateStatusReplicasOnMirroredResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, targetGVR, targetName, desiredReplicas); err != nil {
+				return false, nil
 			}
 		}
 		return true, nil

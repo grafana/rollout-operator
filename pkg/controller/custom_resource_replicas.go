@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -75,9 +77,20 @@ func scaleForResourceMappings(ctx context.Context, namespace, name string, mappi
 	return nil, schema.GroupVersionResource{}, firstErr
 }
 
-// We need to update status.replicas on the resource (status subresource), not on the scale subresource.
-func updateResourceStatusReplicas(ctx context.Context, dynamicClient dynamic.Interface, namespace string, gvr schema.GroupVersionResource, name string, replicas int32) error {
+// updateStatusReplicasOnMirroredResourceIfNeeded makes sure that scaleObject's status.replicas field is up-to-date.
+func updateStatusReplicasOnMirroredResourceIfNeeded(ctx context.Context, log log.Logger, dynamicClient dynamic.Interface, sts *appsv1.StatefulSet, scaleObj *autoscalingv1.Scale, gvr schema.GroupVersionResource, resName string, replicas int32) error {
+	if scaleObj == nil || scaleObj.Status.Replicas == replicas {
+		// Nothing to do.
+		return nil
+	}
+
+	level.Info(log).Log("msg", "updating status.replicas on resource to match current replicas of statefulset", "resource", fmt.Sprintf("%s/%s", gvr.Resource, resName), "name", sts.GetName(), "replicas", replicas)
+
+	// We need to update status.replicas on the resource (status subresource), not on the scale subresource.
 	patch := fmt.Sprintf(`{"status":{"replicas":%d}}`, replicas)
-	_, err := dynamicClient.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, []byte(patch), metav1.PatchOptions{}, "status")
-	return err
+	_, err := dynamicClient.Resource(gvr).Namespace(sts.Namespace).Patch(ctx, resName, types.MergePatchType, []byte(patch), metav1.PatchOptions{}, "status")
+	if err != nil {
+		return fmt.Errorf("failed to update resource %s/%s status.replicas: %w", gvr.Resource, resName, err)
+	}
+	return nil
 }
