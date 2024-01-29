@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	scaleclient "k8s.io/client-go/scale"
 
 	"github.com/grafana/rollout-operator/pkg/config"
@@ -74,8 +75,8 @@ func scaleForResourceMappings(ctx context.Context, namespace, name string, mappi
 	return nil, schema.GroupVersionResource{}, firstErr
 }
 
-func updateScaleStatusReplicas(ctx context.Context, scalesGetter scaleclient.ScalesGetter, namespace string, gvr schema.GroupVersionResource, name string, replicas int32) error {
+func updateResourceStatusReplicas(ctx context.Context, dynamicClient dynamic.Interface, namespace string, gvr schema.GroupVersionResource, name string, replicas int32) error {
 	patch := fmt.Sprintf(`{"status":{"replicas":%d}}`, replicas)
-	_, err := scalesGetter.Scales(namespace).Patch(ctx, gvr, name, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+	_, err := dynamicClient.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, []byte(patch), metav1.PatchOptions{}, "status")
 	return err
 }

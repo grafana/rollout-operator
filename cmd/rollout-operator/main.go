@@ -166,11 +166,14 @@ func main() {
 	scaleClient, err := scale.NewForConfig(kubeConfig, restMapper, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
 	check(errors.Wrap(err, "failed to init scaleClient"))
 
+	dynamic, err := dynamic.NewForConfigAndClient(kubeConfig, httpClient)
+	check(errors.Wrap(err, "failed to init dynamicClient"))
+
 	// Start TLS server if enabled.
 	maybeStartTLSServer(cfg, logger, kubeClient, restart, metrics)
 
 	// Init the controller.
-	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
+	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamic, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
 	check(errors.Wrap(c.Init(), "failed to init controller"))
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).

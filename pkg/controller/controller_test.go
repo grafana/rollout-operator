@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakedynamic "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	fakescale "k8s.io/client-go/scale/fake"
 	ktesting "k8s.io/client-go/testing"
@@ -53,7 +54,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		expectedDeletedPods               []string
 		expectedUpdatedSets               []string
 		expectedPatchedSets               map[string][]string
-		expectedPatchedStatuses           map[string][]string
+		expectedPatchedResources          map[string][]string
 		expectedErr                       string
 	}{
 		"should return error if some StatefulSet don't have OnDelete update strategy": {
@@ -404,7 +405,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			customResourceScaleSpecReplicas:   5,
 			customResourceScaleStatusReplicas: 2,
 			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":5}}`}},
-			expectedPatchedStatuses:           map[string][]string{"my.group/v1/customresources/test/scale": {`{"status":{"replicas":5}}`}},
+			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`}},
 		},
 		"should return early and scale down statefulset based on target custom resource": {
 			statefulSets: []runtime.Object{
@@ -417,7 +418,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			customResourceScaleSpecReplicas:   2,
 			customResourceScaleStatusReplicas: 3,
 			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":2}}`}},
-			expectedPatchedStatuses:           map[string][]string{"my.group/v1/customresources/test/scale": {`{"status":{"replicas":2}}`}},
+			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":2}}`}},
 		},
 		"should patch scale subresource status.replicas if it doesn't match statefulset": {
 			statefulSets: []runtime.Object{
@@ -430,7 +431,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			customResourceScaleSpecReplicas:   3,
 			customResourceScaleStatusReplicas: 5,
 			expectedPatchedSets:               nil,
-			expectedPatchedStatuses:           map[string][]string{"my.group/v1/customresources/test/scale": {`{"status":{"replicas":3}}`}},
+			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":3}}`}},
 		},
 		"should NOT patch scale subresource status.replicas if it already matches statefulset": {
 			statefulSets: []runtime.Object{
@@ -549,20 +550,21 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				return true, obj, nil
 			})
 
+			dynamicClient := &fakedynamic.FakeDynamicClient{}
 			var patchedStatuses map[string][]string
-			scaleClient.AddReactor("patch", "*", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
+			dynamicClient.AddReactor("patch", "*", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
 				patchAction := action.(ktesting.PatchAction)
 				name := path.Join(patchAction.GetResource().Group, patchAction.GetResource().Version, patchAction.GetResource().Resource, patchAction.GetName(), patchAction.GetSubresource())
 				if patchedStatuses == nil {
 					patchedStatuses = map[string][]string{}
 				}
 				patchedStatuses[name] = append(patchedStatuses[name], string(action.(ktesting.PatchAction).GetPatch()))
-				return false, nil, nil
+				return true, nil, nil
 			})
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, testNamespace, 5*time.Second, reg, log.NewNopLogger())
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testNamespace, 5*time.Second, reg, log.NewNopLogger())
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -583,7 +585,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 			// Assert patched StatefulSets.
 			assert.Equal(t, testData.expectedPatchedSets, patchedStsNames)
-			assert.Equal(t, testData.expectedPatchedStatuses, patchedStatuses)
+			assert.Equal(t, testData.expectedPatchedResources, patchedStatuses)
 
 			for _, sts := range updatedSets {
 				// We expect the update hash to be stored as current revision when the StatefulSet is updated.
@@ -635,7 +637,7 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 
 	// Create the controller and start informers.
 	reg := prometheus.NewPedanticRegistry()
-	c := NewRolloutController(kubeClient, nil, nil, testNamespace, 5*time.Second, reg, log.NewNopLogger())
+	c := NewRolloutController(kubeClient, nil, nil, nil, testNamespace, 5*time.Second, reg, log.NewNopLogger())
 	require.NoError(t, c.Init())
 	defer c.Stop()
 

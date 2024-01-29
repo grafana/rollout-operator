@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listersv1 "k8s.io/client-go/listers/apps/v1"
@@ -52,6 +53,7 @@ type RolloutController struct {
 	podsInformer         cache.SharedIndexInformer
 	restMapper           meta.RESTMapper
 	scaleClient          scale.ScalesGetter
+	dynamicClient        dynamic.Interface
 	logger               log.Logger
 
 	// This bool is true if we should trigger a reconcile.
@@ -71,7 +73,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, namespace string, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -98,6 +100,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		podsInformer:         podsInformer.Informer(),
 		restMapper:           restMapper,
 		scaleClient:          scaleClient,
+		dynamicClient:        dynamic,
 		logger:               logger,
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
@@ -349,7 +352,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 		if currentReplicas == desiredReplicas {
 			// Make sure that scaleObject's status.replicas field is up-to-date.
 			if scaleObj != nil && scaleObj.Status.Replicas != desiredReplicas {
-				err := updateScaleStatusReplicas(ctx, c.scaleClient, sts.Namespace, targetGVR, targetName, desiredReplicas)
+				err := updateResourceStatusReplicas(ctx, c.dynamicClient, sts.Namespace, targetGVR, targetName, desiredReplicas)
 				if err != nil {
 					return false, fmt.Errorf("failed to update target resource status.replicas: %w", err)
 				}
@@ -377,7 +380,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 
 		// Make sure that scaleObject's status.replicas field is up-to-date.
 		if scaleObj != nil && scaleObj.Status.Replicas != desiredReplicas {
-			err := updateScaleStatusReplicas(ctx, c.scaleClient, sts.Namespace, targetGVR, targetName, desiredReplicas)
+			err := updateResourceStatusReplicas(ctx, c.dynamicClient, sts.Namespace, targetGVR, targetName, desiredReplicas)
 			if err != nil {
 				return false, fmt.Errorf("failed to update target resource status.replicas: %w", err)
 			}
