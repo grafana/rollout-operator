@@ -75,7 +75,7 @@ func scaleForResourceMappings(ctx context.Context, namespace, name string, mappi
 	return nil, schema.GroupVersionResource{}, firstErr
 }
 
-// We need to update status.replicas on the resource, not on the status subresource.
+// We need to update status.replicas on the resource, not on the scale subresource.
 func updateResourceStatusReplicas(ctx context.Context, dynamicClient dynamic.Interface, namespace string, gvr schema.GroupVersionResource, name string, replicas int32) error {
 	patch := fmt.Sprintf(`{"status":{"replicas":%d}}`, replicas)
 	_, err := dynamicClient.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, []byte(patch), metav1.PatchOptions{}, "status")
