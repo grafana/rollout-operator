@@ -345,16 +345,18 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 			}
 			if scaleObj != nil {
 				desiredReplicas = scaleObj.Spec.Replicas
-				reason = fmt.Sprintf("to match target resource %s/%s", targetGVR.Resource, targetName)
+				reason = fmt.Sprintf("to match resource %s/%s", targetGVR.Resource, targetName)
 			}
 		}
 
 		if currentReplicas == desiredReplicas {
 			// Make sure that scaleObject's status.replicas field is up-to-date.
 			if scaleObj != nil && scaleObj.Status.Replicas != desiredReplicas {
+				level.Info(c.logger).Log("msg", "updating status.replicas on resource to match current replicas of statefulset", "resource", fmt.Sprintf("%s/%s", targetGVR.Resource, targetName), "name", sts.GetName(), "replicas", desiredReplicas)
+
 				err := updateResourceStatusReplicas(ctx, c.dynamicClient, sts.Namespace, targetGVR, targetName, desiredReplicas)
 				if err != nil {
-					return false, fmt.Errorf("failed to update target resource status.replicas: %w", err)
+					return false, fmt.Errorf("failed to update resource %s/%s status.replicas: %w", targetGVR.Resource, targetName, err)
 				}
 			}
 
@@ -380,9 +382,11 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 
 		// Make sure that scaleObject's status.replicas field is up-to-date.
 		if scaleObj != nil && scaleObj.Status.Replicas != desiredReplicas {
+			level.Info(c.logger).Log("msg", "updating status.replicas on resource to match current replicas of statefulset", "resource", fmt.Sprintf("%s/%s", targetGVR.Resource, targetName), "name", sts.GetName(), "replicas", desiredReplicas)
+
 			err := updateResourceStatusReplicas(ctx, c.dynamicClient, sts.Namespace, targetGVR, targetName, desiredReplicas)
 			if err != nil {
-				return false, fmt.Errorf("failed to update target resource status.replicas: %w", err)
+				return false, fmt.Errorf("failed to update resource %s/%s status.replicas: %w", targetGVR.Resource, targetName, err)
 			}
 		}
 		return true, nil
