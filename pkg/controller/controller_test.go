@@ -465,6 +465,27 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			getScaleErr: fmt.Errorf("cannot get scale subresource"),
 			expectedErr: "", // reconciliation continues if scaling fails
 		},
+		"all statefulsets are considered": {
+			statefulSets: []runtime.Object{
+				// Does NOT have scaling annotations
+				mockStatefulSet("ingester-zone-a", withReplicas(4, 4)),
+				// Is already scaled.
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+				})),
+				mockStatefulSet("ingester-zone-c", withReplicas(2, 2), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+				})),
+			},
+			customResourceScaleSpecReplicas:   5,
+			customResourceScaleStatusReplicas: 2,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-c": {`{"spec":{"replicas":5}}`}},
+			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`, `{"status":{"replicas":5}}`}},
+		},
 	}
 
 	for testName, testData := range tests {
