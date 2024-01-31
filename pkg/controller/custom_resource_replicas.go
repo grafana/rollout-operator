@@ -18,6 +18,58 @@ import (
 	"github.com/grafana/rollout-operator/pkg/config"
 )
 
+func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx context.Context, groupName string, sets []*appsv1.StatefulSet) (bool, error) {
+	// Return early no matter what after scaling up or down a single StatefulSet to make sure that rollout-operator
+	// works with up-to-date models.
+	for _, sts := range sets {
+		currentReplicas := *sts.Spec.Replicas
+
+		scaleObj, referenceGVR, referenceName, err := getCustomScaleResourceForStatefulset(ctx, sts, c.restMapper, c.scaleClient)
+		if err != nil {
+			return false, err
+		}
+		if scaleObj == nil {
+			continue
+		}
+
+		referenceResource := fmt.Sprintf("%s/%s", referenceGVR.Resource, referenceName)
+
+		desiredReplicas := scaleObj.Spec.Replicas
+		if currentReplicas == desiredReplicas {
+			updateStatusReplicasOnMirroredResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
+			// No change in the number of replicas: don't log because this will be the result most of the time.
+			continue
+		}
+
+		direction := ""
+		if desiredReplicas > currentReplicas {
+			direction = "up"
+		} else if desiredReplicas < currentReplicas {
+			direction = "down"
+		}
+
+		level.Info(c.logger).Log("msg", fmt.Sprintf("scaling %s statefulset to match reference resource", direction),
+			"group", groupName,
+			"name", sts.GetName(),
+			"currentReplicas", currentReplicas,
+			"desiredReplicas", desiredReplicas,
+			"referenceResource", referenceResource,
+		)
+
+		if err := c.patchStatefulSetSpecReplicas(ctx, sts, desiredReplicas); err != nil {
+			return false, err
+		}
+
+		// Make sure that scaleObject's status.replicas field is up-to-date.
+		if scaleObj.Status.Replicas != desiredReplicas {
+			updateStatusReplicasOnMirroredResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
+		}
+		return true, nil
+	}
+
+	return false, nil
+}
+
 func getCustomScaleResourceForStatefulset(ctx context.Context, sts *appsv1.StatefulSet, restMapper meta.RESTMapper, scalesGetter scaleclient.ScalesGetter) (*autoscalingv1.Scale, schema.GroupVersionResource, string, error) {
 	annotations := sts.GetAnnotations()
 	name := annotations[config.RolloutMirrorReplicasFromResourceNameAnnotationKey]
@@ -27,8 +79,6 @@ func getCustomScaleResourceForStatefulset(ctx context.Context, sts *appsv1.State
 	}
 
 	apiVersion := annotations[config.RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey]
-
-	reference := fmt.Sprintf("%s/%s/%s", kind, sts.Namespace, name)
 
 	targetGV, err := schema.ParseGroupVersion(apiVersion)
 	if err != nil {
@@ -40,9 +90,11 @@ func getCustomScaleResourceForStatefulset(ctx context.Context, sts *appsv1.State
 		Kind:  kind,
 	}
 
+	reference := fmt.Sprintf("%s/%s", kind, name)
+
 	mappings, err := restMapper.RESTMappings(targetGK)
 	if err != nil {
-		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("unable to determine resource for scale target reference: %v", err)
+		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("unable to find custom resource mapping for reference resource %s: %v", reference, err)
 	}
 
 	scale, gvr, err := scaleForResourceMappings(ctx, sts.Namespace, name, mappings, scalesGetter)
@@ -78,19 +130,21 @@ func scaleForResourceMappings(ctx context.Context, namespace, name string, mappi
 }
 
 // updateStatusReplicasOnMirroredResourceIfNeeded makes sure that scaleObject's status.replicas field is up-to-date.
-func updateStatusReplicasOnMirroredResourceIfNeeded(ctx context.Context, log log.Logger, dynamicClient dynamic.Interface, sts *appsv1.StatefulSet, scaleObj *autoscalingv1.Scale, gvr schema.GroupVersionResource, resName string, replicas int32) error {
-	if scaleObj == nil || scaleObj.Status.Replicas == replicas {
+// if update fails, error is logged, but not returned to caller.
+func updateStatusReplicasOnMirroredResourceIfNeeded(ctx context.Context, log log.Logger, dynamicClient dynamic.Interface, sts *appsv1.StatefulSet, scaleObj *autoscalingv1.Scale, gvr schema.GroupVersionResource, resName string, replicas int32) {
+	if scaleObj.Status.Replicas == replicas {
 		// Nothing to do.
-		return nil
+		return
 	}
 
-	level.Info(log).Log("msg", "updating status.replicas on resource to match current replicas of statefulset", "resource", fmt.Sprintf("%s/%s", gvr.Resource, resName), "name", sts.GetName(), "replicas", replicas)
+	referenceResource := fmt.Sprintf("%s/%s", gvr.Resource, resName)
+
+	level.Info(log).Log("msg", "updating status.replicas on resource to match current replicas of statefulset", "name", sts.GetName(), "replicas", replicas, "referenceResource", referenceResource)
 
 	// We need to update status.replicas on the resource (status subresource), not on the scale subresource.
 	patch := fmt.Sprintf(`{"status":{"replicas":%d}}`, replicas)
 	_, err := dynamicClient.Resource(gvr).Namespace(sts.Namespace).Patch(ctx, resName, types.MergePatchType, []byte(patch), metav1.PatchOptions{}, "status")
 	if err != nil {
-		return fmt.Errorf("failed to update resource %s/%s status.replicas: %w", gvr.Resource, resName, err)
+		level.Warn(log).Log("msg", "updating status.replicas on reference resource to match current replicas of statefulset failed", "name", sts.GetName(), "replicas", replicas, "referenceResource", referenceResource, "err", err)
 	}
-	return nil
 }

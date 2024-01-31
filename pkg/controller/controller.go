@@ -15,12 +15,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/apps/v1"
-	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
@@ -317,71 +315,62 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	return nil
 }
 
-// adjustStatefulSetsGroupReplicas examines each StatefulSet and adjusts the number of replicas
-// if desired. The method returns "true" early if the number of replicas in any StatefulSet was adjusted.
+// adjustStatefulSetsGroupReplicas examines each StatefulSet and adjusts the number of replicas if desired.
+// The method returns "true" early if the number of replicas in any StatefulSet was adjusted.
 func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context, groupName string, sets []*v1.StatefulSet) (bool, error) {
+	updated, err := c.adjustStatefulSetsGroupReplicasToFollowLeader(ctx, groupName, sets)
+	if err != nil || updated {
+		return updated, err
+	}
+
+	return c.adjustStatefulSetsGroupReplicasToMirrorResource(ctx, groupName, sets)
+}
+
+// adjustStatefulSetsGroupReplicasToFollowLeader examines each StatefulSet and adjusts the number of replicas if desired,
+// based on leader-replicas, and minimum time between zone downscales.
+// The method returns "true" early if the number of replicas in any StatefulSet was adjusted.
+func (c *RolloutController) adjustStatefulSetsGroupReplicasToFollowLeader(ctx context.Context, groupName string, sets []*v1.StatefulSet) (bool, error) {
 	// Return early no matter what after scaling up or down a single StatefulSet. We do this because
 	// we need to be sure the number of replicas or any relevant annotations (like last downscale time)
 	// are up-to-date on the models. If we modify the StatefulSet, they no longer are.
 	for _, sts := range sets {
 		currentReplicas := *sts.Spec.Replicas
-		reason := "to match leader"
 		desiredReplicas, err := desiredStsReplicas(groupName, sts, sets, c.logger)
 		if err != nil {
 			return false, err
 		}
 
-		// Parameters for updating scale subresource of target resource. (Only valid if scaleObj != nil).
-		var (
-			scaleObj   *autoscalingv1.Scale
-			targetGVR  schema.GroupVersionResource
-			targetName string
-		)
+		if desiredReplicas > currentReplicas {
+			level.Info(c.logger).Log(
+				"msg", "scaling up statefulset to match leader",
+				"group", groupName,
+				"name", sts.GetName(),
+				"replicas", desiredReplicas,
+			)
 
-		if currentReplicas == desiredReplicas {
-			scaleObj, targetGVR, targetName, err = getCustomScaleResourceForStatefulset(ctx, sts, c.restMapper, c.scaleClient)
-			if err != nil {
+			if err := c.patchStatefulSetSpecReplicas(ctx, sts, desiredReplicas); err != nil {
+				// If the patch failed, don't consider the statefulsets changed
 				return false, err
 			}
-			if scaleObj != nil {
-				desiredReplicas = scaleObj.Spec.Replicas
-				reason = fmt.Sprintf("to match resource %s/%s", targetGVR.Resource, targetName)
-			}
-		}
 
-		if currentReplicas == desiredReplicas {
-			if err := updateStatusReplicasOnMirroredResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, targetGVR, targetName, desiredReplicas); err != nil {
-				return false, nil
-			}
-			// No change in the number of replicas: don't log because this will be the result most of the time.
-			continue
-		}
-
-		direction := ""
-		if desiredReplicas > currentReplicas {
-			direction = "up"
+			return true, nil
 		} else if desiredReplicas < currentReplicas {
-			direction = "down"
-		}
+			level.Info(c.logger).Log(
+				"msg", "scaling down statefulset to match leader",
+				"group", groupName,
+				"name", sts.GetName(),
+				"replicas", desiredReplicas,
+			)
 
-		level.Info(c.logger).Log("msg", fmt.Sprintf("scaling %s statefulset %s", direction, reason), "group", groupName, "name", sts.GetName(), "currentReplicas", currentReplicas, "desiredReplicas", desiredReplicas)
-
-		patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, desiredReplicas)
-		_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
-		if err != nil {
-			// If the patch failed, don't consider the statefulsets changed
-			return false, err
-		}
-
-		// Make sure that scaleObject's status.replicas field is up-to-date.
-		if scaleObj != nil && scaleObj.Status.Replicas != desiredReplicas {
-			level.Info(c.logger).Log("msg", "updating status.replicas on resource to match current replicas of statefulset", "resource", fmt.Sprintf("%s/%s", targetGVR.Resource, targetName), "name", sts.GetName(), "replicas", desiredReplicas)
-
-			if err := updateStatusReplicasOnMirroredResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, targetGVR, targetName, desiredReplicas); err != nil {
-				return false, nil
+			if err := c.patchStatefulSetSpecReplicas(ctx, sts, desiredReplicas); err != nil {
+				// If the patch failed, don't consider the statefulsets changed
+				return false, err
 			}
+
+			return true, nil
 		}
-		return true, nil
+
+		// No change in the number of replicas: don't log because this will be the result most of the time.
 	}
 
 	return false, nil
@@ -620,4 +609,10 @@ func (c *RolloutController) deleteMetricsForDecommissionedGroups(groups map[stri
 	for name := range groups {
 		c.discoveredGroups[name] = struct{}{}
 	}
+}
+
+func (c *RolloutController) patchStatefulSetSpecReplicas(ctx context.Context, sts *v1.StatefulSet, replicas int32) error {
+	patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas)
+	_, err := c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+	return err
 }
