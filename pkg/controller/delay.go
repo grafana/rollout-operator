@@ -67,7 +67,7 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 
 	elapsedSinceMaxTime := time.Since(maxPrepareTime)
 	if elapsedSinceMaxTime < delay {
-		return fmt.Errorf("downscale delay configured in %s annotation (%v) has not been reached for all pods. elapsed time: %v", config.RolloutDelayedDownscaleAnnotationKey, delay, elapsedSinceMaxTime)
+		return fmt.Errorf("configured downscale delay %v has not been reached for all pods. elapsed time: %v", delay, elapsedSinceMaxTime)
 	}
 
 	// We can proceed with downscale!
@@ -223,13 +223,13 @@ func callCancelDownscale(ctx context.Context, logger log.Logger, client httpClie
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
 			if err != nil {
-				level.Error(epLogger).Log("msg", fmt.Sprintf("error creating HTTP DELETE request to endpoint from %s annotation", config.RolloutDelayedDownscalePrepareUrlAnnotationKey), "err", err)
+				level.Error(epLogger).Log("msg", "error creating HTTP DELETE request to endpoint", "err", err)
 				return err
 			}
 
 			resp, err := client.Do(req)
 			if err != nil {
-				level.Error(epLogger).Log("msg", fmt.Sprintf("error sending HTTP DELETE request to endpoint from %s annotation", config.RolloutDelayedDownscalePrepareUrlAnnotationKey), "err", err)
+				level.Error(epLogger).Log("msg", "error sending HTTP DELETE request to endpoint", "err", err)
 				return err
 			}
 
@@ -238,10 +238,10 @@ func callCancelDownscale(ctx context.Context, logger log.Logger, client httpClie
 			if resp.StatusCode/100 != 2 {
 				err := errors.New("HTTP DELETE request returned non-2xx status code")
 				body, readError := io.ReadAll(resp.Body)
-				level.Error(epLogger).Log("msg", fmt.Sprintf("unexpected status code returned when calling DELETE on endpoint from %s annotation", config.RolloutDelayedDownscalePrepareUrlAnnotationKey), "status", resp.StatusCode, "response_body", string(body))
+				level.Error(epLogger).Log("msg", "unexpected status code returned when calling DELETE on endpoint", "status", resp.StatusCode, "response_body", string(body))
 				return errors.Join(err, readError)
 			}
-			level.Debug(epLogger).Log("msg", fmt.Sprintf("HTTP DELETE request to endpoint from %s annotation succeded", config.RolloutDelayedDownscalePrepareUrlAnnotationKey))
+			level.Debug(epLogger).Log("msg", "HTTP DELETE request to endpoint succeeded")
 			return nil
 		})
 	}
