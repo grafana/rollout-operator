@@ -1,3 +1,7 @@
+# Local settings (optional).
+# WARNING: do not commit to a repository!
+-include Makefile.local
+
 # Generate the default image tag based on the git branch and revision.
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 GIT_REVISION := $(shell git rev-parse --short HEAD)
