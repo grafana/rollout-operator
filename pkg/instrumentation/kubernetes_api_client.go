@@ -31,11 +31,15 @@ func InstrumentKubernetesAPIClient(cfg *rest.Config, reg prometheus.Registerer) 
 	)
 
 	cfg.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-		return &kubernetesAPIClientInstrumentation{
-			next: &nethttp.Transport{RoundTripper: rt},
-			hist: hist,
-		}
+		return newInstrumentation(rt, hist)
 	})
+}
+
+func newInstrumentation(rt http.RoundTripper, hist *prometheus.HistogramVec) *kubernetesAPIClientInstrumentation {
+	return &kubernetesAPIClientInstrumentation{
+		next: &nethttp.Transport{RoundTripper: rt},
+		hist: hist,
+	}
 }
 
 func (k *kubernetesAPIClientInstrumentation) RoundTrip(req *http.Request) (*http.Response, error) {

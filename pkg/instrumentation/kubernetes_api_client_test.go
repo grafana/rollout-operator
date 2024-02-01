@@ -1,8 +1,12 @@
 package instrumentation
 
 import (
+	"fmt"
+	"net/http"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,4 +50,34 @@ func TestURLExtraction(t *testing.T) {
 			require.Equal(t, expectedDescription, actualDescription)
 		})
 	}
+}
+
+func TestNilResponse(t *testing.T) {
+	h := promauto.With(nil).NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "histo",
+			Help:    "Time",
+			Buckets: []float64{1},
+		},
+		[]string{"path", "method", "status_code"},
+	)
+
+	noResponseRT := &noResponseRoundTripper{}
+	k := newInstrumentation(noResponseRT, h)
+
+	req, err := http.NewRequest("GET", "/test", nil)
+	require.NoError(t, err)
+	resp, err := k.RoundTrip(req)
+	require.Nil(t, resp)
+	require.ErrorIs(t, err, noResponseErr)
+
+	// It would be nice to test for metric, but it's tricky since we're measuring duration.
+}
+
+var noResponseErr = fmt.Errorf("error")
+
+type noResponseRoundTripper struct{}
+
+func (n noResponseRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return nil, noResponseErr
 }
