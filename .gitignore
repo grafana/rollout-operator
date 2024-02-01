@@ -1,3 +1,5 @@
 /rollout-operator
 integration/mock-service/mock-service
 .idea
+Makefile.local
+
