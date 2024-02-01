@@ -316,7 +316,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 }
 
 // adjustStatefulSetsGroupReplicas examines each StatefulSet and adjusts the number of replicas if desired.
-// The method returns "true" early if the number of replicas in any StatefulSet was adjusted.
+// The method returns "true" only if the number of replicas in any StatefulSet was adjusted.
 func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context, groupName string, sets []*v1.StatefulSet) (bool, error) {
 	updated, err := c.adjustStatefulSetsGroupReplicasToFollowLeader(ctx, groupName, sets)
 	if err != nil || updated {
