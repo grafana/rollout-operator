@@ -20,7 +20,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/config"
 )
 
-func cancelPossibleDelayedDownscale(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, replicas int32) {
+func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, replicas int32) {
 	delay, prepareURL, err := parseDelayedDownscaleAnnotations(sts.GetAnnotations())
 	if delay == 0 || prepareURL == nil {
 		return
@@ -33,9 +33,7 @@ func cancelPossibleDelayedDownscale(ctx context.Context, logger log.Logger, sts 
 
 	endpoints := createEndpoints(sts.Namespace, sts.GetName(), 0, int(replicas), prepareURL)
 
-	if err := callCancelDownscale(ctx, logger, httpClient, endpoints); err != nil {
-		level.Warn(logger).Log("msg", "failed to cancel delayed downscale", "name", sts.GetName(), "err", err)
-	}
+	callCancelDelayedDownscale(ctx, logger, httpClient, endpoints)
 }
 
 func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, currentReplicas, desiredReplicas int32) error {
@@ -52,9 +50,8 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	if desiredReplicas > currentReplicas {
 		endpoints := createEndpoints(sts.Namespace, sts.GetName(), 0, int(currentReplicas), prepareURL)
 
-		if err := callCancelDownscale(ctx, logger, httpClient, endpoints); err != nil {
-			level.Warn(logger).Log("msg", "failed to cancel delayed downscale", "name", sts.GetName(), "err", err)
-		}
+		callCancelDelayedDownscale(ctx, logger, httpClient, endpoints)
+		// Proceed even if calling cancel of delayed downscale fails. We call it repeatedly.
 		return nil
 	}
 
@@ -208,9 +205,9 @@ func callPrepareDownscaleAndReturnMaxPrepareTimestamp(ctx context.Context, logge
 	return maxTime, err
 }
 
-func callCancelDownscale(ctx context.Context, logger log.Logger, client httpClient, endpoints []endpoint) error {
+func callCancelDelayedDownscale(ctx context.Context, logger log.Logger, client httpClient, endpoints []endpoint) {
 	if len(endpoints) == 0 {
-		return nil
+		return
 	}
 
 	g, _ := errgroup.WithContext(ctx)
@@ -245,5 +242,6 @@ func callCancelDownscale(ctx context.Context, logger log.Logger, client httpClie
 			return nil
 		})
 	}
-	return g.Wait()
+	// We ignore errors, since all errors are already logged, and callers don't need i
+	_ = g.Wait()
 }

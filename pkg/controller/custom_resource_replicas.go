@@ -37,7 +37,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		desiredReplicas := scaleObj.Spec.Replicas
 		if currentReplicas == desiredReplicas {
 			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
-			cancelPossibleDelayedDownscale(ctx, c.logger, sts, client, desiredReplicas)
+			cancelDelayedDownscaleIfConfigured(ctx, c.logger, sts, client, desiredReplicas)
 			// No change in the number of replicas: don't log because this will be the result most of the time.
 			continue
 		}
