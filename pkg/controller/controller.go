@@ -16,14 +16,17 @@ import (
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listersv1 "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/grafana/rollout-operator/pkg/config"
@@ -46,6 +49,9 @@ type RolloutController struct {
 	podsFactory          informers.SharedInformerFactory
 	podLister            corelisters.PodLister
 	podsInformer         cache.SharedIndexInformer
+	restMapper           meta.RESTMapper
+	scaleClient          scale.ScalesGetter
+	dynamicClient        dynamic.Interface
 	logger               log.Logger
 
 	// This bool is true if we should trigger a reconcile.
@@ -65,7 +71,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, namespace string, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -90,6 +96,9 @@ func NewRolloutController(kubeClient kubernetes.Interface, namespace string, rec
 		podsFactory:          podsFactory,
 		podLister:            podsInformer.Lister(),
 		podsInformer:         podsInformer.Informer(),
+		restMapper:           restMapper,
+		scaleClient:          scaleClient,
+		dynamicClient:        dynamic,
 		logger:               logger,
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
@@ -306,9 +315,21 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	return nil
 }
 
-// adjustStatefulSetsGroupReplicas examines each StatefulSet and adjusts the number of replicas
-// if desired. The method returns "true" early if the number of replicas in any StatefulSet was adjusted.
+// adjustStatefulSetsGroupReplicas examines each StatefulSet and adjusts the number of replicas if desired.
+// The method returns "true" only if the number of replicas in any StatefulSet was adjusted.
 func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context, groupName string, sets []*v1.StatefulSet) (bool, error) {
+	updated, err := c.adjustStatefulSetsGroupReplicasToFollowLeader(ctx, groupName, sets)
+	if err != nil || updated {
+		return updated, err
+	}
+
+	return c.adjustStatefulSetsGroupReplicasToMirrorResource(ctx, groupName, sets)
+}
+
+// adjustStatefulSetsGroupReplicasToFollowLeader examines each StatefulSet and adjusts the number of replicas if desired,
+// based on leader-replicas, and minimum time between zone downscales.
+// The method returns "true" early if the number of replicas in any StatefulSet was adjusted.
+func (c *RolloutController) adjustStatefulSetsGroupReplicasToFollowLeader(ctx context.Context, groupName string, sets []*v1.StatefulSet) (bool, error) {
 	// Return early no matter what after scaling up or down a single StatefulSet. We do this because
 	// we need to be sure the number of replicas or any relevant annotations (like last downscale time)
 	// are up-to-date on the models. If we modify the StatefulSet, they no longer are.
@@ -327,9 +348,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 				"replicas", desiredReplicas,
 			)
 
-			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, desiredReplicas)
-			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
-			if err != nil {
+			if err := c.patchStatefulSetSpecReplicas(ctx, sts, desiredReplicas); err != nil {
 				// If the patch failed, don't consider the statefulsets changed
 				return false, err
 			}
@@ -343,9 +362,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 				"replicas", desiredReplicas,
 			)
 
-			patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, desiredReplicas)
-			_, err = c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
-			if err != nil {
+			if err := c.patchStatefulSetSpecReplicas(ctx, sts, desiredReplicas); err != nil {
 				// If the patch failed, don't consider the statefulsets changed
 				return false, err
 			}
@@ -592,4 +609,10 @@ func (c *RolloutController) deleteMetricsForDecommissionedGroups(groups map[stri
 	for name := range groups {
 		c.discoveredGroups[name] = struct{}{}
 	}
+}
+
+func (c *RolloutController) patchStatefulSetSpecReplicas(ctx context.Context, sts *v1.StatefulSet, replicas int32) error {
+	patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas)
+	_, err := c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+	return err
 }
