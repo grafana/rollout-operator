@@ -48,16 +48,20 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	}
 
 	if desiredReplicas > currentReplicas {
-		endpoints := createEndpoints(sts.Namespace, sts.GetName(), 0, int(currentReplicas), prepareURL)
-
-		callCancelDelayedDownscale(ctx, logger, httpClient, endpoints)
+		callCancelDelayedDownscale(ctx, logger, httpClient, createEndpoints(sts.Namespace, sts.GetName(), 0, int(currentReplicas), prepareURL))
 		// Proceed even if calling cancel of delayed downscale fails. We call it repeatedly.
 		return nil
 	}
 
-	// desiredReplicas < currentReplicas.
-	endpoints := createEndpoints(sts.Namespace, sts.GetName(), int(desiredReplicas), int(currentReplicas), prepareURL)
-	maxPrepareTime, err := callPrepareDownscaleAndReturnMaxPrepareTimestamp(ctx, logger, httpClient, endpoints)
+	{
+		// Replicas in [0, desired) interval should cancel any delayed downscale, if they have any.
+		cancelEndpoints := createEndpoints(sts.Namespace, sts.GetName(), 0, int(desiredReplicas), prepareURL)
+		callCancelDelayedDownscale(ctx, logger, httpClient, cancelEndpoints)
+	}
+
+	// Replicas in [desired, current) interval are going to be stopped.
+	downscaleEndpoints := createEndpoints(sts.Namespace, sts.GetName(), int(desiredReplicas), int(currentReplicas), prepareURL)
+	maxPrepareTime, err := callPrepareDownscaleAndReturnMaxPrepareTimestamp(ctx, logger, httpClient, downscaleEndpoints)
 	if err != nil {
 		return fmt.Errorf("failed prepare pods for delayed downscale: %v", err)
 	}
