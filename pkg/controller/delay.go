@@ -20,6 +20,24 @@ import (
 	"github.com/grafana/rollout-operator/pkg/config"
 )
 
+func cancelPossibleDelayedDownscale(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, replicas int32) {
+	delay, prepareURL, err := parseDelayedDownscaleAnnotations(sts.GetAnnotations())
+	if delay == 0 || prepareURL == nil {
+		return
+	}
+
+	if err != nil {
+		level.Warn(logger).Log("msg", "failed to cancel possible downscale due to error", "name", sts.GetName(), "err", err)
+		return
+	}
+
+	endpoints := createEndpoints(sts.Namespace, sts.GetName(), 0, int(replicas), prepareURL)
+
+	if err := callCancelDownscale(ctx, logger, httpClient, endpoints); err != nil {
+		level.Warn(logger).Log("msg", "failed to cancel delayed downscale", "name", sts.GetName(), "err", err)
+	}
+}
+
 func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, currentReplicas, desiredReplicas int32) error {
 	if currentReplicas == desiredReplicas {
 		// should not happen
@@ -31,20 +49,11 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 		return err
 	}
 
-	// If we're dealing with upscaling, we will cancel preparation of delayed downscale on all pods.
-	// If we fail for any pod, we have few options:
-	//  * we can block upscaling and retry later
-	//  * we allow upscaling, and call cancel of preparation later.
-	//  * we ignore the problem.
-	//
-	// TODO: For now, we ignore the problem, but this needs fixing.
-
 	if desiredReplicas > currentReplicas {
 		endpoints := createEndpoints(sts.Namespace, sts.GetName(), 0, int(currentReplicas), prepareURL)
 
-		err := callCancelDownscale(ctx, logger, httpClient, endpoints)
-		if err != nil {
-			level.Warn(logger).Log("msg", "failed to cancel delayed downscale", "err", err)
+		if err := callCancelDownscale(ctx, logger, httpClient, endpoints); err != nil {
+			level.Warn(logger).Log("msg", "failed to cancel delayed downscale", "name", sts.GetName(), "err", err)
 		}
 		return nil
 	}
