@@ -46,7 +46,11 @@ func (k *kubernetesAPIClientInstrumentation) RoundTrip(req *http.Request) (*http
 
 	resp, err := k.next.RoundTrip(req)
 	duration := time.Since(start)
-	instrument.ObserveWithExemplar(req.Context(), k.hist.WithLabelValues(urlToResourceDescription(req.URL.EscapedPath()), req.Method, strconv.Itoa(resp.StatusCode)), duration.Seconds())
+	statusCode := 0
+	if resp != nil {
+		statusCode = resp.StatusCode
+	}
+	instrument.ObserveWithExemplar(req.Context(), k.hist.WithLabelValues(urlToResourceDescription(req.URL.EscapedPath()), req.Method, strconv.Itoa(statusCode)), duration.Seconds())
 
 	return resp, err
 }
