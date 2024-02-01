@@ -394,7 +394,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			kubePatchErr:        errors.New("cannot patch StatefulSet right now"),
 			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
 		},
-		"should return early and scale up statefulset based on target custom resource": {
+		"should return early and scale up statefulset based on reference custom resource": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(2, 2), withAnnotations(map[string]string{
 					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
@@ -407,7 +407,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":5}}`}},
 			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`}},
 		},
-		"should return early and scale down statefulset based on target custom resource": {
+		"should return early and scale down statefulset based on reference custom resource": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
 					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",

@@ -36,7 +36,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 
 		desiredReplicas := scaleObj.Spec.Replicas
 		if currentReplicas == desiredReplicas {
-			updateStatusReplicasOnMirroredResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
+			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
 			// No change in the number of replicas: don't log because this will be the result most of the time.
 			continue
 		}
@@ -60,10 +60,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 			return false, err
 		}
 
-		// Make sure that scaleObject's status.replicas field is up-to-date.
-		if scaleObj.Status.Replicas != desiredReplicas {
-			updateStatusReplicasOnMirroredResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
-		}
+		updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
 		return true, nil
 	}
 
@@ -129,9 +126,9 @@ func scaleForResourceMappings(ctx context.Context, namespace, name string, mappi
 	return nil, schema.GroupVersionResource{}, firstErr
 }
 
-// updateStatusReplicasOnMirroredResourceIfNeeded makes sure that scaleObject's status.replicas field is up-to-date.
+// updateStatusReplicasOnReferenceResourceIfNeeded makes sure that scaleObject's status.replicas field is up-to-date.
 // if update fails, error is logged, but not returned to caller.
-func updateStatusReplicasOnMirroredResourceIfNeeded(ctx context.Context, log log.Logger, dynamicClient dynamic.Interface, sts *appsv1.StatefulSet, scaleObj *autoscalingv1.Scale, gvr schema.GroupVersionResource, resName string, replicas int32) {
+func updateStatusReplicasOnReferenceResourceIfNeeded(ctx context.Context, log log.Logger, dynamicClient dynamic.Interface, sts *appsv1.StatefulSet, scaleObj *autoscalingv1.Scale, gvr schema.GroupVersionResource, resName string, replicas int32) {
 	if scaleObj.Status.Replicas == replicas {
 		// Nothing to do.
 		return
