@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [FEATURE] Rollout-operator can now "mirror" replicas of statefulset from any resource. Original resource `status.replicas` is kept up-to-date with current number of replicas in target statefulset. #129
+* [FEATURE] Rollout-operator can now "mirror" replicas of statefulset from any reference resource. `status.replicas` field of reference resource is kept up-to-date with current number of replicas in target statefulset. #129
 
 ## v0.13.0
 
