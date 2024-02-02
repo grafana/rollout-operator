@@ -49,7 +49,7 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 
 	if desiredReplicas > currentReplicas {
 		callCancelDelayedDownscale(ctx, logger, httpClient, createEndpoints(sts.Namespace, sts.GetName(), 0, int(currentReplicas), prepareURL))
-		// Proceed even if calling cancel of delayed downscale fails. We call it repeatedly.
+		// Proceed even if calling cancel of delayed downscale fails. We call cancellation repeatedly, so it will happen during next reconcile.
 		return nil
 	}
 
@@ -72,6 +72,7 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	}
 
 	// We can proceed with downscale!
+	level.Info(logger).Log("msg", "downscale delay has been reached on all downscaled pods, proceeding with downscale", "name", sts.GetName(), "delay", delay, "elapsed", elapsedSinceMaxTime)
 	return nil
 }
 
