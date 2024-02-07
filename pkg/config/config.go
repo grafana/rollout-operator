@@ -35,4 +35,10 @@ const (
 	RolloutMirrorReplicasFromResourceNameAnnotationKey       = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-name"
 	RolloutMirrorReplicasFromResourceKindAnnotationKey       = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-kind"
 	RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-api-version" // optional
+
+	// RolloutDelayedDownscaleAnnotationKey configures delay for downscaling. Prepare-url must be configured as well, and must support GET, POST and DELETE methods.
+	RolloutDelayedDownscaleAnnotationKey = "grafana.com/rollout-delayed-downscale"
+
+	// RolloutDelayedDownscalePrepareUrlAnnotationKey is a full URL to prepare-downscale endpoint. Hostname will be replaced with pod's fully qualified domain name.
+	RolloutDelayedDownscalePrepareUrlAnnotationKey = "grafana.com/rollout-prepare-delayed-downscale-url"
 )

@@ -171,7 +171,7 @@ func main() {
 	maybeStartTLSServer(cfg, logger, kubeClient, restart, metrics)
 
 	// Init the controller.
-	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
+	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
 	check(errors.Wrap(c.Init(), "failed to init controller"))
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).

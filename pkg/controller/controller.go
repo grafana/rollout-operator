@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -39,6 +40,10 @@ const (
 	informerSyncInterval = 5 * time.Minute
 )
 
+type httpClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 type RolloutController struct {
 	kubeClient           kubernetes.Interface
 	namespace            string
@@ -52,6 +57,7 @@ type RolloutController struct {
 	restMapper           meta.RESTMapper
 	scaleClient          scale.ScalesGetter
 	dynamicClient        dynamic.Interface
+	httpClient           httpClient
 	logger               log.Logger
 
 	// This bool is true if we should trigger a reconcile.
@@ -71,7 +77,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -99,6 +105,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		restMapper:           restMapper,
 		scaleClient:          scaleClient,
 		dynamicClient:        dynamic,
+		httpClient:           client,
 		logger:               logger,
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
@@ -323,7 +330,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 		return updated, err
 	}
 
-	return c.adjustStatefulSetsGroupReplicasToMirrorResource(ctx, groupName, sets)
+	return c.adjustStatefulSetsGroupReplicasToMirrorResource(ctx, groupName, sets, c.httpClient)
 }
 
 // adjustStatefulSetsGroupReplicasToFollowLeader examines each StatefulSet and adjusts the number of replicas if desired,

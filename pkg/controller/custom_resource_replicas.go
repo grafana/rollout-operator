@@ -18,7 +18,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/config"
 )
 
-func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx context.Context, groupName string, sets []*appsv1.StatefulSet) (bool, error) {
+func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx context.Context, groupName string, sets []*appsv1.StatefulSet, client httpClient) (bool, error) {
 	// Return early no matter what after scaling up or down a single StatefulSet to make sure that rollout-operator
 	// works with up-to-date models.
 	for _, sts := range sets {
@@ -37,7 +37,19 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		desiredReplicas := scaleObj.Spec.Replicas
 		if currentReplicas == desiredReplicas {
 			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
+			cancelDelayedDownscaleIfConfigured(ctx, c.logger, sts, client, desiredReplicas)
 			// No change in the number of replicas: don't log because this will be the result most of the time.
+			continue
+		}
+
+		// We're going to change number of replicas on the statefulset.
+		// If there is delayed downscale configured on the statefulset, we will first handle delay part, and only if that succeeds,
+		// continue with downscaling or upscaling.
+		if err := checkScalingDelay(ctx, c.logger, sts, client, currentReplicas, desiredReplicas); err != nil {
+			level.Warn(c.logger).Log("msg", "not scaling statefulset due to failed scaling delay check", "group", groupName, "name", sts.GetName(), "currentReplicas", currentReplicas, "desiredReplicas", desiredReplicas, "err", err)
+
+			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, currentReplicas)
+			// If delay has not been reached, we can check next statefulset.
 			continue
 		}
 
