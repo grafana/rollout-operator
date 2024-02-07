@@ -59,6 +59,36 @@ This can be useful for automating the tedious scaling of stateful services like 
     - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
     - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
 
+## Scaling based on reference resource
+
+Rollout-operator can use custom resource with `scale` and `status` subresources as a "source of truth" for number of replicas for target statefulset. "Source of truth" resource (or "reference resource") is configured using following annotations:
+
+* `grafana.com/rollout-mirror-replicas-from-resource-name`
+* `grafana.com/rollout-mirror-replicas-from-resource-kind`
+* `grafana.com/rollout-mirror-replicas-from-resource-api-version`
+
+These annotations must be set on StatefulSet that rollout-operator will scale (ie. target statefulset). Number of replicas in target statefulset will follow replicas in reference resource (from `scale` subresource), while reference resource's `status` subresource will be updated with current number of replicas in target statefulset.
+
+This is similar to using `grafana.com/rollout-downscale-leader`, but reference resource can be any kind of resource, not just statefulset. Furthermore `grafana.com/min-time-between-zones-downscale` is not respected when using scaling based on reference resource.
+
+This can be used in combination with HorizontalPodAutoscaler, when it is undesireable to set number of replicas directly on target statefulset, because we want to add custom logic to the scaledown (see next point). In that case, HPA can update different "reference resource", and rollout-operator can "mirror" number of replicas from reference resource to target statefulset.
+
+## Delayed scaledown
+
+When using "Scaling based on reference resource", rollout-operator can be configured to delay the actual scaledown, and ask individual pods to prepare for delayed-scaledown.
+
+This is configured using `grafana.com/rollout-delayed-downscale` and `grafana.com/rollout-prepare-delayed-downscale-url` annotations on target statefulset. First annotation specificies minimum delay duration between call to "prepare-delayed-downscale-url" and actual scaledown, while the second annotation specifies the URL that is called on each pod. (URL is used as-is, but host is replaced with pod's fully qualified domain name.)
+
+Rollout operator has special requirements on the configured endpoint:
+* Endpoint must support `POST` and `DELETE` methods.
+* On `POST` method, pod is supposed to prepare for delayed downscale. Endpoint must also return 200 if preparation succeeded, and JSON body in format: `{"timestamp": 123456789}`, where timestamp is Unix timestamp in seconds when the preparation has been done.
+* Repeated calls with `POST` method should return the same timestamp, unless preparation was done again, and new waiting must start.
+* On `DELETE` method, pod should cancel the preparation for delayed downscale. If there's nothing to do, pod should ignore such `DELETE` request.  
+
+Rollout-operator does NOT remember any state of "delayed scaledown" preparation. It relies on timestamps returned from the pod endpoints on `POST` method. When no delayed scaledown is taking place, rollout-operator still keeps calling `DELETE` method regularly, to make sure that there is all pods have cancelled any previous "preparation of delayed scaledown".
+
+How is this different from `grafana.com/prepare-downscale` label used by `/admission/prepare-downscale` webhook? That webhook calls the "prepare-downscale" endpoint called *just* before the downscale is done, and pods are shutdown right after. On the other hand delayed downscale can take many hours. Delayed downscale and "prepare downscale" features can be used together.
+
 ## Operations
 
 ### HTTP endpoints
