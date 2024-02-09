@@ -31,6 +31,7 @@ sequenceDiagram
         RO->>CS: Reads "scale" subresource for replicas
         alt is downscale
             RO->>Pods: calls POST prepare-delayed-downscale-url on all downscaled pods
+            RO->>Pods: calls DELETE prepare-delayed-downscale-url on all non-downscaled pods
             RO->>SS: If delay has elapsed, updates spec.replicas
         else is upscale, or no change in replicas.
             RO->>Pods: calls DELETE prepare-delayed-downscale-url on all pods
