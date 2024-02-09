@@ -73,6 +73,19 @@ This is similar to using `grafana.com/rollout-downscale-leader`, but reference r
 
 This can be used in combination with HorizontalPodAutoscaler, when it is undesireable to set number of replicas directly on target statefulset, because we want to add custom logic to the scaledown (see next point). In that case, HPA can update different "reference resource", and rollout-operator can "mirror" number of replicas from reference resource to target statefulset.
 
+To support scaling based on reference resource, rollout-operator needs to be allowed to execute `get` and `patch` verbs on `status` and `scale` subresources of the custom resource. For example when using custom resource `replica-templates` from API group `rollout-operator.grafana.com`, you can add following to the RBAC:
+
+```yaml
+- apiGroups:
+  - rollout-operator.grafana.com
+  resources:
+  - replica-templates/scale
+  - replica-templates/status
+  verbs:
+  - get
+  - patch
+```
+
 ## Delayed scaledown
 
 When using "Scaling based on reference resource", rollout-operator can be configured to delay the actual scaledown, and ask individual pods to prepare for delayed-scaledown.
