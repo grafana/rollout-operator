@@ -5,6 +5,12 @@
 * [FEATURE] Rollout-operator can now "mirror" replicas of statefulset from any reference resource. `status.replicas` field of reference resource is kept up-to-date with current number of replicas in target statefulset. #129
 * [FEATURE] Rollout-operator can optionally delay downscale of statefulset when mirroring replicas from reference resource. Delay is coordinated with downscaled pods via new endpoint that pods must implement. #131
 * [ENHANCEMENT] Update Go to `1.22`. #133
+* [ENHANCEMENT] Updated dependencies, including: #137
+  * `github.com/prometheus/client_golang` from `v1.18.0` to `v1.19.0`
+  * `github.com/prometheus/common` from `v0.45.0` to `v0.49.0`
+  * `k8s.io/api` from `v0.29.0` to `v0.29.2`
+  * `k8s.io/apimachinery` from `v0.29.0` to `v0.29.2`
+  * `k8s.io/client-go` from `v0.29.0` to `v0.29.2`
 
 ## v0.13.0
 
