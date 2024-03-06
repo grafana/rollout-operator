@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.14.0
+
 * [FEATURE] Rollout-operator can now "mirror" replicas of statefulset from any reference resource. `status.replicas` field of reference resource is kept up-to-date with current number of replicas in target statefulset. #129
 * [FEATURE] Rollout-operator can optionally delay downscale of statefulset when mirroring replicas from reference resource. Delay is coordinated with downscaled pods via new endpoint that pods must implement. #131
 * [ENHANCEMENT] Update Go to `1.22`. #133
