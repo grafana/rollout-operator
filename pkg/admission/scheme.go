@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: Apache-2.0
 // Provenance-includes-location: https://github.com/kubernetes/kubernetes/blob/5539a5b80fe45cc04df4f53bd1047cd6d998bcf1/test/images/agnhost/webhook/scheme.go
 // Provenance-includes-license: Apache-2.0
 // Provenance-includes-copyright: The Kubernetes Authors.
