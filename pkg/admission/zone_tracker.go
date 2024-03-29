@@ -127,6 +127,19 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 			level.Warn(logger).Log("msg", msg, "err", err)
 			return deny(msg)
 		}
+		foundSts, err = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList, ar.Request.Name)
+		if err != nil {
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because an error occurred while checking whether StatefulSets have non-updated replicas",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas)
+			level.Warn(logger).Log("msg", msg, "err", err)
+			return deny(msg)
+		}
+		if foundSts != nil {
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
+			level.Warn(logger).Log("msg", msg)
+			return deny(msg)
+		}
 	}
 
 	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
