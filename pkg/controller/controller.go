@@ -75,9 +75,11 @@ type RolloutController struct {
 	// Keep track of discovered rollout groups. We use this information to delete metrics
 	// related to rollout groups that have been decommissioned.
 	discoveredGroups map[string]struct{}
+
+	deletionInterval time.Duration
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, deletionInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -109,6 +111,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		logger:               logger,
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
+		deletionInterval:     deletionInterval,
 		groupReconcileTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_group_reconciles_total",
 			Help: "Total number of reconciles started for a specific rollout group.",
@@ -527,6 +530,8 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 				continue
 			}
 
+			level.Info(c.logger).Log("msg", fmt.Sprintf("wait %s until terminating pod  %s", c.deletionInterval.String(), pod.Name))
+			time.Sleep(c.deletionInterval)
 			level.Info(c.logger).Log("msg", fmt.Sprintf("terminating pod %s", pod.Name))
 			if err := c.kubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
 				return false, errors.Wrapf(err, "failed to delete pod %s", pod.Name)
