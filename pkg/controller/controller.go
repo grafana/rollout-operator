@@ -66,6 +66,11 @@ type RolloutController struct {
 	// Used to signal when the controller should stop.
 	stopCh chan struct{}
 
+	//deletion interval related
+	deletionInterval time.Duration
+	//TODO: convert this to a map of rollout group to deletion ready name
+	deletionReadyTime time.Time
+
 	// Metrics.
 	groupReconcileTotal       *prometheus.CounterVec
 	groupReconcileFailed      *prometheus.CounterVec
@@ -77,7 +82,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, deletionInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -109,6 +114,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		logger:               logger,
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
+		deletionInterval:     deletionInterval,
 		groupReconcileTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_group_reconciles_total",
 			Help: "Total number of reconciles started for a specific rollout group.",
@@ -286,6 +292,17 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 		if hasNotReadyPods {
 			notReadySets = append(notReadySets, sts)
 		}
+	}
+
+	//if the cluster is stable, and deletion ready time is not set, then set the deletion ready time
+	if len(notReadySets) == 0 && c.deletionReadyTime.IsZero() {
+		c.deletionReadyTime = time.Now().Add(c.deletionInterval)
+		level.Info(c.logger).Log("msg", "sts group healthy, setting deletion ready time if empty ", "deletionReadyTime", c.deletionReadyTime)
+
+		//reset deletionReadyTime since the cluster is not ready anymore
+	} else if len(notReadySets) != 0 && !c.deletionReadyTime.IsZero() {
+		c.deletionReadyTime = time.Time{}
+		level.Info(c.logger).Log("msg", "sts group unhealthy, reset non-empty deletion ready time ", "deletionReadyTime", c.deletionReadyTime)
 	}
 
 	// Ensure there are not 2+ StatefulSets with not-Ready pods. If there are, we shouldn't proceed
@@ -518,10 +535,26 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			return true, nil
 		}
 
+		deletionHappened := false
+
+		now := time.Now()
+		// Check if deletionReadyTime is set
+		if c.deletionReadyTime.IsZero() {
+			// If not set, schedule deletion by setting deletionReadyTime to now + deletionInterval
+			c.deletionReadyTime = now.Add(c.deletionInterval)
+			level.Info(c.logger).Log("msg", "Scheduled future deletion for sts pods", "sts", sts.Name, "deletionReadyTime", c.deletionReadyTime)
+		}
+
+		if now.Before(c.deletionReadyTime) {
+			level.Info(c.logger).Log("msg", "Waiting deletion ready before deleting pod", "sts", sts.Name, "deletionReadyTime", c.deletionReadyTime)
+			return true, nil // Not yet time to delete; skip this loop iteration
+		}
+
 		for _, pod := range podsToUpdate[:numPods] {
 			// Skip if the pod is terminating. Since "Terminating" is not a pod Phase, we can infer it by checking
 			// if the pod is in the Running phase but the deletionTimestamp has been set (kubectl does something
 			// similar too).
+
 			if pod.Status.Phase == corev1.PodRunning && pod.DeletionTimestamp != nil {
 				level.Debug(c.logger).Log("msg", fmt.Sprintf("waiting for pod %s to be terminated", pod.Name))
 				continue
@@ -530,7 +563,17 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			level.Info(c.logger).Log("msg", fmt.Sprintf("terminating pod %s", pod.Name))
 			if err := c.kubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
 				return false, errors.Wrapf(err, "failed to delete pod %s", pod.Name)
+			} else {
+				deletionHappened = true
+				level.Info(c.logger).Log("msg", fmt.Sprintf("pod %s successfully terminated", pod.Name), "deletionReadyTime", c.deletionReadyTime)
 			}
+
+		}
+
+		//make sure no other pods can be deleted
+		if deletionHappened {
+			c.deletionReadyTime = time.Time{}
+			level.Info(c.logger).Log("msg", "reset deletion ready time since deletion just happened")
 		}
 
 		return true, nil
