@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [CHANGE] Rollout-operator is now released under an Apache License 2.0. #139, #140
+
 ## v0.14.0
 
 * [FEATURE] Rollout-operator can now "mirror" replicas of statefulset from any reference resource. `status.replicas` field of reference resource is kept up-to-date with current number of replicas in target statefulset. #129
