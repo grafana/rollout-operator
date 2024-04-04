@@ -67,7 +67,8 @@ type RolloutController struct {
 	stopCh chan struct{}
 
 	//deletion interval related
-	deletionInterval  time.Duration
+	deletionInterval time.Duration
+	//TODO: convert this to a map of rollout group to deletion ready name
 	deletionReadyTime time.Time
 
 	// Metrics.
@@ -535,6 +536,20 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 		}
 
 		deletionHappened := false
+
+		now := time.Now()
+		// Check if deletionReadyTime is set
+		if c.deletionReadyTime.IsZero() {
+			// If not set, schedule deletion by setting deletionReadyTime to now + deletionInterval
+			c.deletionReadyTime = now.Add(c.deletionInterval)
+			level.Info(c.logger).Log("msg", "Scheduled future deletion for sts pods", "sts", sts.Name, "deletionReadyTime", c.deletionReadyTime)
+		}
+
+		if now.Before(c.deletionReadyTime) {
+			level.Info(c.logger).Log("msg", "Waiting deletion ready before deleting pod", "sts", sts.Name, "deletionReadyTime", c.deletionReadyTime)
+			return true, nil // Not yet time to delete; skip this loop iteration
+		}
+
 		for _, pod := range podsToUpdate[:numPods] {
 			// Skip if the pod is terminating. Since "Terminating" is not a pod Phase, we can infer it by checking
 			// if the pod is in the Running phase but the deletionTimestamp has been set (kubectl does something
@@ -543,19 +558,6 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			if pod.Status.Phase == corev1.PodRunning && pod.DeletionTimestamp != nil {
 				level.Debug(c.logger).Log("msg", fmt.Sprintf("waiting for pod %s to be terminated", pod.Name))
 				continue
-			}
-
-			now := time.Now()
-			// Check if deletionReadyTime is set
-			if c.deletionReadyTime.IsZero() {
-				// If not set, schedule deletion by setting deletionReadyTime to now + deletionInterval
-				c.deletionReadyTime = now.Add(c.deletionInterval)
-				level.Info(c.logger).Log("msg", "Scheduled future deletion for pod", "pod", pod.Name, "deletionReadyTime", c.deletionReadyTime)
-				break // Skip this loop iteration; wait for the deletionReadyTime
-				// Check if it's time to delete the pod
-			} else if now.Before(c.deletionReadyTime) {
-				level.Info(c.logger).Log("msg", "Waiting deletion ready before deleting pod", "pod", pod.Name, "deletionReadyTime", c.deletionReadyTime)
-				break // Not yet time to delete; skip this loop iteration
 			}
 
 			level.Info(c.logger).Log("msg", fmt.Sprintf("terminating pod %s", pod.Name))
@@ -571,7 +573,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 		//make sure no other pods can be deleted
 		if deletionHappened {
 			c.deletionReadyTime = time.Time{}
-			level.Info(c.logger).Log("msg", fmt.Sprintf("reset deletion ready time since deletion just happened"))
+			level.Info(c.logger).Log("msg", "reset deletion ready time since deletion just happened")
 		}
 
 		return true, nil

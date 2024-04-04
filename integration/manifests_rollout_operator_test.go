@@ -59,6 +59,7 @@ func rolloutOperatorDeployment(namespace string, webhook bool) *appsv1.Deploymen
 		fmt.Sprintf("-kubernetes.namespace=%s", namespace),
 		"-reconcile.interval=1s",
 		"-log.level=debug",
+		"-deletion-interval=0s",
 	}
 	if webhook {
 		args = append(args,
