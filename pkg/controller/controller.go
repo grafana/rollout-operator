@@ -66,6 +66,10 @@ type RolloutController struct {
 	// Used to signal when the controller should stop.
 	stopCh chan struct{}
 
+	//deletion interval related
+	deletionInterval  time.Duration
+	deletionReadyTime time.Time
+
 	// Metrics.
 	groupReconcileTotal       *prometheus.CounterVec
 	groupReconcileFailed      *prometheus.CounterVec
@@ -75,8 +79,6 @@ type RolloutController struct {
 	// Keep track of discovered rollout groups. We use this information to delete metrics
 	// related to rollout groups that have been decommissioned.
 	discoveredGroups map[string]struct{}
-
-	deletionInterval time.Duration
 }
 
 func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, deletionInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
@@ -289,6 +291,17 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 		if hasNotReadyPods {
 			notReadySets = append(notReadySets, sts)
 		}
+	}
+
+	//if the cluster is stable, and deletion ready time is not set, then set the deletion ready time
+	if len(notReadySets) == 0 && c.deletionReadyTime.IsZero() {
+		c.deletionReadyTime = time.Now().Add(c.deletionInterval)
+		level.Info(c.logger).Log("msg", "sts group healthy, setting deletion ready time if empty ", "deletionReadyTime", c.deletionReadyTime)
+
+		//reset deletionReadyTime since the cluster is not ready anymore
+	} else if len(notReadySets) != 0 && !c.deletionReadyTime.IsZero() {
+		c.deletionReadyTime = time.Time{}
+		level.Info(c.logger).Log("msg", "sts group unhealthy, reset non-empty deletion ready time ", "deletionReadyTime", c.deletionReadyTime)
 	}
 
 	// Ensure there are not 2+ StatefulSets with not-Ready pods. If there are, we shouldn't proceed
@@ -521,21 +534,44 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			return true, nil
 		}
 
+		deletionHappened := false
 		for _, pod := range podsToUpdate[:numPods] {
 			// Skip if the pod is terminating. Since "Terminating" is not a pod Phase, we can infer it by checking
 			// if the pod is in the Running phase but the deletionTimestamp has been set (kubectl does something
 			// similar too).
+
 			if pod.Status.Phase == corev1.PodRunning && pod.DeletionTimestamp != nil {
 				level.Debug(c.logger).Log("msg", fmt.Sprintf("waiting for pod %s to be terminated", pod.Name))
 				continue
 			}
 
-			level.Info(c.logger).Log("msg", fmt.Sprintf("wait %s until terminating pod  %s", c.deletionInterval.String(), pod.Name))
-			time.Sleep(c.deletionInterval)
+			now := time.Now()
+			// Check if deletionReadyTime is set
+			if c.deletionReadyTime.IsZero() {
+				// If not set, schedule deletion by setting deletionReadyTime to now + deletionInterval
+				c.deletionReadyTime = now.Add(c.deletionInterval)
+				level.Info(c.logger).Log("msg", "Scheduled future deletion for pod", "pod", pod.Name, "deletionReadyTime", c.deletionReadyTime)
+				break // Skip this loop iteration; wait for the deletionReadyTime
+				// Check if it's time to delete the pod
+			} else if now.Before(c.deletionReadyTime) {
+				level.Info(c.logger).Log("msg", "Waiting deletion ready before deleting pod", "pod", pod.Name, "deletionReadyTime", c.deletionReadyTime)
+				break // Not yet time to delete; skip this loop iteration
+			}
+
 			level.Info(c.logger).Log("msg", fmt.Sprintf("terminating pod %s", pod.Name))
 			if err := c.kubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
 				return false, errors.Wrapf(err, "failed to delete pod %s", pod.Name)
+			} else {
+				deletionHappened = true
+				level.Info(c.logger).Log("msg", fmt.Sprintf("pod %s successfully terminated", pod.Name), "deletionReadyTime", c.deletionReadyTime)
 			}
+
+		}
+
+		//make sure no other pods can be deleted
+		if deletionHappened {
+			c.deletionReadyTime = time.Time{}
+			level.Info(c.logger).Log("msg", fmt.Sprintf("reset deletion ready time since deletion just happened"))
 		}
 
 		return true, nil
