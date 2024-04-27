@@ -68,7 +68,7 @@ type RolloutController struct {
 
 	//deletion interval related
 	delayBetweenSts time.Duration
-	lastUpdatedSts  string
+	lastUpdatedSts  *v1.StatefulSet
 	lastUpdatedTime time.Time
 
 	// Metrics.
@@ -115,7 +115,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
 		delayBetweenSts:      delayBetweenSts,
-		lastUpdatedSts:       "",
+		lastUpdatedSts:       nil,
 		lastUpdatedTime:      time.Time{},
 		groupReconcileTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_group_reconciles_total",
@@ -311,11 +311,13 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 		level.Info(c.logger).Log("msg", "a StatefulSet has some not-Ready pods, reconcile it first", "statefulset", notReadySets[0].Name)
 		sets = util.MoveStatefulSetToFront(sets, notReadySets[0])
 		// sts could become not ready by other activities like UKI, we should consider this as last updated sts
-		c.updateLastUpdatedSts(notReadySets[0].Name)
+		c.updateLastUpdatedSts(notReadySets[0])
 	}
 
 	for _, sts := range sets {
-		if !c.canUpdateSts(sts.Name) {
+		if !c.canUpdateSts(sts) {
+			level.Info(c.logger).Log("msg", "delaying reconcile due to last updated sts is not ready yet",
+				"last", c.lastUpdatedSts.Name, "curr", sts.Name, "delay", c.delayBetweenSts)
 			time.Sleep(c.delayBetweenSts)
 			return nil
 		}
@@ -323,14 +325,14 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 		if err != nil {
 			// Do not continue with other StatefulSets because this StatefulSet
 			// is expected to be successfully updated before proceeding.
-			c.updateLastUpdatedSts(sts.Name)
+			c.updateLastUpdatedSts(sts)
 			return errors.Wrapf(err, "failed to update StatefulSet %s", sts.Name)
 		}
 
 		if ongoing {
 			// Do not continue with other StatefulSets because this StatefulSet
 			// update is still ongoing.
-			c.updateLastUpdatedSts(sts.Name)
+			c.updateLastUpdatedSts(sts)
 			return nil
 		}
 	}
@@ -504,16 +506,15 @@ func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error)
 	return pods, nil
 }
 
-func (c *RolloutController) canUpdateSts(sts string) bool {
-	if c.lastUpdatedSts == "" || c.lastUpdatedSts == sts {
+func (c *RolloutController) canUpdateSts(sts *v1.StatefulSet) bool {
+	if c.lastUpdatedSts == nil || c.lastUpdatedSts.Name == sts.Name {
 		// no need to wait within the same sts updates
 		return true
 	}
 	return time.Since(c.lastUpdatedTime) > c.delayBetweenSts
 }
 
-func (c *RolloutController) updateLastUpdatedSts(sts string) {
-	level.Info(c.logger).Log("msg", "update last updated sts", "prev", c.lastUpdatedSts, "curr", sts)
+func (c *RolloutController) updateLastUpdatedSts(sts *v1.StatefulSet) {
 	c.lastUpdatedSts = sts
 	c.lastUpdatedTime = time.Now()
 }
