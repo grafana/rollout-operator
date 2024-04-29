@@ -315,17 +315,10 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	}
 
 	for _, sts := range sets {
-		if !c.canUpdateSts(sts) {
-			level.Info(c.logger).Log("msg", "delaying reconcile due to last updated sts is not ready yet",
-				"last", c.lastUpdatedSts.Name, "curr", sts.Name, "delay", c.delayBetweenSts)
-			time.Sleep(c.delayBetweenSts)
-			return nil
-		}
 		ongoing, err := c.updateStatefulSetPods(ctx, sts)
 		if err != nil {
 			// Do not continue with other StatefulSets because this StatefulSet
 			// is expected to be successfully updated before proceeding.
-			c.updateLastUpdatedSts(sts)
 			return errors.Wrapf(err, "failed to update StatefulSet %s", sts.Name)
 		}
 
@@ -517,6 +510,7 @@ func (c *RolloutController) canUpdateSts(sts *v1.StatefulSet) bool {
 func (c *RolloutController) updateLastUpdatedSts(sts *v1.StatefulSet) {
 	c.lastUpdatedSts = sts
 	c.lastUpdatedTime = time.Now()
+	level.Debug(c.logger).Log("msg", "updated last updated sts", "sts", sts.Name, "time", c.lastUpdatedTime)
 }
 
 func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.StatefulSet) (bool, error) {
@@ -528,6 +522,19 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 	}
 
 	if len(podsToUpdate) > 0 {
+		if !c.canUpdateSts(sts) {
+			// only check canUpdateSts if the current sts has pods to be updated
+			level.Info(c.logger).Log("msg", "delaying reconcile between StatefulSets updates",
+				"curr", sts.Name, "last", c.lastUpdatedSts.Name,
+				"delay", c.delayBetweenSts, "pods_to_update", len(podsToUpdate))
+			time.Sleep(c.delayBetweenSts)
+			// MUST return here:
+			// 1. pods state could change during the delay period, scan the entire cluster again
+			// 2. since we didn't actually update current sts, the last updated sts should not be changed
+			// 3. throw errors to not proceed with other StatefulSets
+			return false, errors.New("delaying reconcile between StatefulSets updates")
+		}
+
 		maxUnavailable := getMaxUnavailableForStatefulSet(sts, c.logger)
 		numNotReady := int(sts.Status.Replicas - sts.Status.ReadyReplicas)
 
