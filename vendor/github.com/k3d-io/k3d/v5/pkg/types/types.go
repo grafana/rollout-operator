@@ -1,5 +1,5 @@
 /*
-Copyright © 2020-2022 The k3d Author(s)
+Copyright © 2020-2023 The k3d Author(s)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -307,6 +307,7 @@ type Node struct {
 	State          NodeState             // filled automatically
 	IP             NodeIP                // filled automatically -> refers solely to the cluster network
 	HookActions    []NodeHook            `json:"hooks,omitempty"`
+	K3dEntrypoint  bool
 }
 
 // ServerOpts describes some additional server role specific opts

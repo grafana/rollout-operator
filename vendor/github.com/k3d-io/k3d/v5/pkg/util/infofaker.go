@@ -1,5 +1,5 @@
 /*
-Copyright © 2020-2022 The k3d Author(s)
+Copyright © 2020-2023 The k3d Author(s)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -83,7 +83,7 @@ func MakeFakeMeminfo(memoryBytes int64, nodeName string) (string, error) {
 		return "", fmt.Errorf("failed to get fake meminfo path for node '%s': %w", nodeName, err)
 	}
 	fakememinfo, err := os.Create(fakeMeminfoPath)
-	defer fakememinfo.Close()
+	defer fakememinfo.Close() // nolint
 	if err != nil {
 		return "", fmt.Errorf("failed to create fake meminfo path '%s': %w", fakeMeminfoPath, err)
 	}
