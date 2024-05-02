@@ -3,6 +3,11 @@
 ## main / unreleased
 
 * [CHANGE] Rollout-operator is now released under an Apache License 2.0. #139, #140
+* [ENHANCEMENT] Updated dependencies, including: #143
+  * `github.com/prometheus/common` from `v0.49.0` to `v0.53.0`
+  * `k8s.io/api` from `v0.29.2` to `v0.30.0`
+  * `k8s.io/apimachinery` from `v0.29.2` to `v0.30.0`
+  * `k8s.io/client-go` from `v0.29.2` to `v0.30.0`
 
 ## v0.14.0
 
