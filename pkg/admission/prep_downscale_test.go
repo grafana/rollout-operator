@@ -3,12 +3,15 @@ package admission
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"text/template"
 	"time"
@@ -123,9 +126,14 @@ type templateParams struct {
 
 type fakeHttpClient struct {
 	statusCode int
+	mockDo     func(*http.Request) (*http.Response, error)
 }
 
 func (f *fakeHttpClient) Do(req *http.Request) (resp *http.Response, err error) {
+	if f.mockDo != nil {
+		return f.mockDo(req)
+	}
+
 	return &http.Response{
 		StatusCode: f.statusCode,
 		Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
@@ -266,6 +274,106 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		require.NoError(t, err)
 		require.NotNil(t, updatedSts.Annotations)
 		require.NotNil(t, updatedSts.Annotations[config.LastDownscaleAnnotationKey])
+	}
+}
+
+func TestSendPrepareShutdown(t *testing.T) {
+	cases := map[string]struct {
+		numEndpoints  int
+		lastPostsFail int
+		expectDeletes int
+		deletesFail   bool
+		expectErr     bool
+	}{
+		"no endpoints": {
+			numEndpoints:  0,
+			lastPostsFail: 0,
+			expectDeletes: 0,
+			expectErr:     false,
+		},
+		"all posts succeed": {
+			numEndpoints:  64,
+			lastPostsFail: 0,
+			expectDeletes: 0,
+			expectErr:     false,
+		},
+		"all posts fail": {
+			numEndpoints:  64,
+			lastPostsFail: 64,
+			expectDeletes: 64,
+			expectErr:     true,
+		},
+		"last post fails": {
+			numEndpoints:  64,
+			lastPostsFail: 1,
+			expectDeletes: 64,
+			expectErr:     true,
+		},
+		"delete failures should still call all deletes": {
+			numEndpoints:  64,
+			lastPostsFail: 64,
+			expectDeletes: 64,
+			deletesFail:   true,
+			expectErr:     true,
+		},
+	}
+
+	for n, c := range cases {
+		t.Run(n, func(t *testing.T) {
+			var postCalls atomic.Int32
+			var deleteCalls atomic.Int32
+
+			errResponse := &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       io.NopCloser(strings.NewReader("we've had a problem")),
+			}
+			successResponse := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("good")),
+			}
+
+			httpClient := &fakeHttpClient{
+				mockDo: func(r *http.Request) (*http.Response, error) {
+					if r.Method == http.MethodPost {
+						calls := postCalls.Add(1)
+						if calls >= int32(c.numEndpoints-c.lastPostsFail+1) {
+							return errResponse, nil
+						} else {
+							return successResponse, nil
+						}
+					} else if r.Method == http.MethodDelete {
+						deleteCalls.Add(1)
+						if c.deletesFail {
+							return errResponse, nil
+						} else {
+							return successResponse, nil
+						}
+					}
+					panic("unexpected method")
+				},
+			}
+
+			endpoints := make([]endpoint, 0, c.numEndpoints)
+			for i := range cap(endpoints) {
+				endpoints = append(endpoints, endpoint{
+					url:   fmt.Sprintf("url-something.foo.%d.example.biz", i),
+					index: i,
+				})
+			}
+
+			err := sendPrepareShutdownRequests(context.Background(), log.NewNopLogger(), httpClient, endpoints)
+			if c.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			if c.lastPostsFail > 0 {
+				assert.Greater(t, postCalls.Load(), int32(0))
+			} else {
+				assert.Equal(t, int32(c.numEndpoints), postCalls.Load())
+			}
+			assert.Equal(t, int32(c.expectDeletes), deleteCalls.Load())
+		})
 	}
 }
 
