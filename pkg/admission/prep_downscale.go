@@ -465,11 +465,17 @@ func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, 
 }
 
 func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.Logger, client httpClient, ep endpoint) error {
-	logger, ctx := spanlogger.New(ctx, parentLogger, "admission.PreparePodForShutdown", tenantResolver)
+	span := "admission.PreparePodForShutdown"
+	if method == http.MethodDelete {
+		span = "admission.UnpreparePodForShutdown"
+	}
+
+	logger, ctx := spanlogger.New(ctx, parentLogger, span, tenantResolver)
 	defer logger.Span.Finish()
 
 	logger.SetSpanAndLogTag("url", ep.url)
 	logger.SetSpanAndLogTag("index", ep.index)
+	logger.SetSpanAndLogTag("method", method)
 
 	req, err := http.NewRequestWithContext(ctx, method, "http://"+ep.url, nil)
 	if err != nil {
