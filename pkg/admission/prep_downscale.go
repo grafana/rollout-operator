@@ -90,6 +90,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		return allowWarn(logger, fmt.Sprintf("%s, allowing the change", err))
 	}
 
+	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	if lbls[config.PrepareDownscaleLabelKey] != config.PrepareDownscaleLabelValue {
 		// Not labeled, nothing to do.
 		return &v1.AdmissionResponse{Allowed: true}
@@ -152,7 +153,6 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		}
 	}
 
-	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP POST requests to and to fail if any don't return 200
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
@@ -510,8 +510,10 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 	// Attemt to POST to every prepare-shutdown endpoint. If any fail, we'll
 	// need to undo them with a DELETE.
 
+	const maxGoroutines = 32
+
 	g, ectx := errgroup.WithContext(ctx)
-	g.SetLimit(64)
+	g.SetLimit(maxGoroutines)
 	for _, ep := range eps {
 		ep := ep
 		g.Go(func() error {
@@ -527,7 +529,7 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 		// At least one failed. Undo them all.
 		level.Warn(logger).Log("msg", "failed to prepare hosts for shutdown. unpreparing...", "err", err)
 		undoGroup, _ := errgroup.WithContext(ctx)
-		undoGroup.SetLimit(64)
+		undoGroup.SetLimit(maxGoroutines)
 		for _, ep := range eps {
 			ep := ep
 			undoGroup.Go(func() error {
