@@ -90,6 +90,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		return allowWarn(logger, fmt.Sprintf("%s, allowing the change", err))
 	}
 
+	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	if lbls[config.PrepareDownscaleLabelKey] != config.PrepareDownscaleLabelValue {
 		// Not labeled, nothing to do.
 		return &v1.AdmissionResponse{Allowed: true}
@@ -152,7 +153,6 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		}
 	}
 
-	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	// Create a slice of endpoint addresses for pods to send HTTP POST requests to and to fail if any don't return 200
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
@@ -460,6 +460,47 @@ func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, 
 	return eps
 }
 
+func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.Logger, client httpClient, ep endpoint) error {
+	span := "admission.PreparePodForShutdown"
+	if method == http.MethodDelete {
+		span = "admission.UnpreparePodForShutdown"
+	}
+
+	logger, ctx := spanlogger.New(ctx, parentLogger, span, tenantResolver)
+	defer logger.Span.Finish()
+
+	logger.SetSpanAndLogTag("url", ep.url)
+	logger.SetSpanAndLogTag("index", ep.index)
+	logger.SetSpanAndLogTag("method", method)
+
+	req, err := http.NewRequestWithContext(ctx, method, "http://"+ep.url, nil)
+	if err != nil {
+		level.Error(logger).Log("msg", fmt.Sprintf("error creating HTTP %s request", method), "err", err)
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
+	defer ht.Finish()
+
+	resp, err := client.Do(req)
+	if err != nil {
+		level.Error(logger).Log("msg", fmt.Sprintf("error sending HTTP %s request", method), "err", err)
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		err := fmt.Errorf("HTTP %s request returned non-2xx status code", method)
+		body, readError := io.ReadAll(resp.Body)
+		level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", err, "status", resp.StatusCode, "response_body", string(body))
+		return errors.Join(err, readError)
+	}
+	level.Debug(logger).Log("msg", "pod prepare-shutdown handler called", "method", method, "url", ep.url)
+	return nil
+}
+
 func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) error {
 	if len(eps) == 0 {
 		return nil
@@ -468,44 +509,42 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.sendPrepareShutdownRequests()")
 	defer span.Finish()
 
-	g, _ := errgroup.WithContext(ctx)
+	// Attempt to POST to every prepare-shutdown endpoint. If any fail, we'll
+	// undo them all with a DELETE.
+
+	const maxGoroutines = 32
+
+	g, ectx := errgroup.WithContext(ctx)
+	g.SetLimit(maxGoroutines)
 	for _, ep := range eps {
-		ep := ep // https://golang.org/doc/faq#closures_and_goroutines
+		ep := ep
 		g.Go(func() error {
-			logger, ctx := spanlogger.New(ctx, logger, "admission.PreparePodForShutdown", tenantResolver)
-			defer logger.Span.Finish()
-
-			logger.SetSpanAndLogTag("url", ep.url)
-			logger.SetSpanAndLogTag("index", ep.index)
-
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+ep.url, nil)
-			if err != nil {
-				level.Error(logger).Log("msg", "error creating HTTP POST request", "err", err)
-			}
-
-			req.Header.Set("Content-Type", "application/json")
-			req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
-			defer ht.Finish()
-
-			resp, err := client.Do(req)
-			if err != nil {
-				level.Error(logger).Log("msg", "error sending HTTP POST request", "err", err)
+			if err := ectx.Err(); err != nil {
 				return err
 			}
-
-			defer resp.Body.Close()
-
-			if resp.StatusCode/100 != 2 {
-				err := errors.New("HTTP POST request returned non-2xx status code")
-				body, readError := io.ReadAll(resp.Body)
-				level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", err, "status", resp.StatusCode, "response_body", string(body))
-				return errors.Join(err, readError)
-			}
-			level.Debug(logger).Log("msg", "pod prepared for shutdown")
-			return nil
+			return invokePrepareShutdown(ectx, http.MethodPost, logger, client, ep)
 		})
 	}
-	return g.Wait()
+
+	err := g.Wait()
+	if err != nil {
+		// At least one failed. Undo them all.
+		level.Warn(logger).Log("msg", "failed to prepare hosts for shutdown. unpreparing...", "err", err)
+		undoGroup, _ := errgroup.WithContext(ctx)
+		undoGroup.SetLimit(maxGoroutines)
+		for _, ep := range eps {
+			ep := ep
+			undoGroup.Go(func() error {
+				if err := invokePrepareShutdown(ctx, http.MethodDelete, logger, client, ep); err != nil {
+					level.Warn(logger).Log("msg", "failed to undo prepare shutdown request", "url", ep.url, "err", err)
+				}
+				return nil
+			})
+		}
+		_ = undoGroup.Wait()
+	}
+
+	return err
 }
 
 var tenantResolver spanlogger.TenantResolver = noTenantResolver{}

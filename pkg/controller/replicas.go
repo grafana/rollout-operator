@@ -106,7 +106,6 @@ func minimumTimeHasElapsed(follower *v1.StatefulSet, all []*v1.StatefulSet, logg
 	)
 
 	return timeSinceDownscale > minTimeSinceDownscale, nil
-
 }
 
 // getMostRecentDownscale gets the time of the most recent downscale of any statefulset besides
