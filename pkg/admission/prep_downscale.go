@@ -159,10 +159,6 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	if err := sendPrepareShutdownRequests(ctx, logger, client, eps); err != nil {
 		// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
 		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
-
-		// At least one endpoint failed. We're going to "undo" all of these by
-		// sending DELETE requests to all of the potentially-affected pods.
-
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
@@ -513,8 +509,8 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.sendPrepareShutdownRequests()")
 	defer span.Finish()
 
-	// Attemt to POST to every prepare-shutdown endpoint. If any fail, we'll
-	// need to undo them with a DELETE.
+	// Attempt to POST to every prepare-shutdown endpoint. If any fail, we'll
+	// undo them all with a DELETE.
 
 	const maxGoroutines = 32
 

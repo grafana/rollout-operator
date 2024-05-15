@@ -336,7 +336,7 @@ func TestSendPrepareShutdown(t *testing.T) {
 				mockDo: func(r *http.Request) (*http.Response, error) {
 					if r.Method == http.MethodPost {
 						calls := postCalls.Add(1)
-						if calls >= int32(c.numEndpoints-c.lastPostsFail+1) {
+						if calls > int32(c.numEndpoints-c.lastPostsFail) {
 							return errResponse, nil
 						} else {
 							return successResponse, nil
@@ -368,9 +368,9 @@ func TestSendPrepareShutdown(t *testing.T) {
 				assert.NoError(t, err)
 			}
 			if c.lastPostsFail > 0 {
-				assert.Greater(t, postCalls.Load(), int32(0))
+				assert.GreaterOrEqual(t, postCalls.Load(), int32(c.numEndpoints-c.lastPostsFail), "at least |e|-|fails| should have been sent a POST")
 			} else {
-				assert.Equal(t, int32(c.numEndpoints), postCalls.Load())
+				assert.Equal(t, int32(c.numEndpoints), postCalls.Load(), "all endpoints should have been sent a POST")
 			}
 			assert.Equal(t, int32(c.expectDeletes), deleteCalls.Load())
 		})
