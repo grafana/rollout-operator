@@ -368,6 +368,7 @@ func TestSendPrepareShutdown(t *testing.T) {
 				assert.NoError(t, err)
 			}
 			if c.lastPostsFail > 0 {
+				// (It's >= because the goroutines may already have in-flight POSTs before realizing the context is canceled.)
 				assert.GreaterOrEqual(t, postCalls.Load(), int32(c.numEndpoints-c.lastPostsFail), "at least |e|-|fails| should have been sent a POST")
 			} else {
 				assert.Equal(t, int32(c.numEndpoints), postCalls.Load(), "all endpoints should have been sent a POST")
