@@ -2,6 +2,9 @@
 
 ## main / unreleased
 
+## v0.16.0
+* [ENHANCEMENT] If we fail to call prepare-shutdown on any ingester, attempt to undo the call by issuing an HTTP DELETE. #146
+
 ## v0.15.0
 
 * [CHANGE] Rollout-operator is now released under an Apache License 2.0. #139, #140
