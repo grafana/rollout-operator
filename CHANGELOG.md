@@ -2,6 +2,9 @@
 
 ## main / unreleased
 
+## v0.16.0
+* [ENHANCEMENT] If the POST to prepare-shutdown fails for any replica, attempt to undo the operation by issuing an HTTP DELETE to prepare-shutdown for all target replicas. #146
+
 ## v0.15.0
 
 * [CHANGE] Rollout-operator is now released under an Apache License 2.0. #139, #140
