@@ -3,7 +3,7 @@
 ## main / unreleased
 
 ## v0.16.0
-* [ENHANCEMENT] If we fail to call prepare-shutdown on any ingester, attempt to undo the call by issuing an HTTP DELETE. #146
+* [ENHANCEMENT] If the POST to prepare-shutdown fails for any replica, attempt to undo the operation by issuing an HTTP DELETE to prepare-shutdown for all target replicas. #146
 
 ## v0.15.0
 
