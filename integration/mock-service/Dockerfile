@@ -1,4 +1,4 @@
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY       mock-service /bin/mock-service
 ENTRYPOINT [ "/bin/mock-service" ]
