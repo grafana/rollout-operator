@@ -1,4 +1,4 @@
-FROM alpine:3.19
+FROM gcr.io/distroless/static-debian12
 
 COPY       mock-service /bin/mock-service
 ENTRYPOINT [ "/bin/mock-service" ]

@@ -8,8 +8,7 @@ COPY . /src/rollout-operator
 WORKDIR /src/rollout-operator
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make ${BUILDTARGET}
 
-FROM alpine:3.19
-RUN apk add --no-cache ca-certificates gcompat
+FROM gcr.io/distroless/static-debian12
 
 COPY --from=build /src/rollout-operator/rollout-operator /bin/rollout-operator
 ENTRYPOINT [ "/bin/rollout-operator" ]
