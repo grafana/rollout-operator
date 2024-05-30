@@ -2,7 +2,12 @@
 
 ## main / unreleased
 
+* [CHANGE] The docker base images are now based off distroless images rather than Alpine. #149
+  * The standard base image is now `gcr.io/distroless/static-debian12:nonroot`.
+  * The boringcrypto base image is now `gcr.io/distroless/base-nossl-debian12:nonroot` (for glibc).
+
 ## v0.16.0
+
 * [ENHANCEMENT] If the POST to prepare-shutdown fails for any replica, attempt to undo the operation by issuing an HTTP DELETE to prepare-shutdown for all target replicas. #146
 
 ## v0.15.0

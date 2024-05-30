@@ -15,6 +15,10 @@ GOARCH ?= $(shell go env GOARCH)
 DONT_FIND := -name vendor -prune -o -name .git -prune -o -name .cache -prune -o -name .pkg -prune
 GO_FILES := $(shell find . $(DONT_FIND) -o -type f -name '*.go' -print)
 
+BASE_IMAGE=gcr.io/distroless/static-debian12:nonroot
+# Boringcrypto has a different base image for glibc
+BORINGCRYPTO_BASE_IMAGE=gcr.io/distroless/base-nossl-debian12:nonroot
+
 .DEFAULT_GOAL := rollout-operator
 
 # Adapted from https://www.thapaliya.com/en/writings/well-documented-makefiles/
@@ -31,23 +35,23 @@ rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary 
 
 .PHONY: build-image
 build-image: clean ## Build the rollout-operator image
-	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BASEIMAGE=$(BASE_IMAGE) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: build-image-boringcrypto
 build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto
 	# Tags with the regular image repo for integration testing
-	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BASEIMAGE=$(BORINGCRYPTO_BASE_IMAGE) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: publish-images
 publish-images: publish-standard-image publish-boringcrypto-image ## Build and publish both the standard and boringcrypto images
 
 .PHONY: publish-standard-image
 publish-standard-image: clean ## Build and publish only the standard rollout-operator image
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BASEIMAGE=$(BASE_IMAGE) --build-arg BUILDTARGET=rollout-operator -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: publish-boringcrypto-image
 publish-boringcrypto-image: clean ## Build and publish only the boring-crypto rollout-operator image
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BASEIMAGE=$(BORINGCRYPTO_BASE_IMAGE) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
 
 .PHONY: test
 test: ## Run tests
