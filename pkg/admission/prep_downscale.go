@@ -32,6 +32,7 @@ import (
 
 const (
 	PrepareDownscaleWebhookPath = "/admission/prepare-downscale"
+	maxPrepareGoroutines        = 32
 )
 
 func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *v1.AdmissionResponse {
@@ -157,6 +158,10 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
 	if err := sendPrepareShutdownRequests(ctx, logger, client, eps); err != nil {
+		// At least one failed. Undo them all.
+		level.Warn(logger).Log("msg", "failed to prepare hosts for shutdown. unpreparing...", "err", err)
+		undoPrepareShutdownRequests(ctx, logger, client, eps)
+
 		// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
 		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
 		return deny(
@@ -166,7 +171,9 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	}
 
 	if err := addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name); err != nil {
-		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
+		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation. unpreparing...", "err", err)
+		undoPrepareShutdownRequests(ctx, logger, client, eps)
+
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
@@ -509,13 +516,10 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.sendPrepareShutdownRequests()")
 	defer span.Finish()
 
-	// Attempt to POST to every prepare-shutdown endpoint. If any fail, we'll
-	// undo them all with a DELETE.
-
-	const maxGoroutines = 32
+	// Attempt to POST to every prepare-shutdown endpoint.
 
 	g, ectx := errgroup.WithContext(ctx)
-	g.SetLimit(maxGoroutines)
+	g.SetLimit(maxPrepareGoroutines)
 	for _, ep := range eps {
 		ep := ep
 		g.Go(func() error {
@@ -526,25 +530,31 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 		})
 	}
 
-	err := g.Wait()
-	if err != nil {
-		// At least one failed. Undo them all.
-		level.Warn(logger).Log("msg", "failed to prepare hosts for shutdown. unpreparing...", "err", err)
-		undoGroup, _ := errgroup.WithContext(ctx)
-		undoGroup.SetLimit(maxGoroutines)
-		for _, ep := range eps {
-			ep := ep
-			undoGroup.Go(func() error {
-				if err := invokePrepareShutdown(ctx, http.MethodDelete, logger, client, ep); err != nil {
-					level.Warn(logger).Log("msg", "failed to undo prepare shutdown request", "url", ep.url, "err", err)
-				}
-				return nil
-			})
-		}
-		_ = undoGroup.Wait()
+	return g.Wait()
+}
+
+// undoPrepareShutdownRequests sends an HTTP DELETE to each of the given endpoints.
+func undoPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.undoPrepareShutdownRequests()")
+	defer span.Finish()
+
+	if len(eps) == 0 {
+		return
+	}
+	undoGroup, _ := errgroup.WithContext(ctx)
+	undoGroup.SetLimit(maxPrepareGoroutines)
+	for _, ep := range eps {
+		ep := ep
+		undoGroup.Go(func() error {
+			if err := invokePrepareShutdown(ctx, http.MethodDelete, logger, client, ep); err != nil {
+				level.Warn(logger).Log("msg", "failed to undo prepare shutdown request", "url", ep.url, "err", err)
+				// (We swallow the error so all of the deletes are attempted.)
+			}
+			return nil
+		})
 	}
 
-	return err
+	undoGroup.Wait()
 }
 
 var tenantResolver spanlogger.TenantResolver = noTenantResolver{}
