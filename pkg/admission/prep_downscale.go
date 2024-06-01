@@ -554,7 +554,7 @@ func undoPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 		})
 	}
 
-	undoGroup.Wait()
+	_ = undoGroup.Wait()
 }
 
 var tenantResolver spanlogger.TenantResolver = noTenantResolver{}
