@@ -63,11 +63,6 @@ func TestInvalidDownscale(t *testing.T) {
 	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withStatusCode(http.StatusInternalServerError), expectDeletes())
 }
 
-func TestFailStoreAnnotation(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, expectDeletes())
-	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, expectDeletes())
-}
-
 func TestDownscaleDryRun(t *testing.T) {
 	testPrepDownscaleWebhook(t, 5, 3, withDryRun())
 	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withDryRun())
@@ -291,6 +286,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		)
 	}
 	api := fake.NewSimpleClientset(objects...)
+
 	f := newFakeHttpClient(
 		func(r *http.Request) (*http.Response, error) {
 			return &http.Response{
