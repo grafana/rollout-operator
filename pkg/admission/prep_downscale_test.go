@@ -766,6 +766,10 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 
 	admissionResponse := zt.prepareDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
+
+	if params.expectDeletes {
+		require.Greater(t, f.calls(http.MethodDelete), 0)
+	}
 }
 
 func TestDecodeAndReplicas(t *testing.T) {

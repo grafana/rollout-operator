@@ -135,8 +135,9 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 
 	err = sendPrepareShutdownRequests(ctx, logger, client, eps)
 	if err != nil {
-		// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
-		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
+		// At least one failed. Undo them all.
+		level.Warn(logger).Log("msg", "failed to prepare hosts for shutdown. unpreparing...", "err", err)
+		undoPrepareShutdownRequests(ctx, logger, client, eps)
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
@@ -145,6 +146,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 
 	if err := zt.setDownscaled(ctx, ar.Request.Name); err != nil {
 		level.Error(logger).Log("msg", "downscale not allowed due to error while setting downscale timestamp in the zone ConfigMap", "err", err)
+		undoPrepareShutdownRequests(ctx, logger, client, eps)
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because setting downscale timestamp in the zone ConfigMap failed.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
