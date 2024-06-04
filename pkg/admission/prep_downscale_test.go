@@ -3,6 +3,7 @@ package admission
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	fakeappsv1 "k8s.io/client-go/kubernetes/typed/apps/v1/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/grafana/rollout-operator/pkg/config"
 )
@@ -63,6 +66,11 @@ func TestInvalidDownscale(t *testing.T) {
 	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withStatusCode(http.StatusInternalServerError), expectDeletes())
 }
 
+func TestFailLastDownscaleAttr(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 3, failSetLastDownscale(), expectDeletes(), expectDeny())
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, failSetLastDownscale(), expectDeletes(), expectDeny())
+}
+
 func TestDownscaleDryRun(t *testing.T) {
 	testPrepDownscaleWebhook(t, 5, 3, withDryRun())
 	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withDryRun())
@@ -78,12 +86,13 @@ func newDebugLogger() log.Logger {
 }
 
 type testParams struct {
-	statusCode          int
-	stsAnnotated        bool
-	downscaleInProgress bool
-	allowed             bool
-	dryRun              bool
-	expectDeletes       bool
+	statusCode           int
+	stsAnnotated         bool
+	downscaleInProgress  bool
+	allowed              bool
+	dryRun               bool
+	expectDeletes        bool
+	failSetLastDownscale bool
 }
 
 type optionFunc func(*testParams)
@@ -101,6 +110,18 @@ func withStatusCode(statusCode int) optionFunc {
 func expectDeletes() optionFunc {
 	return func(tp *testParams) {
 		tp.expectDeletes = true
+	}
+}
+
+func failSetLastDownscale() optionFunc {
+	return func(tp *testParams) {
+		tp.failSetLastDownscale = true
+	}
+}
+
+func expectDeny() optionFunc {
+	return func(tp *testParams) {
+		tp.allowed = false
 	}
 }
 
@@ -286,6 +307,13 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		)
 	}
 	api := fake.NewSimpleClientset(objects...)
+
+	if params.failSetLastDownscale {
+		f := api.AppsV1().(*fakeappsv1.FakeAppsV1)
+		f.PrependReactor("patch", "statefulsets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("something terrible happened")
+		})
+	}
 
 	f := newFakeHttpClient(
 		func(r *http.Request) (*http.Response, error) {
@@ -755,6 +783,14 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 	}
 
 	api := fake.NewSimpleClientset(objects...)
+
+	if params.failSetLastDownscale {
+		f := api.AppsV1().(*fakeappsv1.FakeAppsV1)
+		f.PrependReactor("update", "configmaps", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("something terrible happened")
+		})
+	}
+
 	f := newFakeHttpClient(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: params.statusCode,
