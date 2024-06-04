@@ -42,6 +42,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 	logger.SetSpanAndLogTag("object.resource", ar.Request.Resource.Resource)
 	logger.SetSpanAndLogTag("object.namespace", ar.Request.Namespace)
 	logger.SetSpanAndLogTag("request.dry_run", *ar.Request.DryRun)
+	logger.SetSpanAndLogTag("request.uid", ar.Request.UID)
 
 	if *ar.Request.DryRun {
 		return &v1.AdmissionResponse{Allowed: true}
