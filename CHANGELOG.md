@@ -6,6 +6,7 @@
   * The standard base image is now `gcr.io/distroless/static-debian12:nonroot`.
   * The boringcrypto base image is now `gcr.io/distroless/base-nossl-debian12:nonroot` (for glibc).
 * [ENHANCEMENT] Include unique IDs of webhook requests in logs for easier debugging. #150
+* [ENHANCEMENT] prepare-downscale admission webhook: undo prepare-shutdown calls if adding the `last-downscale` annotation fails. #151
 
 ## v0.16.0
 
