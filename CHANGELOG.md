@@ -5,6 +5,7 @@
 * [CHANGE] The docker base images are now based off distroless images rather than Alpine. #149
   * The standard base image is now `gcr.io/distroless/static-debian12:nonroot`.
   * The boringcrypto base image is now `gcr.io/distroless/base-nossl-debian12:nonroot` (for glibc).
+* [ENHANCEMENT] Include unique IDs of webhook requests in logs for easier debugging. #150
 
 ## v0.16.0
 
