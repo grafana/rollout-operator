@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-	fakeappsv1 "k8s.io/client-go/kubernetes/typed/apps/v1/fake"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/grafana/rollout-operator/pkg/config"
@@ -309,8 +308,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	api := fake.NewSimpleClientset(objects...)
 
 	if params.failSetLastDownscale {
-		f := api.AppsV1().(*fakeappsv1.FakeAppsV1)
-		f.PrependReactor("patch", "statefulsets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		api.PrependReactor("patch", "statefulsets", func(action k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New("something terrible happened")
 		})
 	}
@@ -785,8 +783,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 	api := fake.NewSimpleClientset(objects...)
 
 	if params.failSetLastDownscale {
-		f := api.AppsV1().(*fakeappsv1.FakeAppsV1)
-		f.PrependReactor("update", "configmaps", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		api.PrependReactor("update", "configmaps", func(action k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New("something terrible happened")
 		})
 	}
