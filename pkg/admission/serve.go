@@ -78,6 +78,7 @@ func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset) http
 				"namespace", requestedAdmissionReview.Request.Namespace,
 				"name", requestedAdmissionReview.Request.Name,
 				"request.uid", requestedAdmissionReview.Request.UID,
+				"request.username", requestedAdmissionReview.Request.UserInfo.Username,
 			)
 			responseAdmissionReview := &v1beta1.AdmissionReview{}
 			responseAdmissionReview.SetGroupVersionKind(*gvk)
@@ -97,6 +98,7 @@ func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset) http
 				"namespace", requestedAdmissionReview.Request.Namespace,
 				"name", requestedAdmissionReview.Request.Name,
 				"request.uid", requestedAdmissionReview.Request.UID,
+				"request.username", requestedAdmissionReview.Request.UserInfo.Username,
 			)
 			responseAdmissionReview := &v1.AdmissionReview{}
 			responseAdmissionReview.SetGroupVersionKind(*gvk)
