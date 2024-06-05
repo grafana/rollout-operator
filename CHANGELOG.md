@@ -6,6 +6,7 @@
   * The standard base image is now `gcr.io/distroless/static-debian12:nonroot`.
   * The boringcrypto base image is now `gcr.io/distroless/base-nossl-debian12:nonroot` (for glibc).
 * [ENHANCEMENT] Include unique IDs of webhook requests in logs for easier debugging. #150
+* [ENHANCEMENT] Include k8s operation username in request debug logs. #152
 
 ## v0.16.0
 
