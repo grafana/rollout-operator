@@ -60,11 +60,83 @@ func TestGetMaxUnavailableForStatefulSet(t *testing.T) {
 			},
 			expected: 1,
 		},
-	}
+		"should return percentage of statefulset replicas, if annotation uses percentage": {
+			sts: &v1.StatefulSet{
+				Spec: v1.StatefulSetSpec{
+					Replicas: intPointer(10),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						config.RolloutMaxUnavailableAnnotationKey: "30%",
+					},
+				},
+			},
+			expected: 3,
+		},
+		"should return floor percentage of statefulset replicas, if annotation uses percentage": {
+			sts: &v1.StatefulSet{
+				Spec: v1.StatefulSetSpec{
+					Replicas: intPointer(10),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						config.RolloutMaxUnavailableAnnotationKey: "25%",
+					},
+				},
+			},
+			expected: 2,
+		},
+		"should return floor percentage of statefulset replicas, if annotation uses percentage, 3 replicas": {
+			sts: &v1.StatefulSet{
+				Spec: v1.StatefulSetSpec{
+					Replicas: intPointer(3),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						config.RolloutMaxUnavailableAnnotationKey: "50%",
+					},
+				},
+			},
+			expected: 1,
+		},
+		"should return 1 of statefulset replicas, if annotation uses percentage, but statefulset doesn't have replicas": {
+			sts: &v1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						config.RolloutMaxUnavailableAnnotationKey: "30%",
+					},
+				},
+			},
+			expected: 1,
+		},
+		"should return 1 of statefulset replicas, if annotation uses percentage, but values is too high": {
+			sts: &v1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						config.RolloutMaxUnavailableAnnotationKey: "300%",
+					},
+				},
+			},
+			expected: 1,
+		},
+		"should return 1 of statefulset replicas, if annotation uses percentage, but values is too low": {
+			sts: &v1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						config.RolloutMaxUnavailableAnnotationKey: "0%",
+					},
+				},
+			},
+			expected: 1,
+		}}
 
 	for testName, testCase := range tests {
 		t.Run(testName, func(t *testing.T) {
 			assert.Equal(t, testCase.expected, getMaxUnavailableForStatefulSet(testCase.sts, log.NewNopLogger()))
 		})
 	}
+}
+
+func intPointer(i int32) *int32 {
+	return &i
 }

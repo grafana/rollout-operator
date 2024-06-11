@@ -7,6 +7,7 @@
   * The boringcrypto base image is now `gcr.io/distroless/base-nossl-debian12:nonroot` (for glibc).
 * [ENHANCEMENT] Include unique IDs of webhook requests in logs for easier debugging. #150
 * [ENHANCEMENT] Include k8s operation username in request debug logs. #152
+* [ENHANCEMENT] `rollout-max-unavailable` annotation can now be specified as percentage, e.g.: `rollout-max-unavailable: 25%`. Resulting value is computed as `floor(replicas * percentage)`, but is never less than 1. #153
 
 ## v0.16.0
 
