@@ -166,7 +166,7 @@ func callPrepareDownscaleAndReturnMaxPrepareTimestamp(ctx context.Context, logge
 
 			resp, err := client.Do(req)
 			if err != nil {
-				level.Error(epLogger).Log("error sending HTTP POST request to endpoint", "err", err)
+				level.Error(epLogger).Log("msg", "error sending HTTP POST request to endpoint", "err", err)
 				return err
 			}
 
