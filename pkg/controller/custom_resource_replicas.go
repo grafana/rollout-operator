@@ -45,7 +45,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		// We're going to change number of replicas on the statefulset.
 		// If there is delayed downscale configured on the statefulset, we will first handle delay part, and only if that succeeds,
 		// continue with downscaling or upscaling.
-		desiredReplicas := referenceResourceDesiredReplicas
+		var desiredReplicas int32
 		if newDesiredReplicas, err := checkScalingDelay(ctx, c.logger, sts, client, currentReplicas, referenceResourceDesiredReplicas); err != nil {
 			level.Warn(c.logger).Log("msg", "not scaling statefulset due to failed scaling delay check",
 				"group", groupName,
