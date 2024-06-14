@@ -34,10 +34,10 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 
 		referenceResource := fmt.Sprintf("%s/%s", referenceGVR.Resource, referenceName)
 
-		desiredReplicas := scaleObj.Spec.Replicas
-		if currentReplicas == desiredReplicas {
-			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
-			cancelDelayedDownscaleIfConfigured(ctx, c.logger, sts, client, desiredReplicas)
+		referenceResourceDesiredReplicas := scaleObj.Spec.Replicas
+		if currentReplicas == referenceResourceDesiredReplicas {
+			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, referenceResourceDesiredReplicas)
+			cancelDelayedDownscaleIfConfigured(ctx, c.logger, sts, client, referenceResourceDesiredReplicas)
 			// No change in the number of replicas: don't log because this will be the result most of the time.
 			continue
 		}
@@ -45,26 +45,36 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		// We're going to change number of replicas on the statefulset.
 		// If there is delayed downscale configured on the statefulset, we will first handle delay part, and only if that succeeds,
 		// continue with downscaling or upscaling.
-		if err := checkScalingDelay(ctx, c.logger, sts, client, currentReplicas, desiredReplicas); err != nil {
-			level.Warn(c.logger).Log("msg", "not scaling statefulset due to failed scaling delay check", "group", groupName, "name", sts.GetName(), "currentReplicas", currentReplicas, "desiredReplicas", desiredReplicas, "err", err)
+		desiredReplicas := referenceResourceDesiredReplicas
+		if newDesiredReplicas, err := checkScalingDelay(ctx, c.logger, sts, client, currentReplicas, referenceResourceDesiredReplicas); err != nil {
+			level.Warn(c.logger).Log("msg", "not scaling statefulset due to failed scaling delay check",
+				"group", groupName,
+				"name", sts.GetName(),
+				"currentReplicas", currentReplicas,
+				"referenceResourceDesiredReplicas", referenceResourceDesiredReplicas,
+				"err", err,
+			)
 
 			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, currentReplicas)
 			// If delay has not been reached, we can check next statefulset.
 			continue
+		} else {
+			desiredReplicas = newDesiredReplicas
 		}
 
-		direction := ""
+		logMsg := ""
 		if desiredReplicas > currentReplicas {
-			direction = "up"
+			logMsg = "scaling up statefulset to match replicas in the reference resource"
 		} else if desiredReplicas < currentReplicas {
-			direction = "down"
+			logMsg = "scaling down statefulset to computed desired replicas, based on replicas in the reference resource and elapsed downscale delays"
 		}
 
-		level.Info(c.logger).Log("msg", fmt.Sprintf("scaling %s statefulset to match reference resource", direction),
+		level.Info(c.logger).Log("msg", logMsg,
 			"group", groupName,
 			"name", sts.GetName(),
 			"currentReplicas", currentReplicas,
-			"desiredReplicas", desiredReplicas,
+			"referenceResourceDesiredReplicas", referenceResourceDesiredReplicas,
+			"computedDesiredReplicas", desiredReplicas,
 			"referenceResource", referenceResource,
 		)
 

@@ -36,21 +36,24 @@ func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, 
 	callCancelDelayedDownscale(ctx, logger, httpClient, endpoints)
 }
 
-func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, currentReplicas, desiredReplicas int32) error {
+// Checks if downscale delay has been reached on replicas in [desiredReplicas, currentReplicas) range.
+// If there is a range of replicas at the end of statefulset for which delay has been reached, this function
+// returns updated desired replicas that statefulset can be scaled to.
+func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, currentReplicas, desiredReplicas int32) (updatedDesiredReplicas int32, _ error) {
 	if currentReplicas == desiredReplicas {
 		// should not happen
-		return nil
+		return currentReplicas, nil
 	}
 
 	delay, prepareURL, err := parseDelayedDownscaleAnnotations(sts.GetAnnotations())
 	if delay == 0 || prepareURL == nil || err != nil {
-		return err
+		return desiredReplicas, err
 	}
 
 	if desiredReplicas >= currentReplicas {
 		callCancelDelayedDownscale(ctx, logger, httpClient, createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), 0, int(currentReplicas), prepareURL))
 		// Proceed even if calling cancel of delayed downscale fails. We call cancellation repeatedly, so it will happen during next reconcile.
-		return nil
+		return desiredReplicas, nil
 	}
 
 	{
@@ -61,19 +64,34 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 
 	// Replicas in [desired, current) interval are going to be stopped.
 	downscaleEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), int(desiredReplicas), int(currentReplicas), prepareURL)
-	maxPrepareTime, err := callPrepareDownscaleAndReturnMaxPrepareTimestamp(ctx, logger, httpClient, downscaleEndpoints)
+	elapsedTimeSinceDownscaleInitiated, err := callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx, logger, httpClient, downscaleEndpoints)
 	if err != nil {
-		return fmt.Errorf("failed prepare pods for delayed downscale: %v", err)
+		return desiredReplicas, fmt.Errorf("failed prepare pods for delayed downscale: %v", err)
 	}
 
-	elapsedSinceMaxTime := time.Since(maxPrepareTime)
-	if elapsedSinceMaxTime < delay {
-		return fmt.Errorf("configured downscale delay %v has not been reached for all pods. elapsed time: %v", delay, elapsedSinceMaxTime)
+	// Find how many pods from the end of statefulset we can already scale down
+	allowedDesiredReplicas := currentReplicas
+	for replica := currentReplicas - 1; replica >= desiredReplicas; replica-- {
+		elapsed, ok := elapsedTimeSinceDownscaleInitiated[int(replica)]
+		if !ok {
+			break
+		}
+
+		if elapsed < delay {
+			break
+		}
+
+		// We can scale down this replica
+		allowedDesiredReplicas--
 	}
 
-	// We can proceed with downscale!
-	level.Info(logger).Log("msg", "downscale delay has been reached on all downscaled pods", "name", sts.GetName(), "delay", delay, "elapsed", elapsedSinceMaxTime)
-	return nil
+	if allowedDesiredReplicas == currentReplicas {
+		return currentReplicas, fmt.Errorf("configured downscale delay %v has not been reached for any pods at the end of statefulset replicas range", delay)
+	}
+
+	// We can proceed with downscale on at least one pod.
+	level.Info(logger).Log("msg", "downscale delay has been reached on some downscaled pods", "name", sts.GetName(), "delay", delay, "originalDesiredReplicas", desiredReplicas, "allowedDesiredReplicas", allowedDesiredReplicas)
+	return allowedDesiredReplicas, nil
 }
 
 func parseDelayedDownscaleAnnotations(annotations map[string]string) (time.Duration, *url.URL, error) {
@@ -106,7 +124,7 @@ type endpoint struct {
 	namespace string
 	podName   string
 	url       url.URL
-	index     int
+	replica   int
 }
 
 // Create prepare-downscale endpoints for pods with index in [from, to) range. URL is fully reused except for host, which is replaced with pod's FQDN.
@@ -122,7 +140,7 @@ func createPrepareDownscaleEndpoints(namespace, serviceName string, from, to int
 		ep := endpoint{
 			namespace: namespace,
 			podName:   fmt.Sprintf("%v-%v", serviceName, index),
-			index:     index,
+			replica:   index,
 		}
 
 		ep.url = *url
@@ -134,14 +152,14 @@ func createPrepareDownscaleEndpoints(namespace, serviceName string, from, to int
 	return eps
 }
 
-func callPrepareDownscaleAndReturnMaxPrepareTimestamp(ctx context.Context, logger log.Logger, client httpClient, endpoints []endpoint) (time.Time, error) {
+func callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx context.Context, logger log.Logger, client httpClient, endpoints []endpoint) (map[int]time.Duration, error) {
 	if len(endpoints) == 0 {
-		return time.Time{}, fmt.Errorf("no endpoints")
+		return nil, fmt.Errorf("no endpoints")
 	}
 
 	var (
-		maxTimeMu sync.Mutex
-		maxTime   time.Time
+		timestampsMu sync.Mutex
+		timestamps   = map[int]time.Duration{}
 	)
 
 	type expectedResponse struct {
@@ -195,19 +213,18 @@ func callPrepareDownscaleAndReturnMaxPrepareTimestamp(ctx context.Context, logge
 			}
 
 			t := time.Unix(r.Timestamp, 0)
+			elapsed := time.Since(t)
 
-			maxTimeMu.Lock()
-			if t.After(maxTime) {
-				maxTime = t
-			}
-			maxTimeMu.Unlock()
+			timestampsMu.Lock()
+			timestamps[ep.replica] = elapsed
+			timestampsMu.Unlock()
 
-			level.Debug(epLogger).Log("msg", "HTTP POST request to endpoint succeded", "timestamp", t.UTC().Format(time.RFC3339))
+			level.Debug(epLogger).Log("msg", "HTTP POST request to endpoint succeded", "timestamp", t.UTC().Format(time.RFC3339), "elapsed", elapsed)
 			return nil
 		})
 	}
 	err := g.Wait()
-	return maxTime, err
+	return timestamps, err
 }
 
 func callCancelDelayedDownscale(ctx context.Context, logger log.Logger, client httpClient, endpoints []endpoint) {
