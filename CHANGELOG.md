@@ -8,6 +8,7 @@
 * [ENHANCEMENT] Include unique IDs of webhook requests in logs for easier debugging. #150
 * [ENHANCEMENT] Include k8s operation username in request debug logs. #152
 * [ENHANCEMENT] `rollout-max-unavailable` annotation can now be specified as percentage, e.g.: `rollout-max-unavailable: 25%`. Resulting value is computed as `floor(replicas * percentage)`, but is never less than 1. #153
+* [ENHANCEMENT] Delayed downscale of statefulset can now reduce replicas earlier, if subset of pods at the end of statefulset have already reached their delay. #156
 * [BUGFIX] Fix a mangled error log in controller's delayed downscale code. #154
 
 ## v0.16.0
