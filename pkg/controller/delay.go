@@ -47,7 +47,7 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 
 	delay, prepareURL, err := parseDelayedDownscaleAnnotations(sts.GetAnnotations())
 	if delay == 0 || prepareURL == nil || err != nil {
-		return desiredReplicas, err
+		return currentReplicas, err
 	}
 
 	if desiredReplicas >= currentReplicas {
@@ -66,7 +66,7 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	downscaleEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), int(desiredReplicas), int(currentReplicas), prepareURL)
 	elapsedTimeSinceDownscaleInitiated, err := callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx, logger, httpClient, downscaleEndpoints)
 	if err != nil {
-		return desiredReplicas, fmt.Errorf("failed prepare pods for delayed downscale: %v", err)
+		return currentReplicas, fmt.Errorf("failed prepare pods for delayed downscale: %v", err)
 	}
 
 	// Find how many pods from the end of statefulset we can already scale down
