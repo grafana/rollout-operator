@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.17.0
+
 * [CHANGE] The docker base images are now based off distroless images rather than Alpine. #149
   * The standard base image is now `gcr.io/distroless/static-debian12:nonroot`.
   * The boringcrypto base image is now `gcr.io/distroless/base-nossl-debian12:nonroot` (for glibc).
