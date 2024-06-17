@@ -46,8 +46,11 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	}
 
 	delay, prepareURL, err := parseDelayedDownscaleAnnotations(sts.GetAnnotations())
-	if delay == 0 || prepareURL == nil || err != nil {
+	if err != nil {
 		return currentReplicas, err
+	}
+	if delay == 0 || prepareURL == nil {
+		return desiredReplicas, err
 	}
 
 	if desiredReplicas >= currentReplicas {
