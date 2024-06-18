@@ -155,16 +155,17 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		}
 	}
 
-	// Create a slice of endpoint addresses for pods to send HTTP POST requests to and to fail if any don't return 200
+	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
 	if err := sendPrepareShutdownRequests(ctx, logger, client, eps); err != nil {
-		// At least one failed. Undo them all.
-		level.Warn(logger).Log("msg", "failed to prepare hosts for shutdown. unpreparing...", "err", err)
+		// Down-scale operation is disallowed because at least one pod failed to
+		// prepare for shutdown and cannot be deleted. We also need to
+		// un-prepare them all.
+
+		level.Error(logger).Log("msg", "downscale not allowed due to host(s) failing to prepare for downscale. unpreparing...", "err", err)
 		undoPrepareShutdownRequests(ctx, logger, client, eps)
 
-		// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
-		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
@@ -172,6 +173,8 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	}
 
 	if err := addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name); err != nil {
+		// Down-scale operation is disallowed because we failed to add the
+		// annotation to the statefulset. We again need to un-prepare all pods.
 		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation. unpreparing...", "err", err)
 		undoPrepareShutdownRequests(ctx, logger, client, eps)
 
@@ -181,7 +184,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		)
 	}
 
-	// Down-scale operation is allowed because all pods successfully prepared for shutdown
+	// Otherwise, we've made it through the gauntlet, and the downscale is allowed.
 	level.Info(logger).Log("msg", "downscale allowed")
 	return &v1.AdmissionResponse{
 		Allowed: true,

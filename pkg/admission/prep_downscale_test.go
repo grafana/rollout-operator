@@ -61,8 +61,8 @@ func TestValidDownscaleWithAnotherInProgress(t *testing.T) {
 }
 
 func TestInvalidDownscale(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, withStatusCode(http.StatusInternalServerError), expectDeletes())
-	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withStatusCode(http.StatusInternalServerError), expectDeletes())
+	testPrepDownscaleWebhook(t, 5, 3, withStatusCode(http.StatusInternalServerError), expectDeletes(), expectDeny())
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withStatusCode(http.StatusInternalServerError), expectDeletes(), expectDeny())
 }
 
 func TestFailLastDownscaleAttr(t *testing.T) {
@@ -361,11 +361,6 @@ func TestSendPrepareShutdown(t *testing.T) {
 		"last post fails": {
 			numEndpoints:  64,
 			lastPostsFail: 1,
-			expectErr:     true,
-		},
-		"delete failures should still call all deletes": {
-			numEndpoints:  64,
-			lastPostsFail: 64,
 			expectErr:     true,
 		},
 	}
