@@ -513,12 +513,12 @@ func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.
 }
 
 func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) error {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.sendPrepareShutdownRequests()")
+	defer span.Finish()
+
 	if len(eps) == 0 {
 		return nil
 	}
-
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.sendPrepareShutdownRequests()")
-	defer span.Finish()
 
 	// Attempt to POST to every prepare-shutdown endpoint.
 
@@ -545,6 +545,10 @@ func undoPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 	if len(eps) == 0 {
 		return
 	}
+
+	// Unlike sendPrepareShutdownRequests, we attempt to send each pod a DELETE
+	// without regard for failures.
+
 	undoGroup, _ := errgroup.WithContext(ctx)
 	undoGroup.SetLimit(maxPrepareGoroutines)
 	for _, ep := range eps {
