@@ -3,6 +3,7 @@ package admission
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"text/template"
@@ -28,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/grafana/rollout-operator/pkg/config"
 )
@@ -58,8 +61,13 @@ func TestValidDownscaleWithAnotherInProgress(t *testing.T) {
 }
 
 func TestInvalidDownscale(t *testing.T) {
-	testPrepDownscaleWebhook(t, 5, 3, withStatusCode(http.StatusInternalServerError))
-	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withStatusCode(http.StatusInternalServerError))
+	testPrepDownscaleWebhook(t, 5, 3, withStatusCode(http.StatusInternalServerError), expectDeletes(), expectDeny())
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withStatusCode(http.StatusInternalServerError), expectDeletes(), expectDeny())
+}
+
+func TestFailLastDownscaleAttr(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 3, failSetLastDownscale(), expectDeletes(), expectDeny())
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, failSetLastDownscale(), expectDeletes(), expectDeny())
 }
 
 func TestDownscaleDryRun(t *testing.T) {
@@ -77,11 +85,13 @@ func newDebugLogger() log.Logger {
 }
 
 type testParams struct {
-	statusCode          int
-	stsAnnotated        bool
-	downscaleInProgress bool
-	allowed             bool
-	dryRun              bool
+	statusCode           int
+	stsAnnotated         bool
+	downscaleInProgress  bool
+	allowed              bool
+	dryRun               bool
+	expectDeletes        bool
+	failSetLastDownscale bool
 }
 
 type optionFunc func(*testParams)
@@ -93,6 +103,24 @@ func withStatusCode(statusCode int) optionFunc {
 			tp.allowed = false
 			tp.stsAnnotated = false
 		}
+	}
+}
+
+func expectDeletes() optionFunc {
+	return func(tp *testParams) {
+		tp.expectDeletes = true
+	}
+}
+
+func failSetLastDownscale() optionFunc {
+	return func(tp *testParams) {
+		tp.failSetLastDownscale = true
+	}
+}
+
+func expectDeny() optionFunc {
+	return func(tp *testParams) {
+		tp.allowed = false
 	}
 }
 
@@ -125,19 +153,34 @@ type templateParams struct {
 }
 
 type fakeHttpClient struct {
-	statusCode int
-	mockDo     func(*http.Request) (*http.Response, error)
+	mockDo func(*http.Request) (*http.Response, error)
+
+	mu            sync.Mutex
+	callsByMethod map[string]int
+}
+
+func newFakeHttpClient(mockDo func(*http.Request) (*http.Response, error)) *fakeHttpClient {
+	if mockDo == nil {
+		panic("mockDo req'd")
+	}
+	return &fakeHttpClient{
+		mockDo:        mockDo,
+		callsByMethod: make(map[string]int),
+	}
 }
 
 func (f *fakeHttpClient) Do(req *http.Request) (resp *http.Response, err error) {
-	if f.mockDo != nil {
-		return f.mockDo(req)
-	}
+	f.mu.Lock()
+	f.callsByMethod[req.Method]++
+	f.mu.Unlock()
 
-	return &http.Response{
-		StatusCode: f.statusCode,
-		Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
-	}, nil
+	return f.mockDo(req)
+}
+
+func (f *fakeHttpClient) calls(method string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.callsByMethod[method]
 }
 
 func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, options ...optionFunc) {
@@ -263,7 +306,20 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		)
 	}
 	api := fake.NewSimpleClientset(objects...)
-	f := &fakeHttpClient{statusCode: params.statusCode}
+
+	if params.failSetLastDownscale {
+		api.PrependReactor("patch", "statefulsets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("something terrible happened")
+		})
+	}
+
+	f := newFakeHttpClient(
+		func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: params.statusCode,
+				Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
+			}, nil
+		})
 
 	admissionResponse := prepareDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
@@ -275,45 +331,36 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		require.NotNil(t, updatedSts.Annotations)
 		require.NotNil(t, updatedSts.Annotations[config.LastDownscaleAnnotationKey])
 	}
+
+	if params.expectDeletes {
+		require.Greater(t, f.calls(http.MethodDelete), 0)
+	}
 }
 
 func TestSendPrepareShutdown(t *testing.T) {
 	cases := map[string]struct {
 		numEndpoints  int
 		lastPostsFail int
-		expectDeletes int
-		deletesFail   bool
 		expectErr     bool
 	}{
 		"no endpoints": {
 			numEndpoints:  0,
 			lastPostsFail: 0,
-			expectDeletes: 0,
 			expectErr:     false,
 		},
 		"all posts succeed": {
 			numEndpoints:  64,
 			lastPostsFail: 0,
-			expectDeletes: 0,
 			expectErr:     false,
 		},
 		"all posts fail": {
 			numEndpoints:  64,
 			lastPostsFail: 64,
-			expectDeletes: 64,
 			expectErr:     true,
 		},
 		"last post fails": {
 			numEndpoints:  64,
 			lastPostsFail: 1,
-			expectDeletes: 64,
-			expectErr:     true,
-		},
-		"delete failures should still call all deletes": {
-			numEndpoints:  64,
-			lastPostsFail: 64,
-			expectDeletes: 64,
-			deletesFail:   true,
 			expectErr:     true,
 		},
 	}
@@ -321,7 +368,6 @@ func TestSendPrepareShutdown(t *testing.T) {
 	for n, c := range cases {
 		t.Run(n, func(t *testing.T) {
 			var postCalls atomic.Int32
-			var deleteCalls atomic.Int32
 
 			errResponse := &http.Response{
 				StatusCode: http.StatusInternalServerError,
@@ -332,8 +378,8 @@ func TestSendPrepareShutdown(t *testing.T) {
 				Body:       io.NopCloser(strings.NewReader("good")),
 			}
 
-			httpClient := &fakeHttpClient{
-				mockDo: func(r *http.Request) (*http.Response, error) {
+			httpClient := newFakeHttpClient(
+				func(r *http.Request) (*http.Response, error) {
 					if r.Method == http.MethodPost {
 						calls := postCalls.Add(1)
 						if calls > int32(c.numEndpoints-c.lastPostsFail) {
@@ -341,17 +387,10 @@ func TestSendPrepareShutdown(t *testing.T) {
 						} else {
 							return successResponse, nil
 						}
-					} else if r.Method == http.MethodDelete {
-						deleteCalls.Add(1)
-						if c.deletesFail {
-							return errResponse, nil
-						} else {
-							return successResponse, nil
-						}
 					}
 					panic("unexpected method")
 				},
-			}
+			)
 
 			endpoints := make([]endpoint, 0, c.numEndpoints)
 			for i := range cap(endpoints) {
@@ -373,7 +412,63 @@ func TestSendPrepareShutdown(t *testing.T) {
 			} else {
 				assert.Equal(t, int32(c.numEndpoints), postCalls.Load(), "all endpoints should have been sent a POST")
 			}
-			assert.Equal(t, int32(c.expectDeletes), deleteCalls.Load())
+		})
+	}
+}
+
+func TestUndoPrepareShutdown(t *testing.T) {
+	cases := map[string]struct {
+		numEndpoints int
+		deletesFail  bool
+	}{
+		"no endpoints": {
+			numEndpoints: 0,
+			deletesFail:  false,
+		},
+		"all posts succeed": {
+			numEndpoints: 64,
+			deletesFail:  false,
+		},
+		"delete failures should still call all deletes": {
+			numEndpoints: 64,
+			deletesFail:  true,
+		},
+	}
+
+	for n, c := range cases {
+		t.Run(n, func(t *testing.T) {
+			errResponse := &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       io.NopCloser(strings.NewReader("we've had a problem")),
+			}
+			successResponse := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("good")),
+			}
+
+			httpClient := newFakeHttpClient(
+				func(r *http.Request) (*http.Response, error) {
+					if r.Method == http.MethodDelete {
+						if c.deletesFail {
+							return errResponse, nil
+						} else {
+							return successResponse, nil
+						}
+					}
+					panic("unexpected method")
+				},
+			)
+
+			endpoints := make([]endpoint, 0, c.numEndpoints)
+			for i := range cap(endpoints) {
+				endpoints = append(endpoints, endpoint{
+					url:   fmt.Sprintf("url-something.foo.%d.example.biz", i),
+					index: i,
+				})
+			}
+
+			undoPrepareShutdownRequests(context.Background(), log.NewNopLogger(), httpClient, endpoints)
+			assert.Equal(t, c.numEndpoints, httpClient.calls(http.MethodDelete), "")
 		})
 	}
 }
@@ -679,13 +774,30 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 			},
 		)
 	}
+
 	api := fake.NewSimpleClientset(objects...)
-	f := &fakeHttpClient{statusCode: params.statusCode}
+
+	if params.failSetLastDownscale {
+		api.PrependReactor("update", "configmaps", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("something terrible happened")
+		})
+	}
+
+	f := newFakeHttpClient(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: params.statusCode,
+			Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
+		}, nil
+	})
 
 	zt := newZoneTracker(api, namespace, "zone-tracker-test-cm")
 
 	admissionResponse := zt.prepareDownscale(ctx, logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
+
+	if params.expectDeletes {
+		require.Greater(t, f.calls(http.MethodDelete), 0)
+	}
 }
 
 func TestDecodeAndReplicas(t *testing.T) {

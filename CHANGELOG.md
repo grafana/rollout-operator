@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] prepare-downscale admission webhook: undo prepare-shutdown calls if adding the `last-downscale` annotation fails. #151
+
 ## v0.17.0
 
 * [CHANGE] The docker base images are now based off distroless images rather than Alpine. #149
