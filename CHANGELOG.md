@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.17.1
+
 * [ENHANCEMENT] prepare-downscale admission webhook: undo prepare-shutdown calls if adding the `last-downscale` annotation fails. #151
 
 ## v0.17.0
