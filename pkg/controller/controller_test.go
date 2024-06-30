@@ -165,6 +165,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSet("ingester-zone-b", withPrevRevision(), func(sts *v1.StatefulSet) {
 					sts.Status.Replicas = 3
 					sts.Status.ReadyReplicas = 2
+					sts.Status.AvailableReplicas = 2
 				}),
 			},
 			pods: []runtime.Object{
@@ -183,6 +184,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSet("ingester-zone-b", withPrevRevision(), func(sts *v1.StatefulSet) {
 					sts.Status.Replicas = 3
 					sts.Status.ReadyReplicas = 1
+					sts.Status.AvailableReplicas = 1
 				}),
 			},
 			pods: []runtime.Object{
@@ -1010,10 +1012,11 @@ func mockStatefulSet(name string, overrides ...func(sts *v1.StatefulSet)) *v1.St
 			},
 		},
 		Status: v1.StatefulSetStatus{
-			Replicas:        3,
-			ReadyReplicas:   3,
-			CurrentRevision: testLastRevisionHash,
-			UpdateRevision:  testLastRevisionHash,
+			Replicas:          3,
+			ReadyReplicas:     3,
+			AvailableReplicas: 3,
+			CurrentRevision:   testLastRevisionHash,
+			UpdateRevision:    testLastRevisionHash,
 		},
 	}
 
@@ -1067,6 +1070,7 @@ func withReplicas(totalReplicas, readyReplicas int32) func(sts *v1.StatefulSet) 
 		sts.Spec.Replicas = &totalReplicas
 		sts.Status.Replicas = totalReplicas
 		sts.Status.ReadyReplicas = readyReplicas
+		sts.Status.AvailableReplicas = readyReplicas
 	}
 }
 
