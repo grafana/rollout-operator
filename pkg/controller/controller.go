@@ -498,12 +498,17 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	if len(podsToUpdate) > 0 {
 		maxUnavailable := getMaxUnavailableForStatefulSet(sts, c.logger)
-		numNotReady := int(sts.Status.Replicas - sts.Status.ReadyReplicas)
+		var numNotAvailable int
+		if sts.Spec.MinReadySeconds > 0 {
+			numNotAvailable = int(sts.Status.Replicas - sts.Status.AvailableReplicas)
+		} else {
+			numNotAvailable = int(sts.Status.Replicas - sts.Status.ReadyReplicas)
+		}
 
 		// Compute the number of pods we should update, honoring the configured maxUnavailable.
 		numPods := max(0, min(
-			maxUnavailable-numNotReady, // No more than the configured maxUnavailable (including not-Ready pods).
-			len(podsToUpdate),          // No more than the total number of pods that need to be updated.
+			maxUnavailable-numNotAvailable, // No more than the configured maxUnavailable (including not-Ready pods).
+			len(podsToUpdate),              // No more than the total number of pods that need to be updated.
 		))
 
 		if numPods == 0 {
@@ -513,6 +518,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 				"pods_to_update", len(podsToUpdate),
 				"replicas", sts.Status.Replicas,
 				"ready_replicas", sts.Status.ReadyReplicas,
+				"available_replicas", sts.Status.AvailableReplicas,
 				"max_unavailable", maxUnavailable)
 
 			return true, nil
@@ -546,6 +552,14 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			"statefulset", sts.Name)
 
 		return true, nil
+	} else if sts.Spec.MinReadySeconds > 0 && sts.Status.AvailableReplicas != sts.Status.Replicas {
+		// If we have a MinReadySeconds set, we should wait for the StatefulSet to have all replicas available.
+		level.Info(c.logger).Log(
+			"msg", "StatefulSet pods are all updated and ready but StatefulSet has some not-Available replicas",
+			"statefulset", sts.Name)
+
+		return true, nil
+
 	}
 
 	// At this point there are no pods to update, so we can update the currentRevision in the StatefulSet.
