@@ -498,8 +498,13 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	if len(podsToUpdate) > 0 {
 		maxUnavailable := getMaxUnavailableForStatefulSet(sts, c.logger)
-		//numNotAvailable := int(sts.Status.Replicas - sts.Status.AvailableReplicas)
-		numNotAvailable := int(sts.Status.Replicas - sts.Status.ReadyReplicas)
+		var numNotAvailable int
+		if sts.Spec.MinReadySeconds > 0 {
+			level.Info(c.logger).Log("msg", "StatefulSet has minReadySeconds set, waiting before terminating pods", "statefulset", sts.Name, "min_ready_seconds", sts.Spec.MinReadySeconds)
+			numNotAvailable = int(sts.Status.Replicas - sts.Status.AvailableReplicas)
+		} else {
+			numNotAvailable = int(sts.Status.Replicas - sts.Status.ReadyReplicas)
+		}
 
 		// Compute the number of pods we should update, honoring the configured maxUnavailable.
 		numPods := max(0, min(
@@ -548,7 +553,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			"statefulset", sts.Name)
 
 		return true, nil
-	} else if sts.Status.Replicas != sts.Status.AvailableReplicas {
+	} else if sts.Spec.MinReadySeconds > 0 && sts.Status.Replicas != sts.Status.AvailableReplicas {
 		level.Info(c.logger).Log(
 			"msg", "StatefulSet pods are all updated and ready but StatefulSet has some not-Available replicas",
 			"statefulset", sts.Name)
