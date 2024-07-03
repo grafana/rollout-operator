@@ -165,6 +165,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSet("ingester-zone-b", withPrevRevision(), func(sts *v1.StatefulSet) {
 					sts.Status.Replicas = 3
 					sts.Status.ReadyReplicas = 2
+					sts.Status.AvailableReplicas = 2
 				}),
 			},
 			pods: []runtime.Object{
@@ -183,6 +184,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSet("ingester-zone-b", withPrevRevision(), func(sts *v1.StatefulSet) {
 					sts.Status.Replicas = 3
 					sts.Status.ReadyReplicas = 1
+					sts.Status.AvailableReplicas = 1
 				}),
 			},
 			pods: []runtime.Object{
@@ -540,7 +542,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testNamespace, nil, 5*time.Second, 0, reg, log.NewNopLogger())
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testNamespace, nil, 0, reg, log.NewNopLogger())
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -825,7 +827,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testNamespace, httpClient, 5*time.Second, 0, reg, log.NewNopLogger())
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testNamespace, httpClient, 0, reg, log.NewNopLogger())
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -928,7 +930,7 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 
 	// Create the controller and start informers.
 	reg := prometheus.NewPedanticRegistry()
-	c := NewRolloutController(kubeClient, nil, nil, nil, testNamespace, nil, 5*time.Second, 0, reg, log.NewNopLogger())
+	c := NewRolloutController(kubeClient, nil, nil, nil, testNamespace, nil, 0, reg, log.NewNopLogger())
 	require.NoError(t, c.Init())
 	defer c.Stop()
 
@@ -1010,10 +1012,11 @@ func mockStatefulSet(name string, overrides ...func(sts *v1.StatefulSet)) *v1.St
 			},
 		},
 		Status: v1.StatefulSetStatus{
-			Replicas:        3,
-			ReadyReplicas:   3,
-			CurrentRevision: testLastRevisionHash,
-			UpdateRevision:  testLastRevisionHash,
+			Replicas:          3,
+			ReadyReplicas:     3,
+			AvailableReplicas: 3,
+			CurrentRevision:   testLastRevisionHash,
+			UpdateRevision:    testLastRevisionHash,
 		},
 	}
 
@@ -1067,6 +1070,7 @@ func withReplicas(totalReplicas, readyReplicas int32) func(sts *v1.StatefulSet) 
 		sts.Spec.Replicas = &totalReplicas
 		sts.Status.Replicas = totalReplicas
 		sts.Status.ReadyReplicas = readyReplicas
+		sts.Status.AvailableReplicas = readyReplicas
 	}
 }
 
