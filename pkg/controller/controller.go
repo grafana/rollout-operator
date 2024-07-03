@@ -66,11 +66,6 @@ type RolloutController struct {
 	// Used to signal when the controller should stop.
 	stopCh chan struct{}
 
-	//deletion interval related
-	delayBetweenSts time.Duration
-	lastUpdatedSts  *v1.StatefulSet
-	lastUpdatedTime time.Time
-
 	// Metrics.
 	groupReconcileTotal       *prometheus.CounterVec
 	groupReconcileFailed      *prometheus.CounterVec
@@ -82,7 +77,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, delayBetweenSts time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -114,9 +109,6 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		logger:               logger,
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
-		delayBetweenSts:      delayBetweenSts,
-		lastUpdatedSts:       nil,
-		lastUpdatedTime:      time.Time{},
 		groupReconcileTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_group_reconciles_total",
 			Help: "Total number of reconciles started for a specific rollout group.",
@@ -217,7 +209,7 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	span, ctx := opentracing.StartSpanFromContext(ctx, "RolloutController.reconcile()")
 	defer span.Finish()
 
-	level.Info(c.logger).Log("msg", "reconcile started")
+	level.Info(c.logger).Log("msg", "reconcile started (minReadySeconds version)")
 
 	sets, err := c.listStatefulSetsWithRolloutGroup()
 	if err != nil {
@@ -310,8 +302,6 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	if len(notReadySets) == 1 {
 		level.Info(c.logger).Log("msg", "a StatefulSet has some not-Ready pods, reconcile it first", "statefulset", notReadySets[0].Name)
 		sets = util.MoveStatefulSetToFront(sets, notReadySets[0])
-		// sts could become not ready by other activities like UKI, we should consider this as last updated sts
-		c.updateLastUpdatedSts(notReadySets[0])
 	}
 
 	for _, sts := range sets {
@@ -325,7 +315,6 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 		if ongoing {
 			// Do not continue with other StatefulSets because this StatefulSet
 			// update is still ongoing.
-			c.updateLastUpdatedSts(sts)
 			return nil
 		}
 	}
@@ -499,20 +488,6 @@ func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error)
 	return pods, nil
 }
 
-func (c *RolloutController) canUpdateSts(sts *v1.StatefulSet) bool {
-	if c.lastUpdatedSts == nil || c.lastUpdatedSts.Name == sts.Name {
-		// no need to wait within the same sts updates
-		return true
-	}
-	return time.Since(c.lastUpdatedTime) > c.delayBetweenSts
-}
-
-func (c *RolloutController) updateLastUpdatedSts(sts *v1.StatefulSet) {
-	c.lastUpdatedSts = sts
-	c.lastUpdatedTime = time.Now()
-	level.Debug(c.logger).Log("msg", "updated last updated sts", "sts", sts.Name, "time", c.lastUpdatedTime)
-}
-
 func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.StatefulSet) (bool, error) {
 	level.Debug(c.logger).Log("msg", "reconciling StatefulSet", "statefulset", sts.Name)
 
@@ -522,19 +497,6 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 	}
 
 	if len(podsToUpdate) > 0 {
-		if !c.canUpdateSts(sts) {
-			// only check canUpdateSts if the current sts has pods to be updated
-			level.Info(c.logger).Log("msg", "delaying reconcile between StatefulSets updates",
-				"curr", sts.Name, "last", c.lastUpdatedSts.Name,
-				"delay", c.delayBetweenSts, "pods_to_update", len(podsToUpdate))
-			time.Sleep(c.delayBetweenSts)
-			// MUST return here:
-			// 1. pods state could change during the delay period, scan the entire cluster again
-			// 2. since we didn't actually update current sts, the last updated sts should not be changed
-			// 3. throw errors to not proceed with other StatefulSets
-			return false, errors.New("delaying reconcile between StatefulSets updates")
-		}
-
 		maxUnavailable := getMaxUnavailableForStatefulSet(sts, c.logger)
 		numNotAvailable := int(sts.Status.Replicas - sts.Status.AvailableReplicas)
 
