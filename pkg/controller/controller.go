@@ -498,7 +498,8 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	if len(podsToUpdate) > 0 {
 		maxUnavailable := getMaxUnavailableForStatefulSet(sts, c.logger)
-		numNotAvailable := int(sts.Status.Replicas - sts.Status.AvailableReplicas)
+		//numNotAvailable := int(sts.Status.Replicas - sts.Status.AvailableReplicas)
+		numNotAvailable := int(sts.Status.Replicas - sts.Status.ReadyReplicas)
 
 		// Compute the number of pods we should update, honoring the configured maxUnavailable.
 		numPods := max(0, min(
