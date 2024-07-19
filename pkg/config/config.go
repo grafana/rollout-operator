@@ -20,6 +20,10 @@ const (
 	PrepareDownscaleLabelKey   = "grafana.com/prepare-downscale"
 	PrepareDownscaleLabelValue = "true"
 
+	// GracefulShutdownLabelKey is the label to gracefully shut down a pod of a statefulset.
+	GracefulShutdownLabelKey   = "grafana.com/graceful-shutdown"
+	GracefulShutdownLabelValue = "delete-pod"
+
 	// RolloutGroupLabelKey is the group to which multiple statefulsets belong and must be operated on together.
 	RolloutGroupLabelKey = "rollout-group"
 	// RolloutMaxUnavailableAnnotationKey is the max number of pods in each statefulset that may be stopped at

@@ -491,7 +491,7 @@ func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error)
 func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.StatefulSet) (bool, error) {
 	level.Debug(c.logger).Log("msg", "reconciling StatefulSet", "statefulset", sts.Name)
 
-	podsToUpdate, err := c.podsNotMatchingUpdateRevision(sts)
+	podsToUpdate, err := c.getPodsToUpdate(sts)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get pods to update")
 	}
@@ -565,7 +565,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 	return false, nil
 }
 
-func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
+func (c *RolloutController) getPodsToUpdate(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
 	var (
 		currRev   = sts.Status.CurrentRevision
 		updateRev = sts.Status.UpdateRevision
@@ -590,6 +590,20 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 	pods, err := c.listPods(podsSelector)
 	if err != nil {
 		return nil, err
+	}
+
+	// If there are no pods to be found, check if there are pods that need to be gracefully terminated.
+	if len(pods) == 0 {
+		podsSelector = labels.NewSelector().Add(
+			util.MustNewLabelsRequirement(config.GracefulShutdownLabelKey, selection.Equals, []string{config.GracefulShutdownLabelValue}),
+			util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
+		)
+
+		if pods, err = c.listPods(podsSelector); err != nil {
+			return nil, err
+		} else if len(pods) > 0 {
+			level.Debug(c.logger).Log("msg", fmt.Sprintf("found %d pod(s) marked for graceful termination", len(pods)))
+		}
 	}
 
 	// Sort pods in order to provide a deterministic behaviour.
