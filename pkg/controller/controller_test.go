@@ -489,7 +489,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			expectedPatchedSets:               map[string][]string{"ingester-zone-c": {`{"spec":{"replicas":5}}`}},
 			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`, `{"status":{"replicas":5}}`}},
 		},
-		"should delete pods that are labeled for deletion when all statefulsets are up-to-date": {
+		"should delete pods that are labeled for deletion when all statefulsets are up-to-date, zone-a": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a"),
 				mockStatefulSet("ingester-zone-b"),
@@ -499,15 +499,35 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash, func(pod *corev1.Pod) {
 					pod.Labels[config.GracefulShutdownLabelKey] = config.GracefulShutdownLabelValue
 				}),
-				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash, func(pod *corev1.Pod) {
-					pod.Labels[config.GracefulShutdownLabelKey] = config.GracefulShutdownLabelValue
-				}),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash),
-				mockStatefulSetPod("ingester-zone-b-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testLastRevisionHash, func(pod *corev1.Pod) {
+					pod.Labels[config.GracefulShutdownLabelKey] = config.GracefulShutdownLabelValue
+				}),
 			},
-			expectedDeletedPods: []string{"ingester-zone-a-1", "ingester-zone-a-2"},
+			expectedDeletedPods: []string{"ingester-zone-a-1"},
 		},
+		"should delete pods that are labeled for deletion when all statefulsets are up-to-date, zone-b": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a"),
+				mockStatefulSet("ingester-zone-b"),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash, func(pod *corev1.Pod) {
+					pod.Labels[config.GracefulShutdownLabelKey] = config.GracefulShutdownLabelValue
+				}),
+				mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testLastRevisionHash, func(pod *corev1.Pod) {
+					pod.Labels[config.GracefulShutdownLabelKey] = config.GracefulShutdownLabelValue
+				}),
+			},
+			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-2"},
+		},
+
 		"should delete pods that are labeled for deletion for an up-to-date statefulset during rollout": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a"),
