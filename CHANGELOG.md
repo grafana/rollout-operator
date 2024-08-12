@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [FEATURE] Only scale-up replicas based off `ready` replicas in the leading StatefulSet. #164
+
 ## v0.17.1
 
 * [ENHANCEMENT] prepare-downscale admission webhook: undo prepare-shutdown calls if adding the `last-downscale` annotation fails. #151
