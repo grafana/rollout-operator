@@ -2,6 +2,15 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #165
+  * `github.com/prometheus/client_golang` from `v1.19.0` to `v1.19.1`
+  * `github.com/prometheus/common` from `v0.53.0` to `v0.55.0`
+  * `golang.org/x/sync` from `v0.7.0` to `v0.8.0`
+  * `k8s.io/api` from `v0.30.0` to `v0.30.3`
+  * `k8s.io/apimachinery` from `v0.30.0` to `v0.30.3`
+  * `k8s.io/client-go` from `v0.30.0` to `v0.30.3`
+  * `sigs.k8s.io/controller-runtime` from `v0.18.1` to `v0.18.5`
+
 ## v0.18.0
 
 * [FEATURE] Optionally only scale-up a `StatefulSet` once all of the leader `StatefulSet` replicas are ready. Enable with `grafana.com/rollout-upscale-only-when-leader-ready` annotation set to `true`. #164
