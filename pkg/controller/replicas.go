@@ -19,18 +19,14 @@ func desiredStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulSet
 		return followerReplicas, err
 	}
 
-	// By default, consider the leader's desired replicas regardless of its current state.
 	leaderReplicas := *leader.Spec.Replicas
 	if leaderReplicas > followerReplicas {
 		// Handle scale-up scenarios
 		annotations := sts.GetAnnotations()
-		considerReady, ok := annotations[config.RolloutLeaderReadyAnnotationKey]
-		if ok && considerReady == config.RolloutLeaderReadyAnnotationValue {
-			// If the annotation is present, and equal to 'true', consider only the leader's ready replicas for scaling up.
-			leaderReplicas = leader.Status.ReadyReplicas
-			if leaderReplicas < followerReplicas {
-				// If fewer replicas are ready than currently exist in this zone,
-				// but the desired replicas are greater, do not scale.
+		onlyWhenReady, ok := annotations[config.RolloutLeaderReadyAnnotationKey]
+		if ok && onlyWhenReady == config.RolloutLeaderReadyAnnotationValue {
+			// We only scale up once all of the leader pods are ready. Otherwise we do nothing.
+			if leaderReplicas != leader.Status.ReadyReplicas {
 				return followerReplicas, nil
 			}
 		}

@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [FEATURE] Only scale-up replicas based off `ready` replicas in the leading StatefulSet. #164
+* [FEATURE] Only scale-up once all of the leader `StatefulSet` replicas are ready. #164
 
 ## v0.17.1
 

@@ -28,7 +28,7 @@ const (
 	// RolloutDownscaleLeaderAnnotationKey is the name of the leader statefulset that should be used to determine
 	// the number of replicas in a follower statefulset.
 	RolloutDownscaleLeaderAnnotationKey = "grafana.com/rollout-downscale-leader"
-	// RolloutLeaderReadyKey is whether to only consider `ready` replicas in the leader zone before scaling up
+	// RolloutLeaderReadyKey is whether to only scale up once `ready` replicas match the desired replicas.
 	RolloutLeaderReadyAnnotationKey   = "grafana.com/rollout-leader-ready"
 	RolloutLeaderReadyAnnotationValue = "true"
 
