@@ -28,6 +28,9 @@ const (
 	// RolloutDownscaleLeaderAnnotationKey is the name of the leader statefulset that should be used to determine
 	// the number of replicas in a follower statefulset.
 	RolloutDownscaleLeaderAnnotationKey = "grafana.com/rollout-downscale-leader"
+	// RolloutLeaderReadyKey is whether to only consider `ready` replicas in the leader zone before scaling up
+	RolloutLeaderReadyAnnotationKey   = "grafana.com/rollout-leader-ready"
+	RolloutLeaderReadyAnnotationValue = "true"
 
 	rolloutMirrorReplicasFromResourceAnnotationKeyPrefix = "grafana.com/rollout-mirror-replicas-from-resource"
 	// RolloutMirrorReplicasFromResourceNameAnnotationKey -- when set (together with "kind" and optionally "api-version" annotations), rollout-operator sets number of

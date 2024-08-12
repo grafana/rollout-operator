@@ -33,7 +33,14 @@ For each **rollout group**, the operator **guarantees**:
 
 The operator can also optionally coordinate scaling up and down of `StatefulSets` that are part of the same `rollout-group` based on the `grafana.com/rollout-downscale-leader` annotation. When using this feature, the `grafana.com/min-time-between-zones-downscale` label must also be set on each `StatefulSet`.
 
-This can be useful for automating the tedious scaling of stateful services like Mimir ingesters. Making use of this feature requires adding a few annotations and labels to configure how it works. Examples for a multi-AZ ingester group are given below.
+This can be useful for automating the tedious scaling of stateful services like Mimir ingesters. Making use of this feature requires adding a few annotations and labels to configure how it works.
+
+Additionally you can configure the operator to consider only the ready replicas of the leader `StatefulSet` when scaling up the follower `StatefulSets`. This is controlled by the `grafana.com/rollout-leader-ready` annotation. 
+
+- If the annotation `grafana.com/rollout-leader-ready` is set to `true` on a follower StatefulSet, the operator will scale the follower based on the number of ready replicas in the leader StatefulSet, rather than the desired replicas.
+- This feature ensures that a follower does not scale up beyond the number of ready replicas in the leader, preventing premature scaling in situations where the leader is not fully stable.
+
+Example usage for a multi-AZ ingester group:
 
 - For `ingester-zone-a`, add the following:
   - Labels:
@@ -47,7 +54,8 @@ This can be useful for automating the tedious scaling of stateful services like 
     - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
     - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
   - Annotations:
-    - `grafana.com/rollout-downscale-leader=ingester-zone-a` (zone `b` will follow zone `a`, after a delay) 
+    - `grafana.com/rollout-downscale-leader=ingester-zone-a` (zone `b` will follow zone `a`, after a delay)
+    - `grafana.com/rollout-leader-ready=true` (to consider only ready replicas in zone `a` before scaling up)
     - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
     - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
 - For `ingester-zone-c`, add the following:
@@ -56,6 +64,7 @@ This can be useful for automating the tedious scaling of stateful services like 
     - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
   - Annotations:
     - `grafana.com/rollout-downscale-leader=ingester-zone-b` (zone `c` will follow zone `b`, after a delay)
+    - `grafana.com/rollout-leader-ready=true` (to consider only ready replicas in zone `b` before scaling up)
     - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
     - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
 

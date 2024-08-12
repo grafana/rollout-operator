@@ -211,6 +211,61 @@ func TestReconcileStsReplicas(t *testing.T) {
 		require.Equal(t, int32(4), replicas)
 	})
 
+	t.Run("scale up considering ready replicas", func(t *testing.T) {
+		sts1 := mockStatefulSet("test-zone-a", withReplicas(4, 2))
+		sts2 := mockStatefulSet("test-zone-b", withReplicas(2, 2), withAnnotations(map[string]string{
+			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-a",
+			config.RolloutLeaderReadyAnnotationKey:     config.RolloutLeaderReadyAnnotationValue,
+		}))
+		sts3 := mockStatefulSet("test-zone-c", withReplicas(1, 1), withAnnotations(map[string]string{
+			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-b",
+			config.RolloutLeaderReadyAnnotationKey:     config.RolloutLeaderReadyAnnotationValue,
+		}))
+
+		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
+		require.NoError(t, err)
+		require.Equal(t, int32(2), replicas)
+
+		replicas, err = desiredStsReplicas("test", sts3, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
+		require.NoError(t, err)
+		require.Equal(t, int32(2), replicas)
+	})
+
+	t.Run("scale up ignoring ready replicas", func(t *testing.T) {
+		sts1 := mockStatefulSet("test-zone-a", withReplicas(4, 2))
+		sts2 := mockStatefulSet("test-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
+			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-a",
+		}))
+
+		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2}, log.NewNopLogger())
+		require.NoError(t, err)
+		require.Equal(t, int32(4), replicas)
+	})
+
+	t.Run("do not scale down to ready replicas", func(t *testing.T) {
+		sts1 := mockStatefulSet("test-zone-a", withReplicas(5, 2))
+		sts2 := mockStatefulSet("test-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
+			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-a",
+			config.RolloutLeaderReadyAnnotationKey:     config.RolloutLeaderReadyAnnotationValue,
+		}))
+
+		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2}, log.NewNopLogger())
+		require.NoError(t, err)
+		require.Equal(t, int32(3), replicas)
+	})
+
+	t.Run("scale down to replicas, not ready replicas", func(t *testing.T) {
+		sts1 := mockStatefulSet("test-zone-a", withReplicas(2, 1))
+		sts2 := mockStatefulSet("test-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
+			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-a",
+			config.RolloutLeaderReadyAnnotationKey:     config.RolloutLeaderReadyAnnotationValue,
+		}))
+
+		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2}, log.NewNopLogger())
+		require.NoError(t, err)
+		require.Equal(t, int32(2), replicas)
+	})
+
 	t.Run("scale down min time error", func(t *testing.T) {
 		downscale1 := time.Now().UTC().Round(time.Second).Add(-72 * time.Hour)
 		downscale2 := time.Now().UTC().Round(time.Second).Add(-60 * time.Hour)
