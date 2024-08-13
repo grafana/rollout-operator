@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.18.0
+
 * [FEATURE] Optionally only scale-up a `StatefulSet` once all of the leader `StatefulSet` replicas are ready. Enable with `grafana.com/rollout-upscale-only-when-leader-ready` annotation set to `true`. #164
 
 ## v0.17.1
