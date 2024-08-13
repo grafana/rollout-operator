@@ -20,23 +20,35 @@ func desiredStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulSet
 	}
 
 	leaderReplicas := *leader.Spec.Replicas
+	leaderReadyReplicas := leader.Status.ReadyReplicas
+
+	logger = log.With(
+		logger,
+		"follower", sts.GetName(),
+		"follower_replicas", followerReplicas,
+		"leader", leader.GetName(),
+		"leader_replicas", leaderReplicas,
+		"leader_ready_replicas", leaderReadyReplicas,
+		"group", group,
+	)
+
 	if leaderReplicas > followerReplicas {
-		// Scale up is always allowed immediately
+		// Handle scale-up scenarios
+		annotations := sts.GetAnnotations()
+		onlyWhenReady, ok := annotations[config.RolloutLeaderReadyAnnotationKey]
+		if ok && onlyWhenReady == config.RolloutLeaderReadyAnnotationValue {
+			// We only scale up once all of the leader pods are ready. Otherwise we do nothing.
+			if leaderReplicas != leaderReadyReplicas {
+				level.Debug(logger).Log("msg", "not all leader replicas are ready. Follower replicas not changed.")
+				return followerReplicas, nil
+			}
+		}
 		return leaderReplicas, nil
 	}
 
 	if leaderReplicas < followerReplicas {
 		// Add all relevant key-value pairs before checking if the minimum time between
 		// scale downs has elapsed.
-		logger = log.With(
-			logger,
-			"follower", sts.GetName(),
-			"follower_replicas", followerReplicas,
-			"leader", leader.GetName(),
-			"leader_replicas", leaderReplicas,
-			"group", group,
-		)
-
 		minTimeElapsed, err := minimumTimeHasElapsed(sts, all, logger)
 		if err != nil {
 			return followerReplicas, err
