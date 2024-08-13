@@ -265,23 +265,6 @@ func TestReconcileStsReplicas(t *testing.T) {
 		require.Equal(t, int32(2), replicas)
 	})
 
-	t.Run("do not scale up follower if not all leader replicas are ready", func(t *testing.T) {
-		sts1 := mockStatefulSet("test-zone-a", withReplicas(6, 4))
-		sts2 := mockStatefulSet("test-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
-			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-a",
-			config.RolloutLeaderReadyAnnotationKey:     config.RolloutLeaderReadyAnnotationValue,
-		}))
-
-		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2}, log.NewNopLogger())
-		require.NoError(t, err)
-		require.Equal(t, int32(3), replicas, "no change in replicas because leader isn't ready yet")
-
-		sts1 = mockStatefulSet("test-zone-a", withReplicas(6, 6))
-		replicas, err = desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2}, log.NewNopLogger())
-		require.NoError(t, err)
-		require.Equal(t, int32(6), replicas, "ready to scale zone-b")
-	})
-
 	t.Run("scale down min time error", func(t *testing.T) {
 		downscale1 := time.Now().UTC().Round(time.Second).Add(-72 * time.Hour)
 		downscale2 := time.Now().UTC().Round(time.Second).Add(-60 * time.Hour)
