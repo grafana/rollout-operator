@@ -30,7 +30,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/containerd/containerd/log"
 	"github.com/docker/docker/api/types"
 	docker "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
@@ -126,6 +125,9 @@ func TranslateNodeToContainer(node *k3d.Node) (*NodeInDocker, error) {
 	/* They have to run in privileged mode */
 	// TODO: can we replace this by a reduced set of capabilities?
 	hostConfig.Privileged = true
+
+	// Privileged containers require userns=host when Docker has userns-remap enabled
+	hostConfig.UsernsMode = "host"
 
 	if node.HostPidMode {
 		hostConfig.PidMode = "host"
@@ -301,7 +303,7 @@ func TranslateContainerDetailsToNode(containerDetails types.ContainerJSON) (*k3d
 			if nodeState.Running && nodeState.Status != "restarting" { // if the container is not running or currently restarting, it won't have an IP, so we don't error in that case
 				return nil, fmt.Errorf("failed to parse IP '%s' for container '%s': %s\nStatus: %v\n%+v", clusterNet.IPAddress, containerDetails.Name, err, nodeState.Status, containerDetails.NetworkSettings)
 			} else {
-				log.L.Tracef("failed to parse IP '%s' for container '%s', likely because it's not running (or restarting): %v", clusterNet.IPAddress, containerDetails.Name, err)
+				l.Log().Tracef("failed to parse IP '%s' for container '%s', likely because it's not running (or restarting): %v", clusterNet.IPAddress, containerDetails.Name, err)
 			}
 		}
 		isStaticIP := false

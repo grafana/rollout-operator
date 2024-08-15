@@ -88,7 +88,7 @@ func NewCluster(ctx context.Context, t *testing.T, opts ...Option) Cluster {
 		},
 	}
 
-	clusterConfig, err := config.TransformSimpleToClusterConfig(ctx, runtimes.SelectedRuntime, simpleCfg)
+	clusterConfig, err := config.TransformSimpleToClusterConfig(ctx, runtimes.SelectedRuntime, simpleCfg, "")
 	require.NoError(t, err, "Can't transform simple config to cluster config")
 
 	clusterConfig, err = config.ProcessClusterConfig(*clusterConfig)
