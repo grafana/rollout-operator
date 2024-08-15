@@ -10,6 +10,7 @@
   * `k8s.io/apimachinery` from `v0.30.0` to `v0.30.3`
   * `k8s.io/client-go` from `v0.30.0` to `v0.30.3`
   * `sigs.k8s.io/controller-runtime` from `v0.18.1` to `v0.18.5`
+* [ENHANCEMENT] Update Go to `1.23`. #168
 
 ## v0.18.0
 
