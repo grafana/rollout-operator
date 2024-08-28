@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [CHANGE] Renamed `grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas` annotation to `grafana.com/rollout-mirror-replicas-from-resource-write-back`, because it was too long (over 64 chars). #
+
 ## v0.19.0
 
 * [ENHANCEMENT] Updated dependencies, including: #165
@@ -13,7 +15,7 @@
   * `k8s.io/client-go` from `v0.30.0` to `v0.30.3`
   * `sigs.k8s.io/controller-runtime` from `v0.18.1` to `v0.18.5`
 * [ENHANCEMENT] Update Go to `1.23`. #168
-* [ENHANCEMENT] When mirroring replicas of statefulset, rollout-operator can now skip writing back number of replicas to reference resource, by setting `grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas` annotation to `false`. #169
+* [ENHANCEMENT] When mirroring replicas of statefulset, rollout-operator can now skip writing back number of replicas to reference resource, by setting `grafana.com/rollout-mirror-replicas-from-resource-write-back` annotation to `false`. #169
 
 ## v0.18.0
 
