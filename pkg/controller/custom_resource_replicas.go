@@ -161,11 +161,11 @@ func updateStatusReplicasOnReferenceResourceIfNeeded(ctx context.Context, logger
 	logger = log.With(logger, "name", sts.GetName(), "replicas", replicas, "referenceResource", referenceResource)
 
 	// If annotation is not present, or equals to "true", we update. If annotation equals to "false" or fails to parse, we don't update.
-	updateReplicas, ok := sts.Annotations[config.RolloutMirrorReplicasFromResourceUpdateStatusReplicas]
+	updateReplicas, ok := sts.Annotations[config.RolloutMirrorReplicasFromResourceWriteBackStatusReplicas]
 	if ok {
 		update, err := strconv.ParseBool(updateReplicas)
 		if err != nil {
-			level.Info(logger).Log("msg", "not updating status.replicas on reference resource to match current replicas of statefulset, failed to parse "+config.RolloutMirrorReplicasFromResourceUpdateStatusReplicas+" annotation", "err", err)
+			level.Info(logger).Log("msg", "not updating status.replicas on reference resource to match current replicas of statefulset, failed to parse "+config.RolloutMirrorReplicasFromResourceWriteBackStatusReplicas+" annotation", "err", err)
 			return
 		}
 		if !update {

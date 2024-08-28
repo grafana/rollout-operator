@@ -38,7 +38,7 @@ const (
 	RolloutMirrorReplicasFromResourceNameAnnotationKey       = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-name"
 	RolloutMirrorReplicasFromResourceKindAnnotationKey       = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-kind"
 	RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-api-version"                // optional
-	RolloutMirrorReplicasFromResourceUpdateStatusReplicas    = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-write-back-status-replicas" // optional
+	RolloutMirrorReplicasFromResourceWriteBackStatusReplicas = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-write-back-status-replicas" // optional
 
 	// RolloutDelayedDownscaleAnnotationKey configures delay for downscaling. Prepare-url must be configured as well, and must support GET, POST and DELETE methods.
 	RolloutDelayedDownscaleAnnotationKey = "grafana.com/rollout-delayed-downscale"
