@@ -72,8 +72,12 @@ Rollout-operator can use custom resource with `scale` and `status` subresources 
 * `grafana.com/rollout-mirror-replicas-from-resource-name`
 * `grafana.com/rollout-mirror-replicas-from-resource-kind`
 * `grafana.com/rollout-mirror-replicas-from-resource-api-version`
+* `grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas`
 
-These annotations must be set on StatefulSet that rollout-operator will scale (ie. target statefulset). Number of replicas in target statefulset will follow replicas in reference resource (from `scale` subresource), while reference resource's `status` subresource will be updated with current number of replicas in target statefulset.
+These annotations must be set on StatefulSet that rollout-operator will scale (ie. target statefulset).
+Number of replicas in target statefulset will follow replicas in reference resource (from `scale` subresource).
+Reference resource's `status` subresource will be updated with current number of replicas in target statefulset,
+unless explicitly disabled by setting `grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas` annotation to `false`.
 
 This is similar to using `grafana.com/rollout-downscale-leader`, but reference resource can be any kind of resource, not just statefulset. Furthermore `grafana.com/min-time-between-zones-downscale` is not respected when using scaling based on reference resource.
 

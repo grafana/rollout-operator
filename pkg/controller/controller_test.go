@@ -410,6 +410,20 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":5}}`}},
 			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`}},
 		},
+		"should return early and scale up statefulset based on reference custom resource, but not patch the resource since it's disabled": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(2, 2), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "false",
+				})),
+			},
+			customResourceScaleSpecReplicas:   5,
+			customResourceScaleStatusReplicas: 2,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":5}}`}},
+			expectedPatchedResources:          nil, // Reference resource is not patched.
+		},
 		"should return early and scale down statefulset based on reference custom resource": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
@@ -423,6 +437,20 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":2}}`}},
 			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":2}}`}},
 		},
+		"should return early and scale down statefulset based on reference custom resource, but not patch the resource since it's disabled": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "false",
+				})),
+			},
+			customResourceScaleSpecReplicas:   2,
+			customResourceScaleStatusReplicas: 3,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":2}}`}},
+			expectedPatchedResources:          nil, // Reference resource is not patched.
+		},
 		"should patch scale subresource status.replicas if it doesn't match statefulset": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
@@ -435,6 +463,20 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			customResourceScaleStatusReplicas: 5,
 			expectedPatchedSets:               nil,
 			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":3}}`}},
+		},
+		"should not patch scale subresource status.replicas since it's disabled, even though spec.replicas != statefulset.spec.replicas": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "false",
+				})),
+			},
+			customResourceScaleSpecReplicas:   3,
+			customResourceScaleStatusReplicas: 5,
+			expectedPatchedSets:               nil,
+			expectedPatchedResources:          nil, // Reference resource is not patched.
 		},
 		"should NOT patch scale subresource status.replicas if it already matches statefulset": {
 			statefulSets: []runtime.Object{
@@ -478,7 +520,13 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
 				})),
-				mockStatefulSet("ingester-zone-c", withReplicas(2, 2), withAnnotations(map[string]string{
+				mockStatefulSet("ingester-zone-c", withReplicas(5, 5), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "true", // Patching of reference resource is explicitly enabled.
+				})),
+				mockStatefulSet("ingester-zone-d", withReplicas(2, 2), withAnnotations(map[string]string{
 					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
 					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
@@ -486,8 +534,36 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			customResourceScaleSpecReplicas:   5,
 			customResourceScaleStatusReplicas: 2,
-			expectedPatchedSets:               map[string][]string{"ingester-zone-c": {`{"spec":{"replicas":5}}`}},
-			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`, `{"status":{"replicas":5}}`}},
+			expectedPatchedSets:               map[string][]string{"ingester-zone-d": {`{"spec":{"replicas":5}}`}},
+			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`, `{"status":{"replicas":5}}`, `{"status":{"replicas":5}}`}},
+		},
+		"all statefulsets are considered, but only one patches the reference resource": {
+			statefulSets: []runtime.Object{
+				// Does NOT have scaling annotations
+				mockStatefulSet("ingester-zone-a", withReplicas(4, 4)),
+				// Is already scaled.
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "false", // Explicitly disabled.
+				})),
+				mockStatefulSet("ingester-zone-c", withReplicas(5, 5), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "bad value", // Disabled through wrong value.
+				})),
+				mockStatefulSet("ingester-zone-d", withReplicas(2, 2), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+				})),
+			},
+			customResourceScaleSpecReplicas:   5,
+			customResourceScaleStatusReplicas: 2,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-d": {`{"spec":{"replicas":5}}`}},
+			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`}},
 		},
 	}
 
@@ -559,7 +635,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			// Assert updated StatefulSets.
 			assert.Equal(t, testData.expectedUpdatedSets, updatedStsNames)
 
-			// Assert patched StatefulSets.
+			// Assert patched StatefulSets and resources.
 			assert.Equal(t, testData.expectedPatchedSets, convertEmptyMapToNil(patchedStatefulSets))
 			assert.Equal(t, testData.expectedPatchedResources, convertEmptyMapToNil(patchedStatuses))
 

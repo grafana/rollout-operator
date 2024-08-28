@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -148,7 +149,7 @@ func scaleForResourceMappings(ctx context.Context, namespace, name string, mappi
 
 // updateStatusReplicasOnReferenceResourceIfNeeded makes sure that scaleObject's status.replicas field is up-to-date.
 // if update fails, error is logged, but not returned to caller.
-func updateStatusReplicasOnReferenceResourceIfNeeded(ctx context.Context, log log.Logger, dynamicClient dynamic.Interface, sts *appsv1.StatefulSet, scaleObj *autoscalingv1.Scale, gvr schema.GroupVersionResource, resName string, replicas int32) {
+func updateStatusReplicasOnReferenceResourceIfNeeded(ctx context.Context, logger log.Logger, dynamicClient dynamic.Interface, sts *appsv1.StatefulSet, scaleObj *autoscalingv1.Scale, gvr schema.GroupVersionResource, resName string, replicas int32) {
 	if scaleObj.Status.Replicas == replicas {
 		// Nothing to do.
 		return
@@ -156,12 +157,29 @@ func updateStatusReplicasOnReferenceResourceIfNeeded(ctx context.Context, log lo
 
 	referenceResource := fmt.Sprintf("%s/%s", gvr.Resource, resName)
 
-	level.Info(log).Log("msg", "updating status.replicas on resource to match current replicas of statefulset", "name", sts.GetName(), "replicas", replicas, "referenceResource", referenceResource)
+	// Add common fields to logger.
+	logger = log.With(logger, "name", sts.GetName(), "replicas", replicas, "referenceResource", referenceResource)
+
+	// If annotation is not present, or equals to "true", we update. If annotation equals to "false" or fails to parse, we don't update.
+	updateReplicas, ok := sts.Annotations[config.RolloutMirrorReplicasFromResourceWriteBackStatusReplicas]
+	if ok {
+		update, err := strconv.ParseBool(updateReplicas)
+		if err != nil {
+			level.Info(logger).Log("msg", "not updating status.replicas on reference resource to match current replicas of statefulset, failed to parse "+config.RolloutMirrorReplicasFromResourceWriteBackStatusReplicas+" annotation", "err", err)
+			return
+		}
+		if !update {
+			level.Info(logger).Log("msg", "not updating status.replicas on reference resource to match current replicas of statefulset, updating disabled")
+			return
+		}
+	}
+
+	level.Info(logger).Log("msg", "updating status.replicas on reference resource to match current replicas of statefulset")
 
 	// We need to update status.replicas on the resource (status subresource), not on the scale subresource.
 	patch := fmt.Sprintf(`{"status":{"replicas":%d}}`, replicas)
 	_, err := dynamicClient.Resource(gvr).Namespace(sts.Namespace).Patch(ctx, resName, types.MergePatchType, []byte(patch), metav1.PatchOptions{}, "status")
 	if err != nil {
-		level.Warn(log).Log("msg", "updating status.replicas on reference resource to match current replicas of statefulset failed", "name", sts.GetName(), "replicas", replicas, "referenceResource", referenceResource, "err", err)
+		level.Warn(logger).Log("msg", "updating status.replicas on reference resource to match current replicas of statefulset failed", "err", err)
 	}
 }
