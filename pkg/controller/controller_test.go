@@ -413,10 +413,10 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		"should return early and scale up statefulset based on reference custom resource, but not patch the resource since it's disabled": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(2, 2), withAnnotations(map[string]string{
-					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
-					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
-					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
-					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "false",
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "false",
 				})),
 			},
 			customResourceScaleSpecReplicas:   5,
@@ -440,10 +440,10 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		"should return early and scale down statefulset based on reference custom resource, but not patch the resource since it's disabled": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
-					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
-					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
-					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
-					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "false",
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "false",
 				})),
 			},
 			customResourceScaleSpecReplicas:   2,
@@ -467,10 +467,10 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		"should not patch scale subresource status.replicas since it's disabled, even though spec.replicas != statefulset.spec.replicas": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
-					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
-					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
-					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
-					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "false",
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "false",
 				})),
 			},
 			customResourceScaleSpecReplicas:   3,
@@ -521,10 +521,10 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
 				})),
 				mockStatefulSet("ingester-zone-c", withReplicas(5, 5), withAnnotations(map[string]string{
-					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
-					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
-					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
-					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "true", // Patching of reference resource is explicitly enabled.
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "true", // Patching of reference resource is explicitly enabled.
 				})),
 				mockStatefulSet("ingester-zone-d", withReplicas(2, 2), withAnnotations(map[string]string{
 					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
@@ -543,16 +543,16 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSet("ingester-zone-a", withReplicas(4, 4)),
 				// Is already scaled.
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5), withAnnotations(map[string]string{
-					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
-					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
-					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
-					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "false", // Explicitly disabled.
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "false", // Explicitly disabled.
 				})),
 				mockStatefulSet("ingester-zone-c", withReplicas(5, 5), withAnnotations(map[string]string{
-					"grafana.com/rollout-mirror-replicas-from-resource-name":                       "test",
-					"grafana.com/rollout-mirror-replicas-from-resource-kind":                       customResourceGVK.Kind,
-					"grafana.com/rollout-mirror-replicas-from-resource-api-version":                customResourceGVK.GroupVersion().String(),
-					"grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas": "bad value", // Disabled through wrong value.
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "bad value", // Disabled through wrong value.
 				})),
 				mockStatefulSet("ingester-zone-d", withReplicas(2, 2), withAnnotations(map[string]string{
 					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
