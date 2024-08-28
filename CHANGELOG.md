@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.19.1
+
 * [CHANGE] Renamed `grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas` annotation to `grafana.com/rollout-mirror-replicas-from-resource-write-back`, because it was too long (over 64 chars). #171
 
 ## v0.19.0
