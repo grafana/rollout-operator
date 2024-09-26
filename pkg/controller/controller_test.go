@@ -693,18 +693,18 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
 			},
 			httpResponses: map[string]httpResponse{
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
 			},
 			customResourceScaleSpecReplicas:   3, // We want to downscale to 3 replicas only.
 			customResourceScaleStatusReplicas: 5,
 
 			expectedHttpRequests: []string{
-				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 
 			expectedPatchedSets: map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":3}}`}}, // This is the downscale!
@@ -717,17 +717,17 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
 			},
 			httpResponses: map[string]httpResponse{
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-30*time.Minute).Unix())},
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-30*time.Minute).Unix())},
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
 			},
 			customResourceScaleSpecReplicas:   3, // We want to downscale to 3 replicas only.
 			customResourceScaleStatusReplicas: 5,
 			expectedHttpRequests: []string{
-				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 		},
 
@@ -738,17 +738,17 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
 			},
 			httpResponses: map[string]httpResponse{
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
 			},
 			customResourceScaleSpecReplicas:   3, // We want to downscale to 3 replicas only.
 			customResourceScaleStatusReplicas: 5,
 			expectedHttpRequests: []string{
-				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 		},
 
@@ -759,20 +759,20 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
 			},
 			httpResponses: map[string]httpResponse{
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-75*time.Minute).Unix())},
-				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-30*time.Minute).Unix())}, // cannot be scaled down yet, as 1h has not elapsed
-				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-75*time.Minute).Unix())},
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-75*time.Minute).Unix())},
+				"POST http://ingester-zone-b-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-30*time.Minute).Unix())}, // cannot be scaled down yet, as 1h has not elapsed
+				"POST http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-75*time.Minute).Unix())},
 			},
 			customResourceScaleSpecReplicas:   1, // We want to downscale to single replica
 			customResourceScaleStatusReplicas: 5,
 			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":3}}`}}, // Scaledown by 2 replicas (from 5 to 3) is allowed.
 			expectedHttpRequests: []string{
-				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 		},
 
@@ -783,17 +783,17 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
 			},
 			httpResponses: map[string]httpResponse{
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 500, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 500, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 500, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 500, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
 			},
 			customResourceScaleSpecReplicas:   3, // We want to downscale to 3 replicas only.
 			customResourceScaleStatusReplicas: 5,
 			expectedHttpRequests: []string{
-				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 		},
 
@@ -804,17 +804,17 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
 			},
 			httpResponses: map[string]httpResponse{
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {err: fmt.Errorf("network is down"), body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {err: fmt.Errorf("network is down"), body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
 			},
 			customResourceScaleSpecReplicas:   3, // We want to downscale to 3 replicas only.
 			customResourceScaleStatusReplicas: 5,
 			expectedHttpRequests: []string{
-				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 		},
 
@@ -825,17 +825,17 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
 			},
 			httpResponses: map[string]httpResponse{
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: "this should be JSON, but isn't"},
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: "this should be JSON, but isn't"},
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
 			},
 			customResourceScaleSpecReplicas:   3, // We want to downscale to 3 replicas only.
 			customResourceScaleStatusReplicas: 5,
 			expectedHttpRequests: []string{
-				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 		},
 
@@ -850,25 +850,25 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
 			},
 			httpResponses: map[string]httpResponse{
-				"POST http://ingester-zone-a-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
-				"POST http://ingester-zone-a-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-a-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+				"POST http://ingester-zone-a-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
 			},
 			customResourceScaleSpecReplicas:   3, // We want to downscale to 3 replicas only.
 			customResourceScaleStatusReplicas: 5,
 			expectedHttpRequests: []string{
-				"DELETE http://ingester-zone-a-0.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-a-1.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-a-2.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-a-3.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-a-4.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-a-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-a-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-a-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-a-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-a-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 
-				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 
 			expectedPatchedSets: map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":3}}`}}, // This is the downscale!
@@ -884,8 +884,8 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			customResourceScaleStatusReplicas: 2,
 			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":5}}`}},
 			expectedHttpRequests: []string{
-				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 		},
 
@@ -898,9 +898,9 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			customResourceScaleSpecReplicas:   3,
 			customResourceScaleStatusReplicas: 3,
 			expectedHttpRequests: []string{
-				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
-				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-0.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-headless.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 		},
 	}
@@ -1097,7 +1097,8 @@ func mockStatefulSet(name string, overrides ...func(sts *v1.StatefulSet)) *v1.St
 			},
 		},
 		Spec: v1.StatefulSetSpec{
-			Replicas: &replicas,
+			ServiceName: "ingester-headless",
+			Replicas:    &replicas,
 			UpdateStrategy: v1.StatefulSetUpdateStrategy{
 				Type: v1.OnDeleteStatefulSetStrategyType,
 			},
