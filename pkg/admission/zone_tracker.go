@@ -78,6 +78,11 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
+	statefulset, err := getStatefulSet(ar, oldInfo)
+	if err != nil {
+		return allowWarn(logger, fmt.Sprintf("%s, allowing the change", err))
+	}
+
 	port := annotations[config.PrepareDownscalePortAnnotationKey]
 	if port == "" {
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePortAnnotationKey))
@@ -147,7 +152,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 	}
 
 	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
-	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
+	eps := createEndpoints(ar, oldInfo, newInfo, statefulset.Spec.ServiceName, port, path)
 
 	err = sendPrepareShutdownRequests(ctx, logger, client, eps)
 	if err != nil {
