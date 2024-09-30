@@ -2,6 +2,14 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #174
+  * `github.com/prometheus/client_golang` from `v1.19.1` to `v1.20.4`
+  * `github.com/prometheus/common` from `v0.55.0` to `v0.59.1`
+  * `k8s.io/api` from `v0.30.3` to `v0.31.1`
+  * `k8s.io/apimachinery` from `v0.30.3` to `v0.31.1`
+  * `k8s.io/client-go` from `v0.30.3` to `v0.31.1`
+  * `sigs.k8s.io/controller-runtime` from `v0.18.5` to `v0.19.0`
+
 ## v0.19.1
 
 * [CHANGE] Renamed `grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas` annotation to `grafana.com/rollout-mirror-replicas-from-resource-write-back`, because it was too long (over 64 chars). #171
