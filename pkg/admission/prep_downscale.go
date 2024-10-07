@@ -92,6 +92,11 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		return allowWarn(logger, fmt.Sprintf("%s, allowing the change", err))
 	}
 
+	statefulset, err := getStatefulSet(ar, oldInfo)
+	if err != nil {
+		return allowWarn(logger, fmt.Sprintf("%s, allowing the change", err))
+	}
+
 	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	if lbls[config.PrepareDownscaleLabelKey] != config.PrepareDownscaleLabelValue {
 		// Not labeled, nothing to do.
@@ -159,7 +164,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	}
 
 	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
-	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
+	eps := createEndpoints(ar, oldInfo, newInfo, statefulset.Spec.ServiceName, port, path)
 
 	if err := sendPrepareShutdownRequests(ctx, logger, client, eps); err != nil {
 		// Down-scale operation is disallowed because at least one pod failed to
@@ -449,7 +454,21 @@ func getLabelsAndAnnotations(ctx context.Context, ar v1.AdmissionReview, api kub
 	return lbls, annotations, nil
 }
 
-func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, path string) []endpoint {
+func getStatefulSet(ar v1.AdmissionReview, info *objectInfo) (*appsv1.StatefulSet, error) {
+	switch o := info.obj.(type) {
+	case *appsv1.StatefulSet:
+		statefulset := &appsv1.StatefulSet{}
+		_, _, err := codecs.UniversalDeserializer().Decode(ar.Request.Object.Raw, nil, statefulset)
+		if err != nil {
+			return nil, err
+		}
+		return statefulset, nil
+	default:
+		return nil, fmt.Errorf("%s is not statefulset is %T", ar.Request.Name, o)
+	}
+}
+
+func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, serviceName, port, path string) []endpoint {
 	diff := (*oldInfo.replicas - *newInfo.replicas)
 	eps := make([]endpoint, diff)
 
@@ -463,7 +482,7 @@ func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, 
 		eps[i].url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
 			ar.Request.Name, // pod name
 			index,
-			ar.Request.Name, // svc name
+			serviceName, // svc name
 			ar.Request.Namespace,
 			port,
 			path,

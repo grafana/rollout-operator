@@ -1,8 +1,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: test-app
+  name: test-app-headless
 spec:
+  clusterIP: None
   selector:
     name: test-app
   ports:
@@ -24,7 +25,7 @@ metadata:
     grafana.com/prepare-downscale-http-port: "80"
 spec:
   replicas: 3
-  serviceName: test-app
+  serviceName: test-app-headless
   selector:
     matchLabels:
       name: test-app
