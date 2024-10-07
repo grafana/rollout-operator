@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.20.0
+
 * [ENHANCEMENT] Updated dependencies, including: #174
   * `github.com/prometheus/client_golang` from `v1.19.1` to `v1.20.4`
   * `github.com/prometheus/common` from `v0.55.0` to `v0.59.1`
