@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -34,10 +35,10 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 
 		referenceResource := fmt.Sprintf("%s/%s", referenceGVR.Resource, referenceName)
 
-		desiredReplicas := scaleObj.Spec.Replicas
-		if currentReplicas == desiredReplicas {
-			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
-			cancelDelayedDownscaleIfConfigured(ctx, c.logger, sts, client, desiredReplicas)
+		referenceResourceDesiredReplicas := scaleObj.Spec.Replicas
+		if currentReplicas == referenceResourceDesiredReplicas {
+			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, referenceResourceDesiredReplicas)
+			cancelDelayedDownscaleIfConfigured(ctx, c.logger, sts, client, referenceResourceDesiredReplicas)
 			// No change in the number of replicas: don't log because this will be the result most of the time.
 			continue
 		}
@@ -45,26 +46,34 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		// We're going to change number of replicas on the statefulset.
 		// If there is delayed downscale configured on the statefulset, we will first handle delay part, and only if that succeeds,
 		// continue with downscaling or upscaling.
-		if err := checkScalingDelay(ctx, c.logger, sts, client, currentReplicas, desiredReplicas); err != nil {
-			level.Warn(c.logger).Log("msg", "not scaling statefulset due to failed scaling delay check", "group", groupName, "name", sts.GetName(), "currentReplicas", currentReplicas, "desiredReplicas", desiredReplicas, "err", err)
+		desiredReplicas, err := checkScalingDelay(ctx, c.logger, sts, client, currentReplicas, referenceResourceDesiredReplicas)
+		if err != nil {
+			level.Warn(c.logger).Log("msg", "not scaling statefulset due to failed scaling delay check",
+				"group", groupName,
+				"name", sts.GetName(),
+				"currentReplicas", currentReplicas,
+				"referenceResourceDesiredReplicas", referenceResourceDesiredReplicas,
+				"err", err,
+			)
 
 			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, currentReplicas)
 			// If delay has not been reached, we can check next statefulset.
 			continue
 		}
 
-		direction := ""
+		logMsg := ""
 		if desiredReplicas > currentReplicas {
-			direction = "up"
+			logMsg = "scaling up statefulset to match replicas in the reference resource"
 		} else if desiredReplicas < currentReplicas {
-			direction = "down"
+			logMsg = "scaling down statefulset to computed desired replicas, based on replicas in the reference resource and elapsed downscale delays"
 		}
 
-		level.Info(c.logger).Log("msg", fmt.Sprintf("scaling %s statefulset to match reference resource", direction),
+		level.Info(c.logger).Log("msg", logMsg,
 			"group", groupName,
 			"name", sts.GetName(),
 			"currentReplicas", currentReplicas,
-			"desiredReplicas", desiredReplicas,
+			"referenceResourceDesiredReplicas", referenceResourceDesiredReplicas,
+			"computedDesiredReplicas", desiredReplicas,
 			"referenceResource", referenceResource,
 		)
 
@@ -140,7 +149,7 @@ func scaleForResourceMappings(ctx context.Context, namespace, name string, mappi
 
 // updateStatusReplicasOnReferenceResourceIfNeeded makes sure that scaleObject's status.replicas field is up-to-date.
 // if update fails, error is logged, but not returned to caller.
-func updateStatusReplicasOnReferenceResourceIfNeeded(ctx context.Context, log log.Logger, dynamicClient dynamic.Interface, sts *appsv1.StatefulSet, scaleObj *autoscalingv1.Scale, gvr schema.GroupVersionResource, resName string, replicas int32) {
+func updateStatusReplicasOnReferenceResourceIfNeeded(ctx context.Context, logger log.Logger, dynamicClient dynamic.Interface, sts *appsv1.StatefulSet, scaleObj *autoscalingv1.Scale, gvr schema.GroupVersionResource, resName string, replicas int32) {
 	if scaleObj.Status.Replicas == replicas {
 		// Nothing to do.
 		return
@@ -148,12 +157,29 @@ func updateStatusReplicasOnReferenceResourceIfNeeded(ctx context.Context, log lo
 
 	referenceResource := fmt.Sprintf("%s/%s", gvr.Resource, resName)
 
-	level.Info(log).Log("msg", "updating status.replicas on resource to match current replicas of statefulset", "name", sts.GetName(), "replicas", replicas, "referenceResource", referenceResource)
+	// Add common fields to logger.
+	logger = log.With(logger, "name", sts.GetName(), "replicas", replicas, "referenceResource", referenceResource)
+
+	// If annotation is not present, or equals to "true", we update. If annotation equals to "false" or fails to parse, we don't update.
+	updateReplicas, ok := sts.Annotations[config.RolloutMirrorReplicasFromResourceWriteBackStatusReplicas]
+	if ok {
+		update, err := strconv.ParseBool(updateReplicas)
+		if err != nil {
+			level.Info(logger).Log("msg", "not updating status.replicas on reference resource to match current replicas of statefulset, failed to parse "+config.RolloutMirrorReplicasFromResourceWriteBackStatusReplicas+" annotation", "err", err)
+			return
+		}
+		if !update {
+			level.Info(logger).Log("msg", "not updating status.replicas on reference resource to match current replicas of statefulset, updating disabled")
+			return
+		}
+	}
+
+	level.Info(logger).Log("msg", "updating status.replicas on reference resource to match current replicas of statefulset")
 
 	// We need to update status.replicas on the resource (status subresource), not on the scale subresource.
 	patch := fmt.Sprintf(`{"status":{"replicas":%d}}`, replicas)
 	_, err := dynamicClient.Resource(gvr).Namespace(sts.Namespace).Patch(ctx, resName, types.MergePatchType, []byte(patch), metav1.PatchOptions{}, "status")
 	if err != nil {
-		level.Warn(log).Log("msg", "updating status.replicas on reference resource to match current replicas of statefulset failed", "name", sts.GetName(), "replicas", replicas, "referenceResource", referenceResource, "err", err)
+		level.Warn(logger).Log("msg", "updating status.replicas on reference resource to match current replicas of statefulset failed", "err", err)
 	}
 }

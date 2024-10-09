@@ -1,5 +1,5 @@
 /*
-Copyright © 2020-2022 The k3d Author(s)
+Copyright © 2020-2023 The k3d Author(s)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -57,15 +57,19 @@ import (
 
 // NodeAddToCluster adds a node to an existing cluster
 func NodeAddToCluster(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, cluster *k3d.Cluster, createNodeOpts k3d.NodeCreateOpts) error {
-	targetClusterName := cluster.Name
-	cluster, err := ClusterGet(ctx, runtime, cluster)
-	if err != nil {
-		return fmt.Errorf("Failed to find specified cluster '%s': %w", targetClusterName, err)
-	}
+	if createNodeOpts.EnvironmentInfo == nil {
+		targetClusterName := cluster.Name
+		cluster, err := ClusterGet(ctx, runtime, cluster)
+		if err != nil {
+			return fmt.Errorf("Failed to find specified cluster '%s': %w", targetClusterName, err)
+		}
 
-	envInfo, err := GatherEnvironmentInfo(ctx, runtime, cluster)
-	if err != nil {
-		return fmt.Errorf("error gathering cluster environment info required to properly create the node: %w", err)
+		envInfo, err := GatherEnvironmentInfo(ctx, runtime, cluster)
+		if err != nil {
+			return fmt.Errorf("error gathering cluster environment info required to properly create the node: %w", err)
+		}
+
+		createNodeOpts.EnvironmentInfo = envInfo
 	}
 
 	// networks: ensure that cluster network is on index 0
@@ -104,7 +108,7 @@ func NodeAddToCluster(ctx context.Context, runtime runtimes.Runtime, node *k3d.N
 	}
 
 	// get node details
-	srcNode, err = NodeGet(ctx, runtime, srcNode)
+	srcNode, err := NodeGet(ctx, runtime, srcNode)
 	if err != nil {
 		return err
 	}
@@ -260,7 +264,7 @@ func NodeAddToCluster(ctx context.Context, runtime runtimes.Runtime, node *k3d.N
 					Runtime: runtime,
 					Command: []string{
 						"sh", "-c",
-						fmt.Sprintf("echo '%s %s' >> /etc/hosts", envInfo.HostGateway.String(), k3d.DefaultK3dInternalHostRecord),
+						fmt.Sprintf("echo '%s %s' >> /etc/hosts", createNodeOpts.EnvironmentInfo.HostGateway.String(), k3d.DefaultK3dInternalHostRecord),
 					},
 					Retries:     0,
 					Description: fmt.Sprintf("Inject /etc/hosts record for %s", k3d.DefaultK3dInternalHostRecord),
@@ -329,6 +333,17 @@ func NodeAddToClusterMulti(ctx context.Context, runtime runtimes.Runtime, nodes 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, createNodeOpts.Timeout)
 		defer cancel()
+	}
+
+	targetClusterName := cluster.Name
+	cluster, err := ClusterGet(ctx, runtime, cluster)
+	if err != nil {
+		return fmt.Errorf("Failed to find specified cluster '%s': %w", targetClusterName, err)
+	}
+
+	createNodeOpts.EnvironmentInfo, err = GatherEnvironmentInfo(ctx, runtime, cluster)
+	if err != nil {
+		return fmt.Errorf("error gathering cluster environment info required to properly create the node: %w", err)
 	}
 
 	nodeWaitGroup, ctx := errgroup.WithContext(ctx)
@@ -489,12 +504,10 @@ func NodeStart(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, no
 
 func enableFixes(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, nodeStartOpts *k3d.NodeStartOpts) error {
 	if node.Role == k3d.ServerRole || node.Role == k3d.AgentRole {
-		// FIXME: FixCgroupV2 - to be removed when fixed upstream
-		// auto-enable, if needed
-		EnableCgroupV2FixIfNeeded(runtime)
+		enabledFixes, anyEnabled := fixes.GetFixes(runtime)
 
 		// early exit if we don't need any fix
-		if !fixes.FixEnabledAny() {
+		if !anyEnabled {
 			l.Log().Debugln("No fix enabled.")
 			return nil
 		}
@@ -517,7 +530,7 @@ func enableFixes(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, 
 		})
 
 		// DNS Fix
-		if fixes.FixEnabled(fixes.EnvFixDNS) {
+		if enabledFixes[fixes.EnvFixDNS] {
 			l.Log().Debugln(">>> enabling dns magic")
 
 			for _, v := range node.Volumes {
@@ -545,7 +558,7 @@ func enableFixes(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, 
 		}
 
 		// CGroupsV2Fix
-		if fixes.FixEnabled(fixes.EnvFixCgroupV2) {
+		if enabledFixes[fixes.EnvFixCgroupV2] {
 			l.Log().Debugf(">>> enabling cgroupsv2 magic")
 
 			if nodeStartOpts.NodeHooks == nil {
@@ -564,7 +577,7 @@ func enableFixes(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, 
 			})
 		}
 
-		if fixes.FixEnabled(fixes.EnvFixMounts) {
+		if enabledFixes[fixes.EnvFixMounts] {
 			l.Log().Debugf(">>> enabling mounts magic")
 
 			if nodeStartOpts.NodeHooks == nil {
@@ -588,8 +601,6 @@ func enableFixes(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, 
 
 // NodeCreate creates a new containerized k3s node
 func NodeCreate(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, createNodeOpts k3d.NodeCreateOpts) error {
-	// FIXME: FixCgroupV2 - to be removed when fixed upstream
-	EnableCgroupV2FixIfNeeded(runtime)
 	l.Log().Tracef("Creating node from spec\n%+v", node)
 
 	/*
@@ -617,6 +628,10 @@ func NodeCreate(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, c
 		if err := patchServerSpec(node, runtime); err != nil {
 			return fmt.Errorf("failed to patch server spec on node %s: %w", node.Name, err)
 		}
+	}
+
+	if _, anyFixEnabled := fixes.GetFixes(runtime); anyFixEnabled {
+		node.K3dEntrypoint = true
 	}
 
 	// memory limits
@@ -671,9 +686,12 @@ func NodeDelete(ctx context.Context, runtime runtimes.Runtime, node *k3d.Node, o
 	if node.Memory != "" {
 		l.Log().Debug("Cleaning fake files folder from k3d config dir for this node...")
 		filepath, err := util.GetNodeFakerDirOrCreate(node.Name)
+		if err != nil {
+			l.Log().Errorf("Could not get fake files folder for node %s: %+v", node.Name, err)
+		}
 		err = os.RemoveAll(filepath)
 		if err != nil {
-			// this err prob should not be fatal, just log it
+			// this error prob should not be fatal, just log it
 			l.Log().Errorf("Could not remove fake files folder for node %s: %+v", node.Name, err)
 		}
 	}

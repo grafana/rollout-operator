@@ -1,4 +1,6 @@
-FROM golang:1.22-bookworm AS build
+ARG BASEIMAGE
+
+FROM golang:1.23-bookworm AS build
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -8,16 +10,10 @@ COPY . /src/rollout-operator
 WORKDIR /src/rollout-operator
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make ${BUILDTARGET}
 
-FROM alpine:3.19
-RUN apk add --no-cache ca-certificates gcompat
+FROM ${BASEIMAGE}
 
 COPY --from=build /src/rollout-operator/rollout-operator /bin/rollout-operator
 ENTRYPOINT [ "/bin/rollout-operator" ]
-
-# Create rollout-operator user to run as non-root.
-RUN addgroup -g 10000 -S rollout-operator && \
-    adduser  -u 10000 -S rollout-operator -G rollout-operator
-USER rollout-operator:rollout-operator
 
 ARG revision
 LABEL org.opencontainers.image.title="rollout-operator" \

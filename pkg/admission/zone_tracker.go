@@ -42,6 +42,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 	logger.SetSpanAndLogTag("object.resource", ar.Request.Resource.Resource)
 	logger.SetSpanAndLogTag("object.namespace", ar.Request.Namespace)
 	logger.SetSpanAndLogTag("request.dry_run", *ar.Request.DryRun)
+	logger.SetSpanAndLogTag("request.uid", ar.Request.UID)
 
 	if *ar.Request.DryRun {
 		return &v1.AdmissionResponse{Allowed: true}
@@ -125,18 +126,38 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
 			level.Warn(logger).Log("msg", msg, "err", err)
+			//nolint:govet
+			return deny(msg)
+		}
+		foundSts, err = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList, ar.Request.Name)
+		if err != nil {
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because an error occurred while checking whether StatefulSets have non-updated replicas",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas)
+			level.Warn(logger).Log("msg", msg, "err", err)
+			//nolint:govet
+			return deny(msg)
+		}
+		if foundSts != nil {
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
+			level.Warn(logger).Log("msg", msg)
+			//nolint:govet
 			return deny(msg)
 		}
 	}
 
-	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
-	// Create a slice of endpoint addresses for pods to send HTTP post requests to and to fail if any don't return 200
+	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
 	err = sendPrepareShutdownRequests(ctx, logger, client, eps)
 	if err != nil {
-		// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
-		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
+		// Down-scale operation is disallowed because at least one pod failed to
+		// prepare for shutdown and cannot be deleted. We also need to
+		// un-prepare them all.
+
+		level.Error(logger).Log("msg", "downscale not allowed due to host(s) failing to prepare for downscale. unpreparing...", "err", err)
+		undoPrepareShutdownRequests(ctx, logger, client, eps)
+
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
@@ -144,14 +165,17 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 	}
 
 	if err := zt.setDownscaled(ctx, ar.Request.Name); err != nil {
-		level.Error(logger).Log("msg", "downscale not allowed due to error while setting downscale timestamp in the zone ConfigMap", "err", err)
+		// Down-scale operation is disallowed because we failed to add the
+		// annotation to the statefulset. We again need to un-prepare all pods.
+		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation. unpreparing...", "err", err)
+		undoPrepareShutdownRequests(ctx, logger, client, eps)
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because setting downscale timestamp in the zone ConfigMap failed.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
 		)
 	}
 
-	// Down-scale operation is allowed because all pods successfully prepared for shutdown
+	// Otherwise, we've made it through the gauntlet, and the downscale is allowed.
 	level.Info(logger).Log("msg", "downscale allowed")
 	return &v1.AdmissionResponse{
 		Allowed: true,

@@ -1,5 +1,5 @@
 /*
-Copyright © 2020-2022 The k3d Author(s)
+Copyright © 2020-2023 The k3d Author(s)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,7 @@ import (
 const ApiVersion = "k3d.io/v1alpha5"
 
 // JSONSchema describes the schema used to validate config files
+//
 //go:embed schema.json
 var JSONSchema string
 
@@ -79,6 +80,13 @@ type EnvVarWithNodeFilters struct {
 
 type K3sArgWithNodeFilters struct {
 	Arg         string   `mapstructure:"arg" json:"arg,omitempty"`
+	NodeFilters []string `mapstructure:"nodeFilters" json:"nodeFilters,omitempty"`
+}
+
+type FileWithNodeFilters struct {
+	Source      string   `mapstructure:"source" json:"source,omitempty"`
+	Destination string   `mapstructure:"destination" json:"destination,omitempty"`
+	Description string   `mapstructure:"description" json:"description,omitempty"`
 	NodeFilters []string `mapstructure:"nodeFilters" json:"nodeFilters,omitempty"`
 }
 
@@ -161,6 +169,7 @@ type SimpleConfig struct {
 	Env               []EnvVarWithNodeFilters `mapstructure:"env" json:"env,omitempty"`
 	Registries        SimpleConfigRegistries  `mapstructure:"registries" json:"registries,omitempty"`
 	HostAliases       []k3d.HostAlias         `mapstructure:"hostAliases" json:"hostAliases,omitempty"`
+	Files             []FileWithNodeFilters   `mapstructure:"files" json:"files,omitempty"`
 }
 
 // SimpleExposureOpts provides a simplified syntax compared to the original k3d.ExposureOpts

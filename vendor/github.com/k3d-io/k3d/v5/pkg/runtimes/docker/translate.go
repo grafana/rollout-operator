@@ -1,5 +1,5 @@
 /*
-Copyright © 2020-2022 The k3d Author(s)
+Copyright © 2020-2023 The k3d Author(s)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/containerd/containerd/log"
 	"github.com/docker/docker/api/types"
 	docker "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
@@ -38,7 +37,6 @@ import (
 	l "github.com/k3d-io/k3d/v5/pkg/logger"
 	runtimeErr "github.com/k3d-io/k3d/v5/pkg/runtimes/errors"
 	k3d "github.com/k3d-io/k3d/v5/pkg/types"
-	"github.com/k3d-io/k3d/v5/pkg/types/fixes"
 
 	dockercliopts "github.com/docker/cli/opts"
 	dockerunits "github.com/docker/go-units"
@@ -69,8 +67,7 @@ func TranslateNodeToContainer(node *k3d.Node) (*NodeInDocker, error) {
 	containerConfig.Image = node.Image
 
 	/* Command & Arguments */
-	// FIXME: FixCgroupV2 - to be removed when fixed upstream
-	if fixes.FixEnabledAny() {
+	if node.K3dEntrypoint {
 		if node.Role == k3d.AgentRole || node.Role == k3d.ServerRole {
 			containerConfig.Entrypoint = []string{
 				"/bin/k3d-entrypoint.sh",
@@ -128,6 +125,9 @@ func TranslateNodeToContainer(node *k3d.Node) (*NodeInDocker, error) {
 	/* They have to run in privileged mode */
 	// TODO: can we replace this by a reduced set of capabilities?
 	hostConfig.Privileged = true
+
+	// Privileged containers require userns=host when Docker has userns-remap enabled
+	hostConfig.UsernsMode = "host"
 
 	if node.HostPidMode {
 		hostConfig.PidMode = "host"
@@ -303,7 +303,7 @@ func TranslateContainerDetailsToNode(containerDetails types.ContainerJSON) (*k3d
 			if nodeState.Running && nodeState.Status != "restarting" { // if the container is not running or currently restarting, it won't have an IP, so we don't error in that case
 				return nil, fmt.Errorf("failed to parse IP '%s' for container '%s': %s\nStatus: %v\n%+v", clusterNet.IPAddress, containerDetails.Name, err, nodeState.Status, containerDetails.NetworkSettings)
 			} else {
-				log.L.Tracef("failed to parse IP '%s' for container '%s', likely because it's not running (or restarting): %v", clusterNet.IPAddress, containerDetails.Name, err)
+				l.Log().Tracef("failed to parse IP '%s' for container '%s', likely because it's not running (or restarting): %v", clusterNet.IPAddress, containerDetails.Name, err)
 			}
 		}
 		isStaticIP := false

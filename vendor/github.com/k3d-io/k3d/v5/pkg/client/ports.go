@@ -1,5 +1,5 @@
 /*
-Copyright © 2020-2022 The k3d Author(s)
+Copyright © 2020-2023 The k3d Author(s)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -122,11 +122,7 @@ func addPortMappings(node *k3d.Node, portmappings []nat.PortMapping) error {
 		node.Ports = nat.PortMap{}
 	}
 	for _, pm := range portmappings {
-		if _, exists := node.Ports[pm.Port]; exists {
-			node.Ports[pm.Port] = append(node.Ports[pm.Port], pm.Binding)
-		} else {
-			node.Ports[pm.Port] = []nat.PortBinding{pm.Binding}
-		}
+		node.Ports[pm.Port] = append(node.Ports[pm.Port], pm.Binding)
 	}
 	return nil
 }

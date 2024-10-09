@@ -1,5 +1,5 @@
 /*
-Copyright © 2020-2022 The k3d Author(s)
+Copyright © 2020-2023 The k3d Author(s)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -118,8 +118,8 @@ func (d Docker) StartNode(ctx context.Context, node *k3d.Node) error {
 	}
 
 	// actually start the container
-	l.Log().Infof("Starting Node '%s'", node.Name)
-	if err := docker.ContainerStart(ctx, nodeContainer.ID, types.ContainerStartOptions{}); err != nil {
+	l.Log().Infof("Starting node '%s'", node.Name)
+	if err := docker.ContainerStart(ctx, nodeContainer.ID, container.StartOptions{}); err != nil {
 		return fmt.Errorf("docker failed to start container for node '%s': %w", node.Name, err)
 	}
 
@@ -181,7 +181,7 @@ func getContainersByLabel(ctx context.Context, labels map[string]string) ([]type
 		filters.Add("label", fmt.Sprintf("%s=%s", k, v))
 	}
 
-	containers, err := docker.ContainerList(ctx, types.ContainerListOptions{
+	containers, err := docker.ContainerList(ctx, container.ListOptions{
 		Filters: filters,
 		All:     true,
 	})
@@ -269,8 +269,8 @@ func (d Docker) NodeIsRunning(ctx context.Context, node *k3d.Node) (bool, error)
 
 // GetNodeLogs returns the logs from a given node
 func (d Docker) GetNodeLogs(ctx context.Context, node *k3d.Node, since time.Time, opts *runtimeTypes.NodeLogsOpts) (io.ReadCloser, error) {
-	// get the container for the given node
-	container, err := getNodeContainer(ctx, node)
+	// get the nodeContainer for the given node
+	nodeContainer, err := getNodeContainer(ctx, node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get container for node '%s': %w", node.Name, err)
 	}
@@ -282,9 +282,9 @@ func (d Docker) GetNodeLogs(ctx context.Context, node *k3d.Node, since time.Time
 	}
 	defer docker.Close()
 
-	containerInspectResponse, err := docker.ContainerInspect(ctx, container.ID)
+	containerInspectResponse, err := docker.ContainerInspect(ctx, nodeContainer.ID)
 	if err != nil {
-		return nil, fmt.Errorf("failed ton inspect container '%s': %w", container.ID, err)
+		return nil, fmt.Errorf("failed ton inspect container '%s': %w", nodeContainer.ID, err)
 	}
 
 	if !containerInspectResponse.ContainerJSONBase.State.Running {
@@ -295,9 +295,9 @@ func (d Docker) GetNodeLogs(ctx context.Context, node *k3d.Node, since time.Time
 	if !since.IsZero() {
 		sinceStr = since.Format("2006-01-02T15:04:05.999999999Z")
 	}
-	logreader, err := docker.ContainerLogs(ctx, container.ID, types.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Since: sinceStr, Follow: opts.Follow})
+	logreader, err := docker.ContainerLogs(ctx, nodeContainer.ID, container.LogsOptions{ShowStdout: true, ShowStderr: true, Since: sinceStr, Follow: opts.Follow})
 	if err != nil {
-		return nil, fmt.Errorf("docker failed to get logs from node '%s' (container '%s'): %w", node.Name, container.ID, err)
+		return nil, fmt.Errorf("docker failed to get logs from node '%s' (container '%s'): %w", node.Name, nodeContainer.ID, err)
 	}
 
 	return logreader, nil
@@ -365,7 +365,7 @@ func executeInNode(ctx context.Context, node *k3d.Node, cmd []string, stdin io.R
 	l.Log().Debugf("Executing command '%+v' in node '%s'", cmd, node.Name)
 
 	// get the container for the given node
-	container, err := getNodeContainer(ctx, node)
+	nodeContainer, err := getNodeContainer(ctx, node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get container for node '%s': %w", node.Name, err)
 	}
@@ -383,7 +383,7 @@ func executeInNode(ctx context.Context, node *k3d.Node, cmd []string, stdin io.R
 	}
 
 	// exec
-	exec, err := docker.ContainerExecCreate(ctx, container.ID, types.ExecConfig{
+	exec, err := docker.ContainerExecCreate(ctx, nodeContainer.ID, container.ExecOptions{
 		Privileged: true,
 		// Don't use tty true when piping stdin.
 		Tty:          !attachStdin,
@@ -396,7 +396,7 @@ func executeInNode(ctx context.Context, node *k3d.Node, cmd []string, stdin io.R
 		return nil, fmt.Errorf("docker failed to create exec config for node '%s': %+v", node.Name, err)
 	}
 
-	execConnection, err := docker.ContainerExecAttach(ctx, exec.ID, types.ExecStartCheck{
+	execConnection, err := docker.ContainerExecAttach(ctx, exec.ID, container.ExecAttachOptions{
 		// Don't use tty true when piping stdin.
 		Tty: !attachStdin,
 	})

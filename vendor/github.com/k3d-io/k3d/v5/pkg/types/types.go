@@ -1,5 +1,5 @@
 /*
-Copyright © 2020-2022 The k3d Author(s)
+Copyright © 2020-2023 The k3d Author(s)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -291,6 +291,7 @@ type Node struct {
 	Env            []string              `json:"env,omitempty"`
 	Cmd            []string              // filled automatically based on role
 	Args           []string              `json:"extraArgs,omitempty"`
+	Files          []File                `json:"files,omitempty"`
 	Ports          nat.PortMap           `json:"portMappings,omitempty"`
 	Restart        bool                  `json:"restart,omitempty"`
 	Created        string                `json:"created,omitempty"`
@@ -307,6 +308,7 @@ type Node struct {
 	State          NodeState             // filled automatically
 	IP             NodeIP                // filled automatically -> refers solely to the cluster network
 	HookActions    []NodeHook            `json:"hooks,omitempty"`
+	K3dEntrypoint  bool
 }
 
 // ServerOpts describes some additional server role specific opts

@@ -1,5 +1,5 @@
 /*
-Copyright © 2020-2022 The k3d Author(s)
+Copyright © 2020-2023 The k3d Author(s)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -46,22 +46,26 @@ func NewHostAliasesInjectEtcHostsAction(runtime runtimes.Runtime, hostAliases []
 			if err != nil {
 				return nil, fmt.Errorf("error creating temp hosts file: %w", err)
 			}
-			os.WriteFile(tmpHosts.Name(), input, 0777)
+			if err := os.WriteFile(tmpHosts.Name(), input, 0777); err != nil {
+				return nil, fmt.Errorf("error writing to temp hosts file: %w", err)
+			}
 
-			hostsfile, err := hostsfile.NewCustomHosts(tmpHosts.Name())
+			hFile, err := hostsfile.NewCustomHosts(tmpHosts.Name())
 			if err != nil {
 				return nil, fmt.Errorf("error reading temp hosts file: %w", err)
 			}
 
 			for _, hostAlias := range hostAliases {
-				if err := hostsfile.Add(hostAlias.IP, hostAlias.Hostnames...); err != nil {
+				if err := hFile.Add(hostAlias.IP, hostAlias.Hostnames...); err != nil {
 					return nil, fmt.Errorf("error adding hosts file entry for %s:%s: %w", hostAlias.IP, hostAlias.Hostnames, err)
 				}
 			}
 
-			hostsfile.Clean()
+			hFile.Clean()
 
-			hostsfile.Flush()
+			if err := hFile.Flush(); err != nil {
+				return nil, fmt.Errorf("error flushing hosts file: %w", err)
+			}
 
 			time.Sleep(time.Second)
 
