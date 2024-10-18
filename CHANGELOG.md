@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Improved handling of URL ports in `createPrepareDownscaleEndpoints` function. The function now correctly preserves the port when replacing the host in the URL. #[PR_NUMBER]
+* [BUGFIX] Improved handling of URL ports in `createPrepareDownscaleEndpoints` function. The function now correctly preserves the port when replacing the host in the URL. #176
 
 ## v0.20.0
 
