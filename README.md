@@ -4,7 +4,7 @@ This operator coordinates the rollout of pods between different StatefulSets wit
 
 ## How updates work
 
-The operator coordinates the rollout of pods belonging to `StatefulSets` with the `rollout-group` label and updates strategy set to `OnDelete`. The label value should identify the group of StatefulSets to which the StatefulSet belongs to. Make sure the statefulset has a label `name` in its `spec.template`, the operator uses it to find pods belonging to it.
+The operator coordinates the rollout of pods belonging to `StatefulSets` with the `rollout-group` label and updates strategy set to `OnDelete`. The label value should identify the group of StatefulSets to which the StatefulSet belongs to. Make sure the StatefulSet has a label `name` in its `spec.template`, as the operator uses it to find pods belonging to it.
 
 For example, given the following StatefulSets in a namespace:
 - `ingester-zone-a` with `rollout-group: ingester`
@@ -25,15 +25,19 @@ For each **rollout group**, the operator **guarantees**:
 1. Pods in a StatefulSet are rolled out if and only if all pods in all other StatefulSets of the same group are `Ready` (otherwise it will start or continue the rollout once this check is satisfied)
 1. Pods are rolled out if and only if all StatefulSets in the same group have `OnDelete` update strategy (otherwise the operator will skip the group and log an error)
 1. The maximum number of not-Ready pods in a StatefulSet doesn't exceed the value configured in the `rollout-max-unavailable` annotation (if not set, it defaults to `1`). Values:
-  - `<= 0`: invalid (will default to `1` and log a warning)
-  - `1`: pods are rolled out sequentially
-  - `> 1`: pods are rolled out in parallel (honoring the configured number of max unavailable pods)
+   - `<= 0`: invalid (will default to `1` and log a warning)
+   - `1`: pods are rolled out sequentially
+   - `> 1`: pods are rolled out in parallel (honoring the configured number of max unavailable pods)
 
 ## How scaling up and down works
 
 The operator can also optionally coordinate scaling up and down of `StatefulSets` that are part of the same `rollout-group` based on the `grafana.com/rollout-downscale-leader` annotation. When using this feature, the `grafana.com/min-time-between-zones-downscale` label must also be set on each `StatefulSet`.
 
-This can be useful for automating the tedious scaling of stateful services like Mimir ingesters. Making use of this feature requires adding a few annotations and labels to configure how it works. Examples for a multi-AZ ingester group are given below.
+This can be useful for automating the tedious scaling of stateful services like Mimir ingesters. Making use of this feature requires adding a few annotations and labels to configure how it works.
+
+If the `grafana.com/rollout-upscale-only-when-leader-ready` annotation is set to `true` on a follower `StatefulSet`, the operator will only scale up the follower once all replicas in the leader `StatefulSet` are `ready`. This ensures that the follower zone does not scale up until the leader zone is completely stable.
+
+Example usage for a multi-AZ ingester group:
 
 - For `ingester-zone-a`, add the following:
   - Labels:
@@ -47,7 +51,8 @@ This can be useful for automating the tedious scaling of stateful services like 
     - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
     - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
   - Annotations:
-    - `grafana.com/rollout-downscale-leader=ingester-zone-a` (zone `b` will follow zone `a`, after a delay) 
+    - `grafana.com/rollout-downscale-leader=ingester-zone-a` (zone `b` will follow zone `a`, after a delay)
+    - `grafana.com/rollout-upscale-only-when-leader-ready=true` (zone `b` will only scale up once all replicas in zone `a` are ready)
     - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
     - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
 - For `ingester-zone-c`, add the following:
@@ -56,6 +61,7 @@ This can be useful for automating the tedious scaling of stateful services like 
     - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
   - Annotations:
     - `grafana.com/rollout-downscale-leader=ingester-zone-b` (zone `c` will follow zone `b`, after a delay)
+    - `grafana.com/rollout-upscale-only-when-leader-ready=true` (zone `c` will only scale up once all replicas in zone `b` are ready)
     - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
     - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
 
@@ -66,8 +72,12 @@ Rollout-operator can use custom resource with `scale` and `status` subresources 
 * `grafana.com/rollout-mirror-replicas-from-resource-name`
 * `grafana.com/rollout-mirror-replicas-from-resource-kind`
 * `grafana.com/rollout-mirror-replicas-from-resource-api-version`
+* `grafana.com/rollout-mirror-replicas-from-resource-write-back`
 
-These annotations must be set on StatefulSet that rollout-operator will scale (ie. target statefulset). Number of replicas in target statefulset will follow replicas in reference resource (from `scale` subresource), while reference resource's `status` subresource will be updated with current number of replicas in target statefulset.
+These annotations must be set on StatefulSet that rollout-operator will scale (ie. target statefulset).
+Number of replicas in target statefulset will follow replicas in reference resource (from `scale` subresource).
+Reference resource's `status` subresource will be updated with current number of replicas in target statefulset,
+unless explicitly disabled by setting `grafana.com/rollout-mirror-replicas-from-resource-write-back` annotation to `false`.
 
 This is similar to using `grafana.com/rollout-downscale-leader`, but reference resource can be any kind of resource, not just statefulset. Furthermore `grafana.com/min-time-between-zones-downscale` is not respected when using scaling based on reference resource.
 

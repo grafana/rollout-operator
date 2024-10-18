@@ -2,6 +2,65 @@
 
 ## main / unreleased
 
+## v0.20.0
+
+* [ENHANCEMENT] Updated dependencies, including: #174
+  * `github.com/prometheus/client_golang` from `v1.19.1` to `v1.20.4`
+  * `github.com/prometheus/common` from `v0.55.0` to `v0.59.1`
+  * `k8s.io/api` from `v0.30.3` to `v0.31.1`
+  * `k8s.io/apimachinery` from `v0.30.3` to `v0.31.1`
+  * `k8s.io/client-go` from `v0.30.3` to `v0.31.1`
+  * `sigs.k8s.io/controller-runtime` from `v0.18.5` to `v0.19.0`
+
+## v0.19.1
+
+* [CHANGE] Renamed `grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas` annotation to `grafana.com/rollout-mirror-replicas-from-resource-write-back`, because it was too long (over 64 chars). #171
+
+## v0.19.0
+
+* [ENHANCEMENT] Updated dependencies, including: #165
+  * `github.com/prometheus/client_golang` from `v1.19.0` to `v1.19.1`
+  * `github.com/prometheus/common` from `v0.53.0` to `v0.55.0`
+  * `golang.org/x/sync` from `v0.7.0` to `v0.8.0`
+  * `k8s.io/api` from `v0.30.0` to `v0.30.3`
+  * `k8s.io/apimachinery` from `v0.30.0` to `v0.30.3`
+  * `k8s.io/client-go` from `v0.30.0` to `v0.30.3`
+  * `sigs.k8s.io/controller-runtime` from `v0.18.1` to `v0.18.5`
+* [ENHANCEMENT] Update Go to `1.23`. #168
+* [ENHANCEMENT] When mirroring replicas of statefulset, rollout-operator can now skip writing back number of replicas to reference resource, by setting `grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas` annotation to `false`. #169
+
+## v0.18.0
+
+* [FEATURE] Optionally only scale-up a `StatefulSet` once all of the leader `StatefulSet` replicas are ready. Enable with `grafana.com/rollout-upscale-only-when-leader-ready` annotation set to `true`. #164
+
+## v0.17.1
+
+* [ENHANCEMENT] prepare-downscale admission webhook: undo prepare-shutdown calls if adding the `last-downscale` annotation fails. #151
+
+## v0.17.0
+
+* [CHANGE] The docker base images are now based off distroless images rather than Alpine. #149
+  * The standard base image is now `gcr.io/distroless/static-debian12:nonroot`.
+  * The boringcrypto base image is now `gcr.io/distroless/base-nossl-debian12:nonroot` (for glibc).
+* [ENHANCEMENT] Include unique IDs of webhook requests in logs for easier debugging. #150
+* [ENHANCEMENT] Include k8s operation username in request debug logs. #152
+* [ENHANCEMENT] `rollout-max-unavailable` annotation can now be specified as percentage, e.g.: `rollout-max-unavailable: 25%`. Resulting value is computed as `floor(replicas * percentage)`, but is never less than 1. #153
+* [ENHANCEMENT] Delayed downscale of statefulset can now reduce replicas earlier, if subset of pods at the end of statefulset have already reached their delay. #156
+* [BUGFIX] Fix a mangled error log in controller's delayed downscale code. #154
+
+## v0.16.0
+
+* [ENHANCEMENT] If the POST to prepare-shutdown fails for any replica, attempt to undo the operation by issuing an HTTP DELETE to prepare-shutdown for all target replicas. #146
+
+## v0.15.0
+
+* [CHANGE] Rollout-operator is now released under an Apache License 2.0. #139, #140
+* [ENHANCEMENT] Updated dependencies, including: #144
+  * `github.com/prometheus/common` from `v0.49.0` to `v0.53.0`
+  * `k8s.io/api` from `v0.29.2` to `v0.30.0`
+  * `k8s.io/apimachinery` from `v0.29.2` to `v0.30.0`
+  * `k8s.io/client-go` from `v0.29.2` to `v0.30.0`
+
 ## v0.14.0
 
 * [FEATURE] Rollout-operator can now "mirror" replicas of statefulset from any reference resource. `status.replicas` field of reference resource is kept up-to-date with current number of replicas in target statefulset. #129

@@ -17,6 +17,7 @@ import (
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/api/admission/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -61,6 +62,8 @@ func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset) http
 			return
 		}
 
+		var requestUid types.UID
+
 		var responseObj runtime.Object
 		switch *gvk {
 		case v1beta1.SchemeGroupVersion.WithKind("AdmissionReview"):
@@ -69,24 +72,40 @@ func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset) http
 				level.Error(logger).Log("msg", "unexpected type", "type", fmt.Sprintf("%T", obj), "expected", "*v1beta1.AdmissionReview")
 				return
 			}
-			level.Debug(logger).Log("msg", "handling request", "kind", requestedAdmissionReview.Request.Kind, "namespace", requestedAdmissionReview.Request.Namespace, "name", requestedAdmissionReview.Request.Name)
+			level.Debug(logger).Log(
+				"msg", "handling request",
+				"kind", requestedAdmissionReview.Request.Kind,
+				"namespace", requestedAdmissionReview.Request.Namespace,
+				"name", requestedAdmissionReview.Request.Name,
+				"request.uid", requestedAdmissionReview.Request.UID,
+				"request.username", requestedAdmissionReview.Request.UserInfo.Username,
+			)
 			responseAdmissionReview := &v1beta1.AdmissionReview{}
 			responseAdmissionReview.SetGroupVersionKind(*gvk)
 			responseAdmissionReview.Response = delegateV1beta1AdmitToV1(admit)(r.Context(), logger, *requestedAdmissionReview, api)
 			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 			responseObj = responseAdmissionReview
+			requestUid = requestedAdmissionReview.Request.UID
 		case v1.SchemeGroupVersion.WithKind("AdmissionReview"):
 			requestedAdmissionReview, ok := obj.(*v1.AdmissionReview)
 			if !ok {
 				level.Error(logger).Log("msg", "unexpected type", "type", fmt.Sprintf("%T", obj), "expected", "*v1.AdmissionReview")
 				return
 			}
-			level.Debug(logger).Log("msg", "handling request", "kind", requestedAdmissionReview.Request.Kind, "namespace", requestedAdmissionReview.Request.Namespace, "name", requestedAdmissionReview.Request.Name)
+			level.Debug(logger).Log(
+				"msg", "handling request",
+				"kind", requestedAdmissionReview.Request.Kind,
+				"namespace", requestedAdmissionReview.Request.Namespace,
+				"name", requestedAdmissionReview.Request.Name,
+				"request.uid", requestedAdmissionReview.Request.UID,
+				"request.username", requestedAdmissionReview.Request.UserInfo.Username,
+			)
 			responseAdmissionReview := &v1.AdmissionReview{}
 			responseAdmissionReview.SetGroupVersionKind(*gvk)
 			responseAdmissionReview.Response = admit(r.Context(), logger, *requestedAdmissionReview, api)
 			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 			responseObj = responseAdmissionReview
+			requestUid = requestedAdmissionReview.Request.UID
 		default:
 			msg := fmt.Sprintf("Unsupported group version kind: %v", gvk)
 			level.Error(logger).Log("msg", "unsupported group version kind", "gvk", gvk)
@@ -94,7 +113,7 @@ func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset) http
 			return
 		}
 
-		level.Debug(logger).Log("msg", "sending response", "response", responseObj)
+		level.Debug(logger).Log("msg", "sending response", "request.uid", requestUid, "response", responseObj)
 		respBytes, err := json.Marshal(responseObj)
 		if err != nil {
 			level.Error(logger).Log("msg", "error marshaling response", "err", err)

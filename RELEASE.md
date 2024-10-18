@@ -12,3 +12,6 @@
     ```bash
     $ IMAGE_TAG="${tag}" make publish-images
     ```
+1. Update Helm Chart
+  - Repository https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator
+  - [Example PR](https://github.com/grafana/helm-charts/pull/3177/files)

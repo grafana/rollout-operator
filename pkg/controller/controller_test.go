@@ -412,6 +412,20 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":5}}`}},
 			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`}},
 		},
+		"should return early and scale up statefulset based on reference custom resource, but not patch the resource since it's disabled": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(2, 2), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "false",
+				})),
+			},
+			customResourceScaleSpecReplicas:   5,
+			customResourceScaleStatusReplicas: 2,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":5}}`}},
+			expectedPatchedResources:          nil, // Reference resource is not patched.
+		},
 		"should return early and scale down statefulset based on reference custom resource": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
@@ -425,6 +439,20 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":2}}`}},
 			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":2}}`}},
 		},
+		"should return early and scale down statefulset based on reference custom resource, but not patch the resource since it's disabled": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "false",
+				})),
+			},
+			customResourceScaleSpecReplicas:   2,
+			customResourceScaleStatusReplicas: 3,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":2}}`}},
+			expectedPatchedResources:          nil, // Reference resource is not patched.
+		},
 		"should patch scale subresource status.replicas if it doesn't match statefulset": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
@@ -437,6 +465,20 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			customResourceScaleStatusReplicas: 5,
 			expectedPatchedSets:               nil,
 			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":3}}`}},
+		},
+		"should not patch scale subresource status.replicas since it's disabled, even though spec.replicas != statefulset.spec.replicas": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "false",
+				})),
+			},
+			customResourceScaleSpecReplicas:   3,
+			customResourceScaleStatusReplicas: 5,
+			expectedPatchedSets:               nil,
+			expectedPatchedResources:          nil, // Reference resource is not patched.
 		},
 		"should NOT patch scale subresource status.replicas if it already matches statefulset": {
 			statefulSets: []runtime.Object{
@@ -480,7 +522,13 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
 				})),
-				mockStatefulSet("ingester-zone-c", withReplicas(2, 2), withAnnotations(map[string]string{
+				mockStatefulSet("ingester-zone-c", withReplicas(5, 5), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "true", // Patching of reference resource is explicitly enabled.
+				})),
+				mockStatefulSet("ingester-zone-d", withReplicas(2, 2), withAnnotations(map[string]string{
 					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
 					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
@@ -488,8 +536,36 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			customResourceScaleSpecReplicas:   5,
 			customResourceScaleStatusReplicas: 2,
-			expectedPatchedSets:               map[string][]string{"ingester-zone-c": {`{"spec":{"replicas":5}}`}},
-			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`, `{"status":{"replicas":5}}`}},
+			expectedPatchedSets:               map[string][]string{"ingester-zone-d": {`{"spec":{"replicas":5}}`}},
+			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`, `{"status":{"replicas":5}}`, `{"status":{"replicas":5}}`}},
+		},
+		"all statefulsets are considered, but only one patches the reference resource": {
+			statefulSets: []runtime.Object{
+				// Does NOT have scaling annotations
+				mockStatefulSet("ingester-zone-a", withReplicas(4, 4)),
+				// Is already scaled.
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "false", // Explicitly disabled.
+				})),
+				mockStatefulSet("ingester-zone-c", withReplicas(5, 5), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+					"grafana.com/rollout-mirror-replicas-from-resource-write-back":  "bad value", // Disabled through wrong value.
+				})),
+				mockStatefulSet("ingester-zone-d", withReplicas(2, 2), withAnnotations(map[string]string{
+					"grafana.com/rollout-mirror-replicas-from-resource-name":        "test",
+					"grafana.com/rollout-mirror-replicas-from-resource-kind":        customResourceGVK.Kind,
+					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
+				})),
+			},
+			customResourceScaleSpecReplicas:   5,
+			customResourceScaleStatusReplicas: 2,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-d": {`{"spec":{"replicas":5}}`}},
+			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`}},
 		},
 	}
 
@@ -561,7 +637,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			// Assert updated StatefulSets.
 			assert.Equal(t, testData.expectedUpdatedSets, updatedStsNames)
 
-			// Assert patched StatefulSets.
+			// Assert patched StatefulSets and resources.
 			assert.Equal(t, testData.expectedPatchedSets, convertEmptyMapToNil(patchedStatefulSets))
 			assert.Equal(t, testData.expectedPatchedResources, convertEmptyMapToNil(patchedStatuses))
 
@@ -657,15 +733,15 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			},
 		},
 
-		"scale down is not allowed if delay time was not reached on one pod": {
+		"scale down is not allowed if delay time was not reached on one pod at the end of statefulset": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
 					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
 			},
 			httpResponses: map[string]httpResponse{
-				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
-				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
 			},
 			customResourceScaleSpecReplicas:   3, // We want to downscale to 3 replicas only.
 			customResourceScaleStatusReplicas: 5,
@@ -673,6 +749,30 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+		},
+
+		"limited scale down by 2 replicas is allowed if delay time was reached on some pods at the end of statefulset": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
+			},
+			httpResponses: map[string]httpResponse{
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-75*time.Minute).Unix())},
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-30*time.Minute).Unix())}, // cannot be scaled down yet, as 1h has not elapsed
+				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-75*time.Minute).Unix())},
+			},
+			customResourceScaleSpecReplicas:   1, // We want to downscale to single replica
+			customResourceScaleStatusReplicas: 5,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":3}}`}}, // Scaledown by 2 replicas (from 5 to 3) is allowed.
+			expectedHttpRequests: []string{
+				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 			},

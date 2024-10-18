@@ -32,6 +32,7 @@ import (
 
 const (
 	PrepareDownscaleWebhookPath = "/admission/prepare-downscale"
+	maxPrepareGoroutines        = 32
 )
 
 func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *v1.AdmissionResponse {
@@ -60,6 +61,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	logger.SetSpanAndLogTag("object.resource", ar.Request.Resource.Resource)
 	logger.SetSpanAndLogTag("object.namespace", ar.Request.Namespace)
 	logger.SetSpanAndLogTag("request.dry_run", *ar.Request.DryRun)
+	logger.SetSpanAndLogTag("request.uid", ar.Request.UID)
 
 	if *ar.Request.DryRun {
 		return &v1.AdmissionResponse{Allowed: true}
@@ -90,6 +92,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		return allowWarn(logger, fmt.Sprintf("%s, allowing the change", err))
 	}
 
+	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
 	if lbls[config.PrepareDownscaleLabelKey] != config.PrepareDownscaleLabelValue {
 		// Not labeled, nothing to do.
 		return &v1.AdmissionResponse{Allowed: true}
@@ -135,6 +138,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
 			level.Warn(logger).Log("msg", msg, "err", err)
+			//nolint:govet
 			return deny(msg)
 		}
 		foundSts, err = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList, ar.Request.Name)
@@ -142,23 +146,29 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because an error occurred while checking whether StatefulSets have non-updated replicas",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas)
 			level.Warn(logger).Log("msg", msg, "err", err)
+			//nolint:govet
 			return deny(msg)
 		}
 		if foundSts != nil {
 			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
 			level.Warn(logger).Log("msg", msg)
+			//nolint:govet
 			return deny(msg)
 		}
 	}
 
-	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
-	// Create a slice of endpoint addresses for pods to send HTTP POST requests to and to fail if any don't return 200
+	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
 	if err := sendPrepareShutdownRequests(ctx, logger, client, eps); err != nil {
-		// Down-scale operation is disallowed because a pod failed to prepare for shutdown and cannot be deleted
-		level.Error(logger).Log("msg", "downscale not allowed due to error", "err", err)
+		// Down-scale operation is disallowed because at least one pod failed to
+		// prepare for shutdown and cannot be deleted. We also need to
+		// un-prepare them all.
+
+		level.Error(logger).Log("msg", "downscale not allowed due to host(s) failing to prepare for downscale. unpreparing...", "err", err)
+		undoPrepareShutdownRequests(ctx, logger, client, eps)
+
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
@@ -166,14 +176,18 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	}
 
 	if err := addDownscaledAnnotationToStatefulSet(ctx, api, ar.Request.Namespace, ar.Request.Name); err != nil {
-		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation", "err", err)
+		// Down-scale operation is disallowed because we failed to add the
+		// annotation to the statefulset. We again need to un-prepare all pods.
+		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation. unpreparing...", "err", err)
+		undoPrepareShutdownRequests(ctx, logger, client, eps)
+
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
 		)
 	}
 
-	// Down-scale operation is allowed because all pods successfully prepared for shutdown
+	// Otherwise, we've made it through the gauntlet, and the downscale is allowed.
 	level.Info(logger).Log("msg", "downscale allowed")
 	return &v1.AdmissionResponse{
 		Allowed: true,
@@ -460,52 +474,98 @@ func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, 
 	return eps
 }
 
+func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.Logger, client httpClient, ep endpoint) error {
+	span := "admission.PreparePodForShutdown"
+	if method == http.MethodDelete {
+		span = "admission.UnpreparePodForShutdown"
+	}
+
+	logger, ctx := spanlogger.New(ctx, parentLogger, span, tenantResolver)
+	defer logger.Span.Finish()
+
+	logger.SetSpanAndLogTag("url", ep.url)
+	logger.SetSpanAndLogTag("index", ep.index)
+	logger.SetSpanAndLogTag("method", method)
+
+	req, err := http.NewRequestWithContext(ctx, method, "http://"+ep.url, nil)
+	if err != nil {
+		level.Error(logger).Log("msg", fmt.Sprintf("error creating HTTP %s request", method), "err", err)
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
+	defer ht.Finish()
+
+	resp, err := client.Do(req)
+	if err != nil {
+		level.Error(logger).Log("msg", fmt.Sprintf("error sending HTTP %s request", method), "err", err)
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		err := fmt.Errorf("HTTP %s request returned non-2xx status code", method)
+		body, readError := io.ReadAll(resp.Body)
+		level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", err, "status", resp.StatusCode, "response_body", string(body))
+		return errors.Join(err, readError)
+	}
+	level.Debug(logger).Log("msg", "pod prepare-shutdown handler called", "method", method, "url", ep.url)
+	return nil
+}
+
 func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) error {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.sendPrepareShutdownRequests()")
+	defer span.Finish()
+
 	if len(eps) == 0 {
 		return nil
 	}
 
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.sendPrepareShutdownRequests()")
-	defer span.Finish()
+	// Attempt to POST to every prepare-shutdown endpoint.
 
-	g, _ := errgroup.WithContext(ctx)
+	g, ectx := errgroup.WithContext(ctx)
+	g.SetLimit(maxPrepareGoroutines)
 	for _, ep := range eps {
-		ep := ep // https://golang.org/doc/faq#closures_and_goroutines
+		ep := ep
 		g.Go(func() error {
-			logger, ctx := spanlogger.New(ctx, logger, "admission.PreparePodForShutdown", tenantResolver)
-			defer logger.Span.Finish()
-
-			logger.SetSpanAndLogTag("url", ep.url)
-			logger.SetSpanAndLogTag("index", ep.index)
-
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+ep.url, nil)
-			if err != nil {
-				level.Error(logger).Log("msg", "error creating HTTP POST request", "err", err)
-			}
-
-			req.Header.Set("Content-Type", "application/json")
-			req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
-			defer ht.Finish()
-
-			resp, err := client.Do(req)
-			if err != nil {
-				level.Error(logger).Log("msg", "error sending HTTP POST request", "err", err)
+			if err := ectx.Err(); err != nil {
 				return err
 			}
+			return invokePrepareShutdown(ectx, http.MethodPost, logger, client, ep)
+		})
+	}
 
-			defer resp.Body.Close()
+	return g.Wait()
+}
 
-			if resp.StatusCode/100 != 2 {
-				err := errors.New("HTTP POST request returned non-2xx status code")
-				body, readError := io.ReadAll(resp.Body)
-				level.Error(logger).Log("msg", "error received from shutdown endpoint", "err", err, "status", resp.StatusCode, "response_body", string(body))
-				return errors.Join(err, readError)
+// undoPrepareShutdownRequests sends an HTTP DELETE to each of the given endpoints.
+func undoPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.undoPrepareShutdownRequests()")
+	defer span.Finish()
+
+	if len(eps) == 0 {
+		return
+	}
+
+	// Unlike sendPrepareShutdownRequests, we attempt to send each pod a DELETE
+	// without regard for failures.
+
+	undoGroup, _ := errgroup.WithContext(ctx)
+	undoGroup.SetLimit(maxPrepareGoroutines)
+	for _, ep := range eps {
+		ep := ep
+		undoGroup.Go(func() error {
+			if err := invokePrepareShutdown(ctx, http.MethodDelete, logger, client, ep); err != nil {
+				level.Warn(logger).Log("msg", "failed to undo prepare shutdown request", "url", ep.url, "err", err)
+				// (We swallow the error so all of the deletes are attempted.)
 			}
-			level.Debug(logger).Log("msg", "pod prepared for shutdown")
 			return nil
 		})
 	}
-	return g.Wait()
+
+	_ = undoGroup.Wait()
 }
 
 var tenantResolver spanlogger.TenantResolver = noTenantResolver{}
