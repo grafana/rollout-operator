@@ -147,7 +147,11 @@ func createPrepareDownscaleEndpoints(namespace, serviceName string, from, to int
 		}
 
 		ep.url = *url
-		ep.url.Host = fmt.Sprintf("%s.%v.%v.svc.cluster.local.", ep.podName, serviceName, ep.namespace)
+		newHost := fmt.Sprintf("%s.%v.%v.svc.cluster.local.", ep.podName, serviceName, ep.namespace)
+		if url.Port() != "" {
+			newHost = fmt.Sprintf("%s:%s", newHost, url.Port())
+		}
+		ep.url.Host = newHost
 
 		eps = append(eps, ep)
 	}
