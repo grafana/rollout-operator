@@ -69,7 +69,7 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 			inputURL, err := url.Parse(tc.inputURL)
 			require.NoError(t, err)
 
-			result := createPrepareDownscaleEndpoints(tc.namespace, tc.serviceName, tc.from, tc.to, inputURL)
+			result := createPrepareDownscaleEndpoints(tc.namespace, tc.serviceName, tc.serviceName, tc.from, tc.to, inputURL)
 
 			assert.Equal(t, tc.expected, result)
 		})
