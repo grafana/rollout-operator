@@ -161,28 +161,40 @@ func TestMoveStatefulSetToFront(t *testing.T) {
 
 func TestGroupStatefulSetsByLabel(t *testing.T) {
 	input := []*v1.StatefulSet{
-		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester"}}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester"}}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor"}}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester", config.RolloutSecondaryGroupLabelKey: "mimir"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester", config.RolloutSecondaryGroupLabelKey: "mimir"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester", config.RolloutSecondaryGroupLabelKey: "loki"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester", config.RolloutSecondaryGroupLabelKey: "loki"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor", config.RolloutSecondaryGroupLabelKey: "mimir"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor", config.RolloutSecondaryGroupLabelKey: "mimir"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor", config.RolloutSecondaryGroupLabelKey: "loki"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor", config.RolloutSecondaryGroupLabelKey: "loki"}}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "store-gateway"}},
 	}
 
 	expected := map[string][]*v1.StatefulSet{
-		"ingester": {
-			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester"}}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester"}}},
+		"ingester-mimir": {
+			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester", config.RolloutSecondaryGroupLabelKey: "mimir"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester", config.RolloutSecondaryGroupLabelKey: "mimir"}}},
 		},
-		"compactor": {
-			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor"}}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor"}}},
+		"compactor-mimir": {
+			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor", config.RolloutSecondaryGroupLabelKey: "mimir"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor", config.RolloutSecondaryGroupLabelKey: "mimir"}}},
+		},
+		"ingester-loki": {
+			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester", config.RolloutSecondaryGroupLabelKey: "loki"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "ingester-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "ingester", config.RolloutSecondaryGroupLabelKey: "loki"}}},
+		},
+		"compactor-loki": {
+			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-a", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor", config.RolloutSecondaryGroupLabelKey: "loki"}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "compactor-zone-b", Labels: map[string]string{config.RolloutGroupLabelKey: "compactor", config.RolloutSecondaryGroupLabelKey: "loki"}}},
 		},
 		"": {
 			{ObjectMeta: metav1.ObjectMeta{Name: "store-gateway"}},
 		},
 	}
 
-	assert.Equal(t, expected, GroupStatefulSetsByLabel(input, config.RolloutGroupLabelKey))
+	assert.Equal(t, expected, GroupStatefulSetsByLabel(input, config.RolloutGroupLabelKey, config.RolloutSecondaryGroupLabelKey))
 }
 
 func TestMax(t *testing.T) {

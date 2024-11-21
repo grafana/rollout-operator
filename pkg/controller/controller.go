@@ -261,7 +261,7 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 	}
 
 	// Group statefulsets by the rollout group label. Each group will be reconciled independently.
-	groups := util.GroupStatefulSetsByLabel(sets, config.RolloutGroupLabelKey)
+	groups := util.GroupStatefulSetsByLabel(sets, config.RolloutGroupLabelKey, config.RolloutSecondaryGroupLabelKey)
 	var reconcileErrs error
 	for groupName, groupSets := range groups {
 		if err := c.reconcileStatefulSetsGroup(ctx, groupName, groupSets); err != nil {

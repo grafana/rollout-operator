@@ -76,11 +76,16 @@ func MoveStatefulSetToFront(sets []*v1.StatefulSet, toMove *v1.StatefulSet) []*v
 
 // GroupStatefulSetsByLabel returns a map containing the input StatefulSets grouped by
 // the input label's value.
-func GroupStatefulSetsByLabel(sets []*v1.StatefulSet, label string) map[string][]*v1.StatefulSet {
+func GroupStatefulSetsByLabel(sets []*v1.StatefulSet, primaryLabel string, secondaryLabel string) map[string][]*v1.StatefulSet {
 	groups := make(map[string][]*v1.StatefulSet)
 
 	for _, sts := range sets {
-		value := sts.GetLabels()[label]
+		labels := sts.GetLabels()
+		value := labels[primaryLabel]
+		secondaryValue := labels[secondaryLabel]
+		if secondaryValue != "" {
+			value = value + "-" + secondaryValue
+		}
 		groups[value] = append(groups[value], sts)
 	}
 

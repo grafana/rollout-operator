@@ -476,6 +476,7 @@ func TestUndoPrepareShutdown(t *testing.T) {
 func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
 	namespace := "test"
 	rolloutGroup := "ingester"
+	rolloutSecondaryGroup := ""
 	labels := map[string]string{config.RolloutGroupLabelKey: rolloutGroup, "name": "zone-a"}
 	stsMeta := metav1.ObjectMeta{
 		Name:      "zone-a",
@@ -525,7 +526,7 @@ func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
 	}
 	api := fake.NewSimpleClientset(objects...)
 
-	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup)
+	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup, rolloutSecondaryGroup)
 	require.NoError(t, err)
 
 	sts, err := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, stsList, stsMeta.Name)
@@ -537,6 +538,7 @@ func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
 func TestFindStatefulSetWithNonUpdatedReplicas_UnavailableReplicasSameZone(t *testing.T) {
 	namespace := "test"
 	rolloutGroup := "ingester"
+	rolloutSecondaryGroup := ""
 	labels := map[string]string{config.RolloutGroupLabelKey: rolloutGroup, "name": "zone-a"}
 	stsMeta := metav1.ObjectMeta{
 		Name:      "zone-a",
@@ -559,7 +561,103 @@ func TestFindStatefulSetWithNonUpdatedReplicas_UnavailableReplicasSameZone(t *te
 	}
 	api := fake.NewSimpleClientset(objects...)
 
-	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup)
+	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup, rolloutSecondaryGroup)
+	require.NoError(t, err)
+
+	sts, err := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, stsList, stsMeta.Name)
+	require.NoError(t, err)
+	require.Nil(t, sts)
+}
+
+func TestFindStatefulSetWithNonUpdatedReplicasWithSecondaryGroup(t *testing.T) {
+	namespace := "test"
+	rolloutGroup := "ingester"
+	rolloutSecondaryGroup := "mimir"
+	labels := map[string]string{config.RolloutGroupLabelKey: rolloutGroup, config.RolloutSecondaryGroupLabelKey: rolloutSecondaryGroup, "name": "zone-a"}
+	stsMeta := metav1.ObjectMeta{
+		Name:      "zone-a",
+		Namespace: namespace,
+		Labels:    labels,
+	}
+	objects := []runtime.Object{
+		&apps.StatefulSet{
+			ObjectMeta: stsMeta,
+			Spec: apps.StatefulSetSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: stsMeta,
+				},
+			},
+			Status: apps.StatefulSetStatus{
+				Replicas:        1,
+				UpdatedReplicas: 1,
+			},
+		},
+		&apps.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "zone-b",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Status: apps.StatefulSetStatus{
+				Replicas:        1,
+				UpdatedReplicas: 1,
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Ready: true,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+				}},
+			},
+		},
+	}
+	api := fake.NewSimpleClientset(objects...)
+
+	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup, rolloutSecondaryGroup)
+	require.NoError(t, err)
+
+	sts, err := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, stsList, stsMeta.Name)
+	require.NoError(t, err)
+	require.NotNil(t, sts)
+	assert.Equal(t, sts.name, "zone-b")
+}
+
+func TestFindStatefulSetWithNonUpdatedReplicasWithSecondaryGroup_UnavailableReplicasSameZone(t *testing.T) {
+	namespace := "test"
+	rolloutGroup := "ingester"
+	rolloutSecondaryGroup := "mimir"
+	labels := map[string]string{config.RolloutGroupLabelKey: rolloutGroup, config.RolloutSecondaryGroupLabelKey: rolloutSecondaryGroup, "name": "zone-a"}
+	stsMeta := metav1.ObjectMeta{
+		Name:      "zone-a",
+		Namespace: namespace,
+		Labels:    labels,
+	}
+	objects := []runtime.Object{
+		&apps.StatefulSet{
+			ObjectMeta: stsMeta,
+			Spec: apps.StatefulSetSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: stsMeta,
+				},
+			},
+			Status: apps.StatefulSetStatus{
+				Replicas:        1,
+				UpdatedReplicas: 0,
+			},
+		},
+	}
+	api := fake.NewSimpleClientset(objects...)
+
+	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup, rolloutSecondaryGroup)
 	require.NoError(t, err)
 
 	sts, err := findStatefulSetWithNonUpdatedReplicas(context.Background(), api, namespace, stsList, stsMeta.Name)

@@ -117,8 +117,9 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	}
 
 	rolloutGroup := lbls[config.RolloutGroupLabelKey]
+	rolloutSecondaryGroup := lbls[config.RolloutSecondaryGroupLabelKey]
 	if rolloutGroup != "" {
-		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, rolloutGroup)
+		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, rolloutGroup, rolloutSecondaryGroup)
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
 			return deny(
@@ -354,7 +355,7 @@ func findPodsForStatefulSet(ctx context.Context, api kubernetes.Interface, names
 	})
 }
 
-func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interface, namespace, rolloutGroup string) (*appsv1.StatefulSetList, error) {
+func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interface, namespace, rolloutGroup string, rolloutSecondaryGroup string) (*appsv1.StatefulSetList, error) {
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.findStatefulSetsForRolloutGroup()")
 	defer span.Finish()
 
@@ -366,6 +367,15 @@ func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interfa
 		return nil, err
 	}
 	sel := labels.NewSelector().Add(*groupReq)
+
+	if rolloutSecondaryGroup != "" {
+		secGroupReq, err := labels.NewRequirement(config.RolloutSecondaryGroupLabelKey, selection.Equals, []string{rolloutSecondaryGroup})
+		if err != nil {
+			return nil, err
+		}
+		sel = sel.Add(*secGroupReq)
+	}
+
 	return api.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: sel.String(),
 	})

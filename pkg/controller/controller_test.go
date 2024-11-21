@@ -59,6 +59,8 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		expectedPatchedSets               map[string][]string
 		expectedPatchedResources          map[string][]string
 		expectedErr                       string
+		additionalGroups                  string
+		additionalGroupFailures           string
 	}{
 		"should return error if some StatefulSet don't have OnDelete update strategy": {
 			statefulSets: []runtime.Object{
@@ -83,6 +85,41 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
 			},
 		},
+		"should do nothing if multiple StatefulSets have not-Ready pods reported by the StatefulSet -- add secondary group need update": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("mimir-ingester-zone-a", withPrevRevision(), withReplicas(3, 2)),
+				mockStatefulSet("mimir-ingester-zone-b", withPrevRevision(), withReplicas(3, 1)),
+
+				mockStatefulSet("loki-ingester-zone-a", withReplicas(3, 3),
+					withLabels(map[string]string{
+						config.RolloutSecondaryGroupLabelKey: "loki",
+					}),
+				),
+				mockStatefulSet("loki-ingester-zone-b", withReplicas(3, 3),
+					withLabels(map[string]string{
+						config.RolloutSecondaryGroupLabelKey: "loki",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("mimir-ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-2", testPrevRevisionHash),
+
+				mockStatefulSetPod("loki-ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"loki-ingester-zone-a-0", "loki-ingester-zone-a-1"},
+			additionalGroups: `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
+			additionalGroupFailures: `rollout_operator_group_reconciles_failed_total{rollout_group="ingester-loki"} 0`,
+		},
 		"should do nothing if multiple StatefulSets have not-Ready pods but NOT reported by the StatefulSet status yet": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 3)),
@@ -100,6 +137,45 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					pod.DeletionTimestamp = util.Now()
 				}),
 			},
+		},
+		"should do nothing if multiple StatefulSets have not-Ready pods but NOT reported by the StatefulSet status yet -- add secondary group need update": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("mimir-ingester-zone-a", withPrevRevision(), withReplicas(3, 3)),
+				mockStatefulSet("mimir-ingester-zone-b", withPrevRevision(), withReplicas(3, 3)),
+
+				mockStatefulSet("loki-ingester-zone-a", withReplicas(3, 3),
+					withLabels(map[string]string{
+						config.RolloutSecondaryGroupLabelKey: "loki",
+					}),
+				),
+				mockStatefulSet("loki-ingester-zone-b", withReplicas(3, 3),
+					withLabels(map[string]string{
+						config.RolloutSecondaryGroupLabelKey: "loki",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("mimir-ingester-zone-a-0", testPrevRevisionHash, func(pod *corev1.Pod) {
+					pod.DeletionTimestamp = util.Now()
+				}),
+				mockStatefulSetPod("mimir-ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-2", testPrevRevisionHash, func(pod *corev1.Pod) {
+					pod.DeletionTimestamp = util.Now()
+				}),
+
+				mockStatefulSetPod("loki-ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"loki-ingester-zone-a-0", "loki-ingester-zone-a-1"},
+			additionalGroups: `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
+			additionalGroupFailures: `rollout_operator_group_reconciles_failed_total{rollout_group="ingester-loki"} 0`,
 		},
 		"should do nothing if multiple StatefulSets have not-Ready pods but ONLY reported by 1 StatefulSet status": {
 			statefulSets: []runtime.Object{
@@ -130,6 +206,67 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-2", testLastRevisionHash),
 			},
+		},
+		"should do nothing if all pods are updated -- add secondary group": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("mimir-ingester-zone-a"),
+				mockStatefulSet("loki-ingester-zone-a",
+					withLabels(map[string]string{
+						config.RolloutSecondaryGroupLabelKey: "loki",
+					}),
+				),
+				mockStatefulSet("mimir-ingester-zone-b"),
+				mockStatefulSet("loki-ingester-zone-b",
+					withLabels(map[string]string{
+						config.RolloutSecondaryGroupLabelKey: "loki",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("mimir-ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-0", testLastRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-1", testLastRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-2", testLastRevisionHash),
+			},
+			additionalGroups: `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
+			additionalGroupFailures: `rollout_operator_group_reconciles_failed_total{rollout_group="ingester-loki"} 0`,
+		},
+		"should do nothing if all pods are updated -- add secondary group need update": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("mimir-ingester-zone-a"),
+				mockStatefulSet("mimir-ingester-zone-b"),
+
+				mockStatefulSet("loki-ingester-zone-a", withReplicas(3, 3),
+					withLabels(map[string]string{
+						config.RolloutSecondaryGroupLabelKey: "loki",
+					}),
+				),
+				mockStatefulSet("loki-ingester-zone-b", withReplicas(3, 3),
+					withLabels(map[string]string{
+						config.RolloutSecondaryGroupLabelKey: "loki",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("mimir-ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-0", testLastRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-1", testLastRevisionHash),
+				mockStatefulSetPod("mimir-ingester-zone-b-2", testLastRevisionHash),
+
+				mockStatefulSetPod("loki-ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("loki-ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"loki-ingester-zone-a-0", "loki-ingester-zone-a-1"},
+			additionalGroups: `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
+			additionalGroupFailures: `rollout_operator_group_reconciles_failed_total{rollout_group="ingester-loki"} 0`,
 		},
 		"should delete pods that needs to be updated, honoring the configured max unavailable": {
 			statefulSets: []runtime.Object{
@@ -650,16 +787,24 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			if testData.expectedErr != "" {
 				expectedFailures = 1
 			}
+			addlGroup := ""
+			addlGroupFailures := ""
+			if testData.additionalGroups != "" {
+				addlGroup = testData.additionalGroups
+				addlGroupFailures = testData.additionalGroupFailures
+			}
 
 			assert.NoError(t, testutil.GatherAndCompare(reg, strings.NewReader(fmt.Sprintf(`
 				# HELP rollout_operator_group_reconciles_total Total number of reconciles started for a specific rollout group.
 				# TYPE rollout_operator_group_reconciles_total counter
 				rollout_operator_group_reconciles_total{rollout_group="ingester"} 1
+				%s
 
 				# HELP rollout_operator_group_reconciles_failed_total Total number of reconciles failed for a specific rollout group.
 				# TYPE rollout_operator_group_reconciles_failed_total counter
 				rollout_operator_group_reconciles_failed_total{rollout_group="ingester"} %d
-			`, expectedFailures)),
+				%s
+			`, addlGroup, expectedFailures, addlGroupFailures)),
 				"rollout_operator_group_reconciles_total",
 				"rollout_operator_group_reconciles_failed_total"))
 		})

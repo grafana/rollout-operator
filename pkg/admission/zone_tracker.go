@@ -97,8 +97,9 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 	}
 
 	rolloutGroup := lbls[config.RolloutGroupLabelKey]
+	rolloutSecondaryGroup := lbls[config.RolloutSecondaryGroupLabelKey]
 	if rolloutGroup != "" {
-		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, rolloutGroup)
+		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, rolloutGroup, rolloutSecondaryGroup)
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
 			return deny(
