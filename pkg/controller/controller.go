@@ -136,12 +136,9 @@ func (c *RolloutController) Init() error {
 	// We enqueue a reconcile request each time any of the observed StatefulSets are updated. The UpdateFunc
 	// is also called every sync period even if no changes occurred.
 	_, err := c.statefulSetsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			c.enqueueReconcile()
-		},
-		UpdateFunc: func(old, new interface{}) {
-			c.enqueueReconcile()
-		},
+		AddFunc:    c.onAdded,
+		UpdateFunc: c.onUpdated,
+		DeleteFunc: c.onDeleted,
 	})
 	if err != nil {
 		return err
@@ -170,6 +167,53 @@ func (c *RolloutController) Init() error {
 	level.Info(c.logger).Log("msg", "informer caches have synced")
 
 	return nil
+}
+
+func (c *RolloutController) onAdded(obj interface{}) {
+	sts, isStatefulSet := obj.(*v1.StatefulSet)
+	if isStatefulSet {
+		level.Debug(c.logger).Log(
+			"msg", "observed StatefulSet added",
+			"name", sts.Name,
+			"namespace", sts.Namespace,
+			"replicas", sts.Spec.Replicas,
+			"generation", sts.Generation,
+			"creation_timestamp", sts.CreationTimestamp,
+		)
+	}
+
+	c.enqueueReconcile()
+}
+
+func (c *RolloutController) onUpdated(old, new interface{}) {
+	oldSts, oldIsStatefulSet := old.(*v1.StatefulSet)
+	newSts, newIsStatefulSet := new.(*v1.StatefulSet)
+	if oldIsStatefulSet && newIsStatefulSet && oldSts.Generation != newSts.Generation {
+		level.Debug(c.logger).Log(
+			"msg", "observed StatefulSet updated",
+			"name", oldSts.Name,
+			"namespace", oldSts.Namespace,
+			"old_replicas", oldSts.Spec.Replicas,
+			"new_replicas", newSts.Spec.Replicas,
+			"old_generation", oldSts.Generation,
+			"new_generation", newSts.Generation,
+		)
+	}
+
+	c.enqueueReconcile()
+}
+
+func (c *RolloutController) onDeleted(obj interface{}) {
+	sts, isStatefulSet := obj.(*v1.StatefulSet)
+	if isStatefulSet {
+		level.Debug(c.logger).Log(
+			"msg", "observed StatefulSet deleted",
+			"name", sts.Name,
+			"namespace", sts.Namespace,
+			"replicas", sts.Spec.Replicas,
+			"generation", sts.Generation,
+		)
+	}
 }
 
 // Run runs the controller and blocks until Stop() is called.
