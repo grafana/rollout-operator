@@ -19,6 +19,7 @@ metadata:
   name: test-app
   labels:
     grafana.com/prepare-downscale: "true"
+    rollout-group: test-app
   annotations:
     grafana.com/prepare-downscale-http-path: "/"
     grafana.com/prepare-downscale-http-port: "80"
@@ -36,3 +37,5 @@ spec:
       containers:
         - name: app
           image: nginx:latest
+  updateStrategy:
+    type: OnDelete
