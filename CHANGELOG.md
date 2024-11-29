@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.21.0
+
 * [ENHANCEMENT] Log debug information about StatefulSets as they are created, updated and deleted. #182
 
 ## v0.20.1
