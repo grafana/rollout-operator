@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] New parameter log.format allows to set logging format to logfmt (default) or json (new). #184
+
 ## v0.21.0
 
 * [ENHANCEMENT] Log debug information about StatefulSets as they are created, updated and deleted. #182

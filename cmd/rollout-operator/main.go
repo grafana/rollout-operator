@@ -39,7 +39,8 @@ import (
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
 
 type config struct {
-	logLevel string
+	logFormat string
+	logLevel  string
 
 	serverPort        int
 	kubeAPIURL        string
@@ -65,6 +66,7 @@ type config struct {
 }
 
 func (cfg *config) register(fs *flag.FlagSet) {
+	fs.StringVar(&cfg.logFormat, "log.format", "logfmt", "The log format. Supported values: logfmt, json. Defaults to logfmt.")
 	fs.StringVar(&cfg.logLevel, "log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
 	fs.IntVar(&cfg.serverPort, "server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
 	fs.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
@@ -113,7 +115,7 @@ func main() {
 	check(fs.Parse(os.Args[1:]))
 	check(cfg.validate())
 
-	logger, err := initLogger(cfg.logLevel)
+	logger, err := initLogger(cfg.logFormat, cfg.logLevel)
 	check(err)
 
 	reg := prometheus.NewRegistry()
@@ -280,8 +282,17 @@ func buildKubeConfig(apiURL, cfgFile string) (*rest.Config, error) {
 	return rest.InClusterConfig()
 }
 
-func initLogger(minLevel string) (log.Logger, error) {
-	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+func initLogger(logFormat, minLevel string) (log.Logger, error) {
+	var logger log.Logger
+	switch logFormat {
+	case "logfmt":
+		logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	case "json":
+		logger = log.NewJSONLogger(log.NewSyncWriter(os.Stderr))
+	default:
+		return nil, fmt.Errorf("unknown log format: %s", logFormat)
+	}
+
 	var options []level.Option
 
 	switch minLevel {
