@@ -48,6 +48,7 @@ type RolloutController struct {
 	kubeClient           kubernetes.Interface
 	namespace            string
 	reconcileInterval    time.Duration
+	podSelectorKey       string
 	statefulSetsFactory  informers.SharedInformerFactory
 	statefulSetLister    listersv1.StatefulSetLister
 	statefulSetsInformer cache.SharedIndexInformer
@@ -77,7 +78,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, podSelectorKey string, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -96,6 +97,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		kubeClient:           kubeClient,
 		namespace:            namespace,
 		reconcileInterval:    reconcileInterval,
+		podSelectorKey:       podSelectorKey,
 		statefulSetsFactory:  statefulSetsFactory,
 		statefulSetLister:    statefulSetsInformer.Lister(),
 		statefulSetsInformer: statefulSetsInformer.Informer(),
@@ -496,7 +498,7 @@ func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (boo
 func (c *RolloutController) listPodsByStatefulSet(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
 	// Select all pods belonging to the input StatefulSet.
 	podsSelector := labels.NewSelector().Add(
-		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
+		util.MustNewLabelsRequirement(c.podSelectorKey, selection.Equals, []string{sts.Spec.Template.Labels[c.podSelectorKey]}),
 	)
 
 	pods, err := c.listPods(podsSelector)
@@ -628,7 +630,7 @@ func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) (
 	// and so it means they still need to be updated.
 	podsSelector := labels.NewSelector().Add(
 		util.MustNewLabelsRequirement(v1.ControllerRevisionHashLabelKey, selection.NotEquals, []string{updateRev}),
-		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
+		util.MustNewLabelsRequirement(c.podSelectorKey, selection.Equals, []string{sts.Spec.Template.Labels[c.podSelectorKey]}),
 	)
 
 	pods, err := c.listPods(podsSelector)
