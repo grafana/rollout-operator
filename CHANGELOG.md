@@ -3,7 +3,8 @@
 ## main / unreleased
 
 * [ENHANCEMENT] New parameter log.format allows to set logging format to logfmt (default) or json (new). #184
-
+* [ENHANCEMENT] Add a 5 minute timeout to requests to Pods and to the Kubernetes control plane. #186
+ 
 ## v0.21.0
 
 * [ENHANCEMENT] Log debug information about StatefulSets as they are created, updated and deleted. #182

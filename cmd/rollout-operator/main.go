@@ -276,6 +276,10 @@ func buildKubeConfig(apiURL, cfgFile string) (*rest.Config, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Set a generous timeout.
+		// We use this client for various HTTP operations against the k8s API and against the StatefulSets.
+		// We want to not be stuck waiting forever on a TCP timeout, but also not interrupt any process the StatefulSets might eb doing.
+		config.Timeout = 5 * time.Minute
 		return config, nil
 	}
 
