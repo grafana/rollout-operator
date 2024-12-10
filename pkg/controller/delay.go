@@ -246,7 +246,8 @@ func callCancelDelayedDownscale(ctx context.Context, logger log.Logger, client h
 		g.Go(func() error {
 			target := ep.url.String()
 
-			epLogger := log.With(logger, "pod", ep.podName, "url", target)
+			requestStart := time.Now()
+			epLogger := log.With(logger, "pod", ep.podName, "url", target, "duration", log.Valuer(func() interface{} { return time.Since(requestStart) }))
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
 			if err != nil {
