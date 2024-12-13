@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Make timeout for requests to Pods and to the Kubernetes control plane configurable. #TBD
+* [ENHANCEMENT] Make timeout for requests to Pods and to the Kubernetes control plane configurable. #188
 
 ## v0.22.0
 
