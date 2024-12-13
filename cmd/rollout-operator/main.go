@@ -46,6 +46,7 @@ type config struct {
 	kubeAPIURL        string
 	kubeConfigFile    string
 	kubeNamespace     string
+	kubeClientTimeout time.Duration
 	reconcileInterval time.Duration
 
 	serverTLSEnabled bool
@@ -71,6 +72,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.IntVar(&cfg.serverPort, "server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
 	fs.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
+	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "Timeout for requests made to the Kubernetes API")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
 
@@ -142,7 +144,7 @@ func main() {
 	check(srv.Start())
 
 	// Build the Kubernetes client config.
-	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile)
+	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile, cfg.kubeClientTimeout)
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
 	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
 
@@ -270,16 +272,13 @@ func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, resta
 
 }
 
-func buildKubeConfig(apiURL, cfgFile string) (*rest.Config, error) {
+func buildKubeConfig(apiURL, cfgFile string, timeout time.Duration) (*rest.Config, error) {
 	if cfgFile != "" {
 		config, err := clientcmd.BuildConfigFromFlags(apiURL, cfgFile)
 		if err != nil {
 			return nil, err
 		}
-		// Set a generous timeout.
-		// We use this client for various HTTP operations against the k8s API and against the StatefulSets.
-		// We want to not be stuck waiting forever on a TCP timeout, but also not interrupt any process the StatefulSets might eb doing.
-		config.Timeout = 5 * time.Minute
+		config.Timeout = timeout
 		return config, nil
 	}
 

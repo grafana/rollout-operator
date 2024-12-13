@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Make timeout for requests to Pods and to the Kubernetes control plane configurable. #TBD
+
 ## v0.22.0
 
 * [ENHANCEMENT] New parameter log.format allows to set logging format to logfmt (default) or json (new). #184
