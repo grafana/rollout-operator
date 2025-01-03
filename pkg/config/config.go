@@ -21,7 +21,7 @@ const (
 	PrepareDownscaleLabelValue = "true"
 
 	// RolloutGroupLabelKey is the group to which multiple statefulsets belong and must be operated on together.
-	RolloutGroupLabelKey = "rollout-group"
+	RolloutGroupLabelKey          = "rollout-group"
 	RolloutSecondaryGroupLabelKey = "rollout-secondary-group"
 	// RolloutMaxUnavailableAnnotationKey is the max number of pods in each statefulset that may be stopped at
 	// one time.

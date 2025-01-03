@@ -116,8 +116,8 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("loki-ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("loki-ingester-zone-b-2", testPrevRevisionHash),
 			},
-			expectedDeletedPods: []string{"loki-ingester-zone-a-0", "loki-ingester-zone-a-1"},
-			additionalGroups: `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
+			expectedDeletedPods:     []string{"loki-ingester-zone-a-0", "loki-ingester-zone-a-1"},
+			additionalGroups:        `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
 			additionalGroupFailures: `rollout_operator_group_reconciles_failed_total{rollout_group="ingester-loki"} 0`,
 		},
 		"should do nothing if multiple StatefulSets have not-Ready pods but NOT reported by the StatefulSet status yet": {
@@ -173,8 +173,8 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("loki-ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("loki-ingester-zone-b-2", testPrevRevisionHash),
 			},
-			expectedDeletedPods: []string{"loki-ingester-zone-a-0", "loki-ingester-zone-a-1"},
-			additionalGroups: `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
+			expectedDeletedPods:     []string{"loki-ingester-zone-a-0", "loki-ingester-zone-a-1"},
+			additionalGroups:        `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
 			additionalGroupFailures: `rollout_operator_group_reconciles_failed_total{rollout_group="ingester-loki"} 0`,
 		},
 		"should do nothing if multiple StatefulSets have not-Ready pods but ONLY reported by 1 StatefulSet status": {
@@ -230,7 +230,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("mimir-ingester-zone-b-1", testLastRevisionHash),
 				mockStatefulSetPod("mimir-ingester-zone-b-2", testLastRevisionHash),
 			},
-			additionalGroups: `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
+			additionalGroups:        `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
 			additionalGroupFailures: `rollout_operator_group_reconciles_failed_total{rollout_group="ingester-loki"} 0`,
 		},
 		"should do nothing if all pods are updated -- add secondary group need update": {
@@ -264,8 +264,8 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("loki-ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("loki-ingester-zone-b-2", testPrevRevisionHash),
 			},
-			expectedDeletedPods: []string{"loki-ingester-zone-a-0", "loki-ingester-zone-a-1"},
-			additionalGroups: `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
+			expectedDeletedPods:     []string{"loki-ingester-zone-a-0", "loki-ingester-zone-a-1"},
+			additionalGroups:        `rollout_operator_group_reconciles_total{rollout_group="ingester-loki"} 1`,
 			additionalGroupFailures: `rollout_operator_group_reconciles_failed_total{rollout_group="ingester-loki"} 0`,
 		},
 		"should delete pods that needs to be updated, honoring the configured max unavailable": {
