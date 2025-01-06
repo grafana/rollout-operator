@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.23.0
+
 * [ENHANCEMENT] Make timeout for requests to Pods and to the Kubernetes control plane configurable. #188
 * [ENHANCEMENT] Updated dependencies, including: #189 #191
   * `github.com/prometheus/client_golang` from `v1.20.4` to `v1.20.5`
