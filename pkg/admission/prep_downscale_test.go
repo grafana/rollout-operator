@@ -928,12 +928,13 @@ func TestCreateEndpoints(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		oldInfo  *objectInfo
-		newInfo  *objectInfo
-		port     string
-		path     string
-		expected []endpoint
+		name        string
+		oldInfo     *objectInfo
+		newInfo     *objectInfo
+		serviceName string
+		port        string
+		path        string
+		expected    []endpoint
 	}{
 		{
 			name: "downscale by 2",
@@ -943,15 +944,16 @@ func TestCreateEndpoints(t *testing.T) {
 			newInfo: &objectInfo{
 				replicas: func() *int32 { i := int32(3); return &i }(),
 			},
-			port: "8080",
-			path: "prepare-downscale",
+			serviceName: "headless-service",
+			port:        "8080",
+			path:        "prepare-downscale",
 			expected: []endpoint{
 				{
-					url:   "test-4.test.default.svc.cluster.local:8080/prepare-downscale",
+					url:   "test-4.headless-service.default.svc.cluster.local:8080/prepare-downscale",
 					index: 4,
 				},
 				{
-					url:   "test-3.test.default.svc.cluster.local:8080/prepare-downscale",
+					url:   "test-3.headless-service.default.svc.cluster.local:8080/prepare-downscale",
 					index: 3,
 				},
 			},
@@ -960,7 +962,7 @@ func TestCreateEndpoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := createEndpoints(ar, tt.oldInfo, tt.newInfo, tt.port, tt.path)
+			actual := createEndpoints(ar, tt.oldInfo, tt.newInfo, tt.serviceName, tt.port, tt.path)
 			if len(actual) != len(tt.expected) {
 				t.Errorf("createEndpoints() = %v, want %v", actual, tt.expected)
 				return
