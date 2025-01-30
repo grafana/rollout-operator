@@ -9,6 +9,8 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/gorilla/mux"
+
+	"github.com/grafana/rollout-operator/pkg/metrics"
 )
 
 type server struct {
@@ -18,11 +20,11 @@ type server struct {
 	logger log.Logger
 }
 
-func newServer(port int, logger log.Logger, metrics *metrics) *server {
-	m, handler := newInstrumentedRouter(metrics)
+func newServer(cfg config, namespace string, logger log.Logger, metrics *metrics.Metrics) *server {
+	m, handler := newInstrumentedRouter(metrics, namespace, cfg, logger)
 
 	return &server{
-		port: port,
+		port: cfg.serverPort,
 		mux:  m,
 		srv: &http.Server{
 			Handler:      handler,

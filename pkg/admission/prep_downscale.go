@@ -27,6 +27,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/metrics"
+	"github.com/grafana/rollout-operator/pkg/middleware"
 	"github.com/grafana/rollout-operator/pkg/util"
 )
 
@@ -35,10 +37,15 @@ const (
 	maxPrepareGoroutines        = 32
 )
 
-func PrepareDownscale(ctx context.Context, logger log.Logger, ar admissionv1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *admissionv1.AdmissionResponse {
+func PrepareDownscale(ctx context.Context, namespace string, logger log.Logger, ar admissionv1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string, metrics *metrics.Metrics) *admissionv1.AdmissionResponse {
+	rt := http.DefaultTransport
+	if namespace != "" {
+		// HTTP client side cluster validation.
+		rt = middleware.ClusterValidationRoundTripper(rt, namespace, logger, metrics)
+	}
 	client := &http.Client{
 		Timeout:   5 * time.Second,
-		Transport: &nethttp.Transport{RoundTripper: http.DefaultTransport},
+		Transport: &nethttp.Transport{RoundTripper: rt},
 	}
 
 	if useZoneTracker {
