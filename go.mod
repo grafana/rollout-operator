@@ -6,7 +6,7 @@ require (
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/go-kit/log v0.2.1
 	github.com/gorilla/mux v1.8.1
-	github.com/grafana/dskit v0.0.0-20241212153328-e27df29220ea
+	github.com/grafana/dskit v0.0.0-20250131091637-f3e9480803e2
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/k3d-io/k3d/v5 v5.7.5
 	github.com/opentracing-contrib/go-stdlib v1.1.0

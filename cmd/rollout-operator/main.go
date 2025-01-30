@@ -42,12 +42,13 @@ type config struct {
 	logFormat string
 	logLevel  string
 
-	serverPort        int
-	kubeAPIURL        string
-	kubeConfigFile    string
-	kubeNamespace     string
-	kubeClientTimeout time.Duration
-	reconcileInterval time.Duration
+	serverPort                int
+	kubeAPIURL                string
+	kubeConfigFile            string
+	kubeNamespace             string
+	kubeClientTimeout         time.Duration
+	reconcileInterval         time.Duration
+	enableNamespaceValidation bool
 
 	serverTLSEnabled bool
 	serverTLSPort    int
@@ -75,6 +76,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "Timeout for requests made to the Kubernetes API")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
+	fs.BoolVar(&cfg.enableNamespaceValidation, "enable-namespace-validation", false, "Enable validation of HTTP requests targeting this namespace?")
 
 	fs.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
 	fs.IntVar(&cfg.serverTLSPort, "server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
@@ -137,7 +139,11 @@ func main() {
 	}
 
 	// Expose HTTP endpoints.
-	srv := newServer(cfg.serverPort, logger, metrics)
+	var namespace string
+	if cfg.enableNamespaceValidation {
+		namespace = cfg.kubeNamespace
+	}
+	srv := newServer(cfg.serverPort, namespace, logger, metrics)
 	srv.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	srv.Handle("/ready", readyHandler(ready))
 	srv.PathPrefix("/debug/pprof").Handler(http.DefaultServeMux)
@@ -239,10 +245,14 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 	}
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-		return admission.PrepareDownscale(ctx, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName)
+		return admission.PrepareDownscale(ctx, cfg.kubeNamespace, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName)
 	}
 
-	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert, metrics)
+	var namespace string
+	if cfg.enableNamespaceValidation {
+		namespace = cfg.kubeNamespace
+	}
+	tlsSrv, err := newTLSServer(cfg.serverTLSPort, namespace, logger, cert, metrics)
 	check(errors.Wrap(err, "failed to create tls server"))
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, kubeClient))

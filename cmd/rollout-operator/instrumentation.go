@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 
+	"github.com/go-kit/log"
 	"github.com/gorilla/mux"
 	"github.com/grafana/dskit/instrument"
 	"github.com/grafana/dskit/middleware"
@@ -41,7 +42,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	}
 }
 
-func newInstrumentedRouter(metrics *metrics) (*mux.Router, http.Handler) {
+func newInstrumentedRouter(metrics *metrics, namespace string, logger log.Logger) (*mux.Router, http.Handler) {
 	router := mux.NewRouter()
 
 	httpMiddleware := []middleware.Interface{
@@ -55,6 +56,9 @@ func newInstrumentedRouter(metrics *metrics) (*mux.Router, http.Handler) {
 			ResponseBodySize: metrics.SentMessageSize,
 			InflightRequests: metrics.InflightRequests,
 		},
+	}
+	if namespace != "" {
+		httpMiddleware = append(httpMiddleware, middleware.ClusterValidationMiddleware(namespace, logger))
 	}
 
 	return router, middleware.Merge(httpMiddleware...).Wrap(router)

@@ -21,13 +21,13 @@ type tlsServer struct {
 	logger log.Logger
 }
 
-func newTLSServer(port int, logger log.Logger, cert tlscert.Certificate, metrics *metrics) (*tlsServer, error) {
+func newTLSServer(port int, namespace string, logger log.Logger, cert tlscert.Certificate, metrics *metrics) (*tlsServer, error) {
 	pair, err := tls.X509KeyPair(cert.Cert, cert.Key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load key pair: %v", err)
 	}
 
-	m, handler := newInstrumentedRouter(metrics)
+	m, handler := newInstrumentedRouter(metrics, namespace, logger)
 
 	return &tlsServer{
 		port: port,

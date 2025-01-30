@@ -17,10 +17,12 @@ import (
 	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/apps/v1"
 
+	"github.com/grafana/dskit/clusterutil"
+
 	"github.com/grafana/rollout-operator/pkg/config"
 )
 
-func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, replicas int32) {
+func cancelDelayedDownscaleIfConfigured(ctx context.Context, namespace string, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, replicas int32) {
 	delay, prepareURL, err := parseDelayedDownscaleAnnotations(sts.GetAnnotations())
 	if delay == 0 || prepareURL == nil {
 		return
@@ -33,13 +35,13 @@ func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, 
 
 	endpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), 0, int(replicas), prepareURL)
 
-	callCancelDelayedDownscale(ctx, logger, httpClient, endpoints)
+	callCancelDelayedDownscale(ctx, namespace, logger, httpClient, endpoints)
 }
 
 // Checks if downscale delay has been reached on replicas in [desiredReplicas, currentReplicas) range.
 // If there is a range of replicas at the end of statefulset for which delay has been reached, this function
 // returns updated desired replicas that statefulset can be scaled to.
-func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, currentReplicas, desiredReplicas int32) (updatedDesiredReplicas int32, _ error) {
+func checkScalingDelay(ctx context.Context, namespace string, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, currentReplicas, desiredReplicas int32) (updatedDesiredReplicas int32, _ error) {
 	if currentReplicas == desiredReplicas {
 		// should not happen
 		return currentReplicas, nil
@@ -54,7 +56,7 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	}
 
 	if desiredReplicas >= currentReplicas {
-		callCancelDelayedDownscale(ctx, logger, httpClient, createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), 0, int(currentReplicas), prepareURL))
+		callCancelDelayedDownscale(ctx, namespace, logger, httpClient, createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), 0, int(currentReplicas), prepareURL))
 		// Proceed even if calling cancel of delayed downscale fails. We call cancellation repeatedly, so it will happen during next reconcile.
 		return desiredReplicas, nil
 	}
@@ -62,12 +64,12 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	{
 		// Replicas in [0, desired) interval should cancel any delayed downscale, if they have any.
 		cancelEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), 0, int(desiredReplicas), prepareURL)
-		callCancelDelayedDownscale(ctx, logger, httpClient, cancelEndpoints)
+		callCancelDelayedDownscale(ctx, namespace, logger, httpClient, cancelEndpoints)
 	}
 
 	// Replicas in [desired, current) interval are going to be stopped.
 	downscaleEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), int(desiredReplicas), int(currentReplicas), prepareURL)
-	elapsedTimeSinceDownscaleInitiated, err := callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx, logger, httpClient, downscaleEndpoints)
+	elapsedTimeSinceDownscaleInitiated, err := callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx, namespace, logger, httpClient, downscaleEndpoints)
 	if err != nil {
 		return currentReplicas, fmt.Errorf("failed prepare pods for delayed downscale: %v", err)
 	}
@@ -159,7 +161,7 @@ func createPrepareDownscaleEndpoints(namespace, serviceName string, from, to int
 	return eps
 }
 
-func callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx context.Context, logger log.Logger, client httpClient, endpoints []endpoint) (map[int]time.Duration, error) {
+func callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx context.Context, namespace string, logger log.Logger, client httpClient, endpoints []endpoint) (map[int]time.Duration, error) {
 	if len(endpoints) == 0 {
 		return nil, fmt.Errorf("no endpoints")
 	}
@@ -189,6 +191,7 @@ func callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx co
 				return err
 			}
 
+			req.Header.Set(clusterutil.ClusterHeader, namespace)
 			resp, err := client.Do(req)
 			if err != nil {
 				level.Error(epLogger).Log("msg", "error sending HTTP POST request to endpoint", "err", err)
@@ -234,7 +237,7 @@ func callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx co
 	return timestamps, err
 }
 
-func callCancelDelayedDownscale(ctx context.Context, logger log.Logger, client httpClient, endpoints []endpoint) {
+func callCancelDelayedDownscale(ctx context.Context, namespace string, logger log.Logger, client httpClient, endpoints []endpoint) {
 	if len(endpoints) == 0 {
 		return
 	}
@@ -255,6 +258,7 @@ func callCancelDelayedDownscale(ctx context.Context, logger log.Logger, client h
 				return err
 			}
 
+			req.Header.Set(clusterutil.ClusterHeader, namespace)
 			resp, err := client.Do(req)
 			if err != nil {
 				level.Error(epLogger).Log("msg", "error sending HTTP DELETE request to endpoint", "err", err)

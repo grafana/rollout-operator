@@ -34,7 +34,7 @@ type zoneInfo struct {
 }
 
 // Use a ConfigMap instead of an annotation to track the last time zones were downscaled
-func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
+func (zt *zoneTracker) prepareDownscale(ctx context.Context, namespace string, l log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
 	logger, ctx := spanlogger.New(ctx, l, "zoneTracker.prepareDownscale()", tenantResolver)
 	defer logger.Span.Finish()
 
@@ -149,14 +149,14 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
-	err = sendPrepareShutdownRequests(ctx, logger, client, eps)
+	err = sendPrepareShutdownRequests(ctx, namespace, logger, client, eps)
 	if err != nil {
 		// Down-scale operation is disallowed because at least one pod failed to
 		// prepare for shutdown and cannot be deleted. We also need to
 		// un-prepare them all.
 
 		level.Error(logger).Log("msg", "downscale not allowed due to host(s) failing to prepare for downscale. unpreparing...", "err", err)
-		undoPrepareShutdownRequests(ctx, logger, client, eps)
+		undoPrepareShutdownRequests(ctx, namespace, logger, client, eps)
 
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
@@ -168,7 +168,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 		// Down-scale operation is disallowed because we failed to add the
 		// annotation to the statefulset. We again need to un-prepare all pods.
 		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation. unpreparing...", "err", err)
-		undoPrepareShutdownRequests(ctx, logger, client, eps)
+		undoPrepareShutdownRequests(ctx, namespace, logger, client, eps)
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because setting downscale timestamp in the zone ConfigMap failed.",
 			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
