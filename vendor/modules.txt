@@ -251,8 +251,9 @@ github.com/google/uuid
 # github.com/gorilla/mux v1.8.1
 ## explicit; go 1.20
 github.com/gorilla/mux
-# github.com/grafana/dskit v0.0.0-20241212153328-e27df29220ea
+# github.com/grafana/dskit v0.0.0-20250210170515-7a3216014a10
 ## explicit; go 1.21
+github.com/grafana/dskit/clusterutil
 github.com/grafana/dskit/grpcutil
 github.com/grafana/dskit/httpgrpc
 github.com/grafana/dskit/instrument

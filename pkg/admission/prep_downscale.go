@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/grafana/dskit/clusterutil"
 	"github.com/grafana/dskit/spanlogger"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go"
@@ -35,7 +36,7 @@ const (
 	maxPrepareGoroutines        = 32
 )
 
-func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *v1.AdmissionResponse {
+func PrepareDownscale(ctx context.Context, namespace string, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *v1.AdmissionResponse {
 	client := &http.Client{
 		Timeout:   5 * time.Second,
 		Transport: &nethttp.Transport{RoundTripper: http.DefaultTransport},
@@ -43,17 +44,17 @@ func PrepareDownscale(ctx context.Context, logger log.Logger, ar v1.AdmissionRev
 
 	if useZoneTracker {
 		zt := newZoneTracker(api, ar.Request.Namespace, zoneTrackerConfigMapName)
-		return zt.prepareDownscale(ctx, logger, ar, api, client)
+		return zt.prepareDownscale(ctx, namespace, logger, ar, api, client)
 	}
 
-	return prepareDownscale(ctx, logger, ar, api, client)
+	return prepareDownscale(ctx, namespace, logger, ar, api, client)
 }
 
 type httpClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
+func prepareDownscale(ctx context.Context, namespace string, l log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
 	logger, ctx := spanlogger.New(ctx, l, "admission.prepareDownscale()", tenantResolver)
 	defer logger.Span.Finish()
 
@@ -161,13 +162,13 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
 	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
 
-	if err := sendPrepareShutdownRequests(ctx, logger, client, eps); err != nil {
+	if err := sendPrepareShutdownRequests(ctx, namespace, logger, client, eps); err != nil {
 		// Down-scale operation is disallowed because at least one pod failed to
 		// prepare for shutdown and cannot be deleted. We also need to
 		// un-prepare them all.
 
 		level.Error(logger).Log("msg", "downscale not allowed due to host(s) failing to prepare for downscale. unpreparing...", "err", err)
-		undoPrepareShutdownRequests(ctx, logger, client, eps)
+		undoPrepareShutdownRequests(ctx, namespace, logger, client, eps)
 
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
@@ -179,7 +180,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		// Down-scale operation is disallowed because we failed to add the
 		// annotation to the statefulset. We again need to un-prepare all pods.
 		level.Error(logger).Log("msg", "downscale not allowed due to error while adding annotation. unpreparing...", "err", err)
-		undoPrepareShutdownRequests(ctx, logger, client, eps)
+		undoPrepareShutdownRequests(ctx, namespace, logger, client, eps)
 
 		return deny(
 			"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
@@ -474,7 +475,7 @@ func createEndpoints(ar v1.AdmissionReview, oldInfo, newInfo *objectInfo, port, 
 	return eps
 }
 
-func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.Logger, client httpClient, ep endpoint) error {
+func invokePrepareShutdown(ctx context.Context, method, namespace string, parentLogger log.Logger, client httpClient, ep endpoint) error {
 	span := "admission.PreparePodForShutdown"
 	if method == http.MethodDelete {
 		span = "admission.UnpreparePodForShutdown"
@@ -493,6 +494,7 @@ func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.
 		return err
 	}
 
+	req.Header.Set(clusterutil.ClusterVerificationLabelHeader, namespace)
 	req.Header.Set("Content-Type", "application/json")
 	req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
 	defer ht.Finish()
@@ -515,7 +517,7 @@ func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.
 	return nil
 }
 
-func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) error {
+func sendPrepareShutdownRequests(ctx context.Context, namespace string, logger log.Logger, client httpClient, eps []endpoint) error {
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.sendPrepareShutdownRequests()")
 	defer span.Finish()
 
@@ -533,7 +535,7 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 			if err := ectx.Err(); err != nil {
 				return err
 			}
-			return invokePrepareShutdown(ectx, http.MethodPost, logger, client, ep)
+			return invokePrepareShutdown(ectx, http.MethodPost, namespace, logger, client, ep)
 		})
 	}
 
@@ -541,7 +543,7 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 }
 
 // undoPrepareShutdownRequests sends an HTTP DELETE to each of the given endpoints.
-func undoPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) {
+func undoPrepareShutdownRequests(ctx context.Context, namespace string, logger log.Logger, client httpClient, eps []endpoint) {
 	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.undoPrepareShutdownRequests()")
 	defer span.Finish()
 
@@ -557,7 +559,7 @@ func undoPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 	for _, ep := range eps {
 		ep := ep
 		undoGroup.Go(func() error {
-			if err := invokePrepareShutdown(ctx, http.MethodDelete, logger, client, ep); err != nil {
+			if err := invokePrepareShutdown(ctx, http.MethodDelete, namespace, logger, client, ep); err != nil {
 				level.Warn(logger).Log("msg", "failed to undo prepare shutdown request", "url", ep.url, "err", err)
 				// (We swallow the error so all of the deletes are attempted.)
 			}

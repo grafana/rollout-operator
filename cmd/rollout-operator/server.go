@@ -18,8 +18,8 @@ type server struct {
 	logger log.Logger
 }
 
-func newServer(port int, logger log.Logger, metrics *metrics) *server {
-	m, handler := newInstrumentedRouter(metrics)
+func newServer(port int, namespace string, logger log.Logger, metrics *metrics) *server {
+	m, handler := newInstrumentedRouter(metrics, namespace, logger)
 
 	return &server{
 		port: port,
