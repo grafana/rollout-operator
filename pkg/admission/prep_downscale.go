@@ -102,8 +102,10 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	if port == "" {
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePortAnnotationKey))
 		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v annotation is not set or empty.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, config.PrepareDownscalePortAnnotationKey,
+			fmt.Sprintf(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v annotation is not set or empty.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, config.PrepareDownscalePortAnnotationKey,
+			),
 		)
 	}
 
@@ -111,8 +113,10 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	if path == "" {
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePathAnnotationKey))
 		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v annotation is not set or empty.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, config.PrepareDownscalePathAnnotationKey,
+			fmt.Sprintf(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because the %v annotation is not set or empty.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, config.PrepareDownscalePathAnnotationKey,
+			),
 		)
 	}
 
@@ -122,23 +126,26 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
 			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because finding other statefulsets failed.",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
+				fmt.Sprintf(
+					"downscale of %s/%s in %s from %d to %d replicas is not allowed because finding other statefulsets failed.",
+					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
+				),
 			)
 		}
 		foundSts, err := findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name)
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale annotations", "err", err)
 			return deny(
-				"downscale of %s/%s in %s from %d to %d replicas is not allowed because parsing downscale annotations failed.",
-				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
+				fmt.Sprintf(
+					"downscale of %s/%s in %s from %d to %d replicas is not allowed because parsing downscale annotations failed.",
+					ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
+				),
 			)
 		}
 		if foundSts != nil {
 			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
 			level.Warn(logger).Log("msg", msg, "err", err)
-			//nolint:govet
 			return deny(msg)
 		}
 		foundSts, err = findStatefulSetWithNonUpdatedReplicas(ctx, api, ar.Request.Namespace, stsList, ar.Request.Name)
@@ -146,14 +153,12 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because an error occurred while checking whether StatefulSets have non-updated replicas",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas)
 			level.Warn(logger).Log("msg", msg, "err", err)
-			//nolint:govet
 			return deny(msg)
 		}
 		if foundSts != nil {
 			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v has %d non-updated replicas and %d non-ready replicas",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, foundSts.name, foundSts.nonUpdatedReplicas, foundSts.nonReadyReplicas)
 			level.Warn(logger).Log("msg", msg)
-			//nolint:govet
 			return deny(msg)
 		}
 	}
@@ -170,8 +175,10 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		undoPrepareShutdownRequests(ctx, logger, client, eps)
 
 		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
+			fmt.Sprintf(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because one or more pods failed to prepare for shutdown.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
+			),
 		)
 	}
 
@@ -182,8 +189,10 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		undoPrepareShutdownRequests(ctx, logger, client, eps)
 
 		return deny(
-			"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
-			ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
+			fmt.Sprintf(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because adding an annotation to the statefulset failed.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
+			),
 		)
 	}
 
@@ -197,12 +206,12 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	}
 }
 
-// deny returns a *v1.AdmissionResponse with Allowed: false and the message provided formatted with as in fmt.Sprintf.
-func deny(msg string, args ...any) *v1.AdmissionResponse {
+// deny returns a *v1.AdmissionResponse with Allowed: false and the message provided
+func deny(msg string) *v1.AdmissionResponse {
 	return &v1.AdmissionResponse{
 		Allowed: false,
 		Result: &metav1.Status{
-			Message: fmt.Sprintf(msg, args...),
+			Message: msg,
 		},
 	}
 }
