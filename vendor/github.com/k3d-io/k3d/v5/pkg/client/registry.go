@@ -76,6 +76,10 @@ func RegistryCreate(ctx context.Context, runtime runtimes.Runtime, reg *k3d.Regi
 		Env:      []string{},
 	}
 
+	if reg.ExposureOpts.Binding.HostPort != "" {
+		registryNode.Env = append(registryNode.Env, fmt.Sprintf("REGISTRY_HTTP_ADDR=:%s", reg.ExposureOpts.Binding.HostPort))
+	}
+
 	if reg.Options.Proxy.RemoteURL != "" {
 		registryNode.Env = append(registryNode.Env, fmt.Sprintf("REGISTRY_PROXY_REMOTEURL=%s", reg.Options.Proxy.RemoteURL))
 
@@ -86,6 +90,10 @@ func RegistryCreate(ctx context.Context, runtime runtimes.Runtime, reg *k3d.Regi
 		if reg.Options.Proxy.Password != "" {
 			registryNode.Env = append(registryNode.Env, fmt.Sprintf("REGISTRY_PROXY_PASSWORD=%s", reg.Options.Proxy.Password))
 		}
+	}
+
+	if reg.Options.DeleteEnabled {
+		registryNode.Env = append(registryNode.Env, "REGISTRY_STORAGE_DELETE_ENABLED=true")
 	}
 
 	if len(reg.Volumes) > 0 {
@@ -359,7 +367,7 @@ func RegistryGenerateLocalRegistryHostingConfigMapYAML(ctx context.Context, runt
 	return cmYaml, nil
 }
 
-// RegistryMergeConfig merges a source registry config into an existing dest registry cofnig
+// RegistryMergeConfig merges a source registry config into an existing dest registry config
 func RegistryMergeConfig(ctx context.Context, dest, src *wharfie.Registry) error {
 	if err := mergo.MergeWithOverwrite(dest, src); err != nil {
 		return fmt.Errorf("failed to merge registry configs: %w", err)
