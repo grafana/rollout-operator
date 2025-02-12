@@ -206,7 +206,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 	}
 }
 
-// deny returns a *v1.AdmissionResponse with Allowed: false and the message provided formatted with as in fmt.Sprintf.
+// deny returns a *v1.AdmissionResponse with Allowed: false and the message provided
 func deny(msg string) *v1.AdmissionResponse {
 	return &v1.AdmissionResponse{
 		Allowed: false,
