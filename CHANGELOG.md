@@ -2,6 +2,15 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Update Go to `1.24` #196
+* [ENHANCEMENT] Updated dependencies, including: #197
+  * `github.com/prometheus/common` from `v0.61.0` to `v0.62.0`
+  * `golang.org/x/sync` from `v0.10.0` to `v0.11.0`
+  * `k8s.io/api` from `v0.32.0` to `v0.32.1`
+  * `k8s.io/apimachinery` from `v0.32.0` to `v0.32.1`
+  * `k8s.io/client-go` from `v0.32.0` to `v0.32.1`
+  * `sigs.k8s.io/controller-runtime` from `v0.19.3` to `v0.20.1`
+
 ## v0.23.0
 
 * [ENHANCEMENT] Make timeout for requests to Pods and to the Kubernetes control plane configurable. #188
