@@ -321,7 +321,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 			}, nil
 		})
 
-	admissionResponse := prepareDownscale(ctx, logger, ar, api, f)
+	admissionResponse := prepareDownscale(ctx, "", logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
 	if params.stsAnnotated {
@@ -400,7 +400,7 @@ func TestSendPrepareShutdown(t *testing.T) {
 				})
 			}
 
-			err := sendPrepareShutdownRequests(context.Background(), log.NewNopLogger(), httpClient, endpoints)
+			err := sendPrepareShutdownRequests(context.Background(), "", log.NewNopLogger(), httpClient, endpoints)
 			if c.expectErr {
 				assert.Error(t, err)
 			} else {
@@ -467,7 +467,7 @@ func TestUndoPrepareShutdown(t *testing.T) {
 				})
 			}
 
-			undoPrepareShutdownRequests(context.Background(), log.NewNopLogger(), httpClient, endpoints)
+			undoPrepareShutdownRequests(context.Background(), "", log.NewNopLogger(), httpClient, endpoints)
 			assert.Equal(t, c.numEndpoints, httpClient.calls(http.MethodDelete), "")
 		})
 	}
@@ -792,7 +792,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 
 	zt := newZoneTracker(api, namespace, "zone-tracker-test-cm")
 
-	admissionResponse := zt.prepareDownscale(ctx, logger, ar, api, f)
+	admissionResponse := zt.prepareDownscale(ctx, "", logger, ar, api, f)
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
 	if params.expectDeletes {
