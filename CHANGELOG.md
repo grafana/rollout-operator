@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.24.0
+
 * [ENHANCEMENT] Update Go to `1.24` #196
 * [ENHANCEMENT] Updated dependencies, including: #197
   * `github.com/prometheus/common` from `v0.61.0` to `v0.62.0`
