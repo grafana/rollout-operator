@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+## v0.24.1
+
+* [ENHANCEMENT] Rebuild of main branch to resolve [CVE-2025-0395](https://nvd.nist.gov/vuln/detail/CVE-2025-0395)
+
 ## v0.24.0
 
 * [ENHANCEMENT] Update Go to `1.24` #196
