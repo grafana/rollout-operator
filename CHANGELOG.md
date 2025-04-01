@@ -2,6 +2,15 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #203
+  * `github.com/prometheus/client_golang` from `v1.20.5` to `v1.21.1`
+  * `github.com/prometheus/common` from `v0.62.0` to `v0.63.0`
+  * `golang.org/x/sync` from `v0.11.0` to `v0.12.0`
+  * `k8s.io/api` from `v0.32.1` to `v0.32.3`
+  * `k8s.io/apimachinery` from `v0.32.1` to `v0.32.3`
+  * `k8s.io/client-go` from `v0.32.1` to `v0.32.3`
+  * `sigs.k8s.io/controller-runtime` from `v0.20.1` to `v0.20.4`
+
 ## v0.24.0
 
 * [ENHANCEMENT] Update Go to `1.24` #196
