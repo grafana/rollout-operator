@@ -113,7 +113,7 @@ func NewCluster(ctx context.Context, t *testing.T, opts ...Option) Cluster {
 		t.Logf("Hint: try running `docker network prune`")
 	}
 	require.NoError(t, err, "Failed creating cluster.")
-	t.Logf("Cluster '%s' created successfully!", clusterConfig.Cluster.Name)
+	t.Logf("Cluster '%s' created successfully!", clusterConfig.Name)
 
 	// Get kubeconfig and instantiate kubernetes.Clientset.
 	kubeConfigFile := filepath.Join(t.TempDir(), fmt.Sprintf("kubeconfig.%s.yaml", opt.clusterName))

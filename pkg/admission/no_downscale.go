@@ -26,7 +26,7 @@ const (
 
 func NoDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
 	logger, ctx := spanlogger.New(ctx, l, "admission.NoDownscale()", tenantResolver)
-	defer logger.Span.Finish()
+	defer logger.Finish()
 
 	logger.SetSpanAndLogTag("object.name", ar.Request.Name)
 	logger.SetSpanAndLogTag("object.resource", ar.Request.Resource.Resource)

@@ -69,15 +69,15 @@ func TestNilResponse(t *testing.T) {
 	require.NoError(t, err)
 	resp, err := k.RoundTrip(req)
 	require.Nil(t, resp)
-	require.ErrorIs(t, err, noResponseErr)
+	require.ErrorIs(t, err, errNoResponse)
 
 	// It would be nice to test for metric, but it's tricky since we're measuring duration.
 }
 
-var noResponseErr = fmt.Errorf("error")
+var errNoResponse = fmt.Errorf("error")
 
 type noResponseRoundTripper struct{}
 
 func (n noResponseRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
-	return nil, noResponseErr
+	return nil, errNoResponse
 }
