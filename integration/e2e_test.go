@@ -135,7 +135,7 @@ func TestNoDownscale_DownscaleUpdatingStatefulSet(t *testing.T) {
 	mock := mockServiceStatefulSet("mock", "1", true)
 	{
 		t.Log("Create the service with two replicas.")
-		mock.ObjectMeta.Labels["grafana.com/no-downscale"] = "true"
+		mock.Labels["grafana.com/no-downscale"] = "true"
 		mock.Spec.Replicas = ptr[int32](2)
 		requireCreateStatefulSet(ctx, t, api, mock)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 2)
@@ -183,7 +183,7 @@ func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 	}
 
 	mock := mockServiceStatefulSet("mock", "1", true)
-	mock.ObjectMeta.Labels["grafana.com/no-downscale"] = "true"
+	mock.Labels["grafana.com/no-downscale"] = "true"
 	{
 		t.Log("Create the service with two replicas.")
 		mock.Spec.Replicas = ptr[int32](2)

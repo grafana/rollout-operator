@@ -7,9 +7,8 @@ import (
 	"testing"
 	"time"
 
-	apps "k8s.io/api/apps/v1"
 	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -91,8 +90,8 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 	// Create a new zoneTracker with the fake client
 	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
 
-	stsList := &apps.StatefulSetList{
-		Items: []apps.StatefulSet{
+	stsList := &appsv1.StatefulSetList{
+		Items: []appsv1.StatefulSet{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-zone",
@@ -142,8 +141,8 @@ func TestLoadZonesCreatesInitialZones(t *testing.T) {
 	// Create a new zoneTracker with the fake client
 	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
 
-	stsList := &apps.StatefulSetList{
-		Items: []apps.StatefulSet{
+	stsList := &appsv1.StatefulSetList{
+		Items: []appsv1.StatefulSet{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-zone",
@@ -197,7 +196,7 @@ func TestLoadZonesEmptyConfigMap(t *testing.T) {
 	// Create a new zoneTracker with the fake client
 	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
 
-	stsList := &apps.StatefulSetList{}
+	stsList := &appsv1.StatefulSetList{}
 
 	err := zt.loadZones(ctx, stsList)
 	if err != nil {
@@ -215,7 +214,7 @@ func TestSetDownscaled(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	// Create the configmap
-	cm := &v1.ConfigMap{
+	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "testconfigmap",
 			Namespace: "testnamespace",

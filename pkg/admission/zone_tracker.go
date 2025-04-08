@@ -11,7 +11,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/spanlogger"
 	"github.com/opentracing/opentracing-go"
-	v1 "k8s.io/api/admission/v1"
+	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,9 +34,9 @@ type zoneInfo struct {
 }
 
 // Use a ConfigMap instead of an annotation to track the last time zones were downscaled
-func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, api kubernetes.Interface, client httpClient) *v1.AdmissionResponse {
+func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.AdmissionReview, api kubernetes.Interface, client httpClient) *admissionv1.AdmissionResponse {
 	logger, ctx := spanlogger.New(ctx, l, "zoneTracker.prepareDownscale()", tenantResolver)
-	defer logger.Span.Finish()
+	defer logger.Finish()
 
 	logger.SetSpanAndLogTag("object.name", ar.Request.Name)
 	logger.SetSpanAndLogTag("object.resource", ar.Request.Resource.Resource)
@@ -45,7 +45,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 	logger.SetSpanAndLogTag("request.uid", ar.Request.UID)
 
 	if *ar.Request.DryRun {
-		return &v1.AdmissionResponse{Allowed: true}
+		return &admissionv1.AdmissionResponse{Allowed: true}
 	}
 
 	oldInfo, err := decodeAndReplicas(ar.Request.OldObject.Raw)
@@ -75,7 +75,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 
 	if lbls[config.PrepareDownscaleLabelKey] != config.PrepareDownscaleLabelValue {
 		// Not labeled, nothing to do.
-		return &v1.AdmissionResponse{Allowed: true}
+		return &admissionv1.AdmissionResponse{Allowed: true}
 	}
 
 	port := annotations[config.PrepareDownscalePortAnnotationKey]
@@ -188,7 +188,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar v1
 
 	// Otherwise, we've made it through the gauntlet, and the downscale is allowed.
 	level.Info(logger).Log("msg", "downscale allowed")
-	return &v1.AdmissionResponse{
+	return &admissionv1.AdmissionResponse{
 		Allowed: true,
 		Result: &metav1.Status{
 			Message: fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is allowed -- all pods successfully prepared for shutdown.", ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas),
