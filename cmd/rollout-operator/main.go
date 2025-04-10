@@ -17,6 +17,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/flagext"
+	"github.com/grafana/dskit/middleware"
 	"github.com/grafana/dskit/tracing"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,8 +36,6 @@ import (
 	"github.com/grafana/rollout-operator/pkg/admission"
 	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
-	"github.com/grafana/rollout-operator/pkg/metrics"
-	"github.com/grafana/rollout-operator/pkg/middleware"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
 )
 
@@ -140,7 +139,7 @@ func main() {
 	check(err)
 
 	reg := prometheus.NewRegistry()
-	metrics := metrics.NewMetrics(reg)
+	metrics := newMetrics(reg)
 	ready := atomic.NewBool(false)
 	restart := make(chan string)
 
@@ -156,11 +155,7 @@ func main() {
 	}
 
 	// Expose HTTP endpoints.
-	var namespace string
-	if cfg.enableNamespaceValidation {
-		namespace = cfg.kubeNamespace
-	}
-	srv := newServer(cfg, namespace, logger, metrics)
+	srv := newServer(cfg, logger, metrics)
 	srv.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	srv.Handle("/ready", readyHandler(ready))
 	srv.PathPrefix("/debug/pprof").Handler(http.DefaultServeMux)
@@ -174,10 +169,18 @@ func main() {
 	if kubeConfig.UserAgent == "" {
 		kubeConfig.UserAgent = rest.DefaultKubernetesUserAgent()
 	}
-	if namespace != "" {
+
+	httpRT := http.DefaultTransport
+	if cfg.enableNamespaceValidation {
 		// HTTP client side cluster validation.
+		reporter := func(msg string, method string) {
+			level.Warn(logger).Log("msg", msg, "method", method, "cluster_validation_label", cfg.kubeNamespace)
+			metrics.InvalidClusterValidationLabels.WithLabelValues(method, "http", cfg.kubeNamespace).Inc()
+		}
+		httpRT = middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, httpRT)
+
 		kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-			return middleware.ClusterValidationRoundTripper(rt, namespace, logger, metrics)
+			return httpRT
 		})
 	}
 
@@ -201,7 +204,7 @@ func main() {
 	check(errors.Wrap(err, "failed to init dynamicClient"))
 
 	// Start TLS server if enabled.
-	maybeStartTLSServer(cfg, logger, kubeClient, restart, metrics)
+	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics)
 
 	// Init the controller.
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
@@ -231,7 +234,7 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics.Metrics) {
+func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics) {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
 		return
@@ -267,15 +270,11 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 		check(tlscert.PatchCABundleOnMutatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
 	}
 
-	var namespace string
-	if cfg.enableNamespaceValidation {
-		namespace = cfg.kubeNamespace
-	}
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-		return admission.PrepareDownscale(ctx, namespace, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName, metrics)
+		return admission.PrepareDownscale(ctx, rt, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName)
 	}
 
-	tlsSrv, err := newTLSServer(cfg, namespace, logger, cert, metrics)
+	tlsSrv, err := newTLSServer(cfg, logger, cert, metrics)
 	check(errors.Wrap(err, "failed to create tls server"))
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, kubeClient))

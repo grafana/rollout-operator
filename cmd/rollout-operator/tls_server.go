@@ -11,7 +11,6 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/gorilla/mux"
 
-	"github.com/grafana/rollout-operator/pkg/metrics"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
 )
 
@@ -22,13 +21,13 @@ type tlsServer struct {
 	logger log.Logger
 }
 
-func newTLSServer(cfg config, namespace string, logger log.Logger, cert tlscert.Certificate, metrics *metrics.Metrics) (*tlsServer, error) {
+func newTLSServer(cfg config, logger log.Logger, cert tlscert.Certificate, metrics *metrics) (*tlsServer, error) {
 	pair, err := tls.X509KeyPair(cert.Cert, cert.Key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load key pair: %v", err)
 	}
 
-	m, handler := newInstrumentedRouter(metrics, namespace, cfg, logger)
+	m, handler := newInstrumentedRouter(metrics, cfg, logger)
 
 	return &tlsServer{
 		port: cfg.serverTLSPort,
