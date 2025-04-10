@@ -87,7 +87,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
 	fs.BoolVar(&cfg.enableNamespaceValidation, "server.cluster-validation.http.enabled", false, "Enable validation of HTTP requests targeting this namespace?")
 	fs.BoolVar(&cfg.softNamespaceValidation, "server.cluster-validation.http.soft-validation", false, "Enable soft validation of HTTP requests targeting this namespace?")
-	fs.Var(&cfg.namespaceValidationExcludePaths, "server.cluster-validation.http.exclude-paths", fmt.Sprintf("Comma-separated list of URL paths that are excluded from the cluster validation check. Default: %s.", strings.Join(defaultExcludePaths, ",")))
+	fs.Var(&cfg.namespaceValidationExcludePaths, "server.cluster-validation.http.exclude-paths", fmt.Sprintf("Comma-separated list of URL paths that are excluded from the cluster validation check. Default: %s.", strings.Join(defaultClusterValidationExcludePaths, ",")))
 
 	fs.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
 	fs.IntVar(&cfg.serverTLSPort, "server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
@@ -107,7 +107,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.zoneTrackerConfigMapName, "zone-tracker.config-map-name", "rollout-operator-zone-tracker", "The name of the ConfigMap to use for the zone tracker")
 }
 
-func (cfg *config) validate() error {
+func (cfg config) validate() error {
 	// Validate CLI flags.
 	if cfg.kubeNamespace == "" {
 		return errors.New("the Kubernetes namespace has not been specified")
@@ -119,11 +119,6 @@ func (cfg *config) validate() error {
 		return errors.New("the zone tracker ConfigMap name has not been specified")
 	}
 
-	if len(cfg.namespaceValidationExcludePaths) == 0 {
-		// Apply default.
-		cfg.namespaceValidationExcludePaths = defaultExcludePaths
-	}
-
 	return nil
 }
 
@@ -133,6 +128,10 @@ func main() {
 	fs := flag.NewFlagSet("rollout-operator", flag.ExitOnError)
 	cfg.register(fs)
 	check(fs.Parse(os.Args[1:]))
+	if len(cfg.namespaceValidationExcludePaths) == 0 {
+		// Apply default.
+		cfg.namespaceValidationExcludePaths = defaultClusterValidationExcludePaths
+	}
 	check(cfg.validate())
 
 	logger, err := initLogger(cfg.logFormat, cfg.logLevel)
@@ -180,7 +179,7 @@ func main() {
 		httpRT = middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, httpRT)
 
 		kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-			return httpRT
+			return middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, rt)
 		})
 	}
 
