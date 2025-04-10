@@ -42,7 +42,7 @@ import (
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
 
 var (
-	defaultExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale"}
+	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale"}
 )
 
 type config struct {
