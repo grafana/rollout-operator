@@ -170,18 +170,16 @@ func main() {
 	}
 
 	httpRT := http.DefaultTransport
-	if cfg.enableNamespaceValidation {
-		// HTTP client side cluster validation.
-		reporter := func(msg string, method string) {
-			level.Warn(logger).Log("msg", msg, "method", method, "cluster_validation_label", cfg.kubeNamespace)
-			metrics.InvalidClusterValidationLabels.WithLabelValues(method, "http", cfg.kubeNamespace).Inc()
-		}
-		httpRT = middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, httpRT)
-
-		kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-			return middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, rt)
-		})
+	// HTTP client side cluster validation.
+	reporter := func(msg string, method string) {
+		level.Warn(logger).Log("msg", msg, "method", method, "cluster_validation_label", cfg.kubeNamespace)
+		metrics.InvalidClusterValidationLabels.WithLabelValues(method, "http", cfg.kubeNamespace).Inc()
 	}
+	httpRT = middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, httpRT)
+
+	kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+		return middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, rt)
+	})
 
 	// share the transport between all clients
 	httpClient, err := rest.HTTPClientFor(kubeConfig)
