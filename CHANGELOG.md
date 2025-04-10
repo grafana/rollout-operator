@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [FEATURE] Add cross-cluster traffic protection. #195
+
 ## v0.25.0
 
 * [ENHANCEMENT] Updated dependencies, including: #203

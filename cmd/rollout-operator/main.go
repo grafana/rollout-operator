@@ -10,11 +10,14 @@ import (
 	_ "net/http/pprof" // anonymous import to get the pprof handler registered
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/grafana/dskit/flagext"
+	"github.com/grafana/dskit/middleware"
 	"github.com/grafana/dskit/tracing"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -38,16 +41,23 @@ import (
 
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
 
+var (
+	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale"}
+)
+
 type config struct {
 	logFormat string
 	logLevel  string
 
-	serverPort        int
-	kubeAPIURL        string
-	kubeConfigFile    string
-	kubeNamespace     string
-	kubeClientTimeout time.Duration
-	reconcileInterval time.Duration
+	serverPort                      int
+	kubeAPIURL                      string
+	kubeConfigFile                  string
+	kubeNamespace                   string
+	kubeClientTimeout               time.Duration
+	reconcileInterval               time.Duration
+	enableNamespaceValidation       bool
+	softNamespaceValidation         bool
+	namespaceValidationExcludePaths flagext.StringSliceCSV
 
 	serverTLSEnabled bool
 	serverTLSPort    int
@@ -75,6 +85,9 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "Timeout for requests made to the Kubernetes API")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
+	fs.BoolVar(&cfg.enableNamespaceValidation, "server.cluster-validation.http.enabled", false, "Enable validation of HTTP requests targeting this namespace?")
+	fs.BoolVar(&cfg.softNamespaceValidation, "server.cluster-validation.http.soft-validation", false, "Enable soft validation of HTTP requests targeting this namespace?")
+	fs.Var(&cfg.namespaceValidationExcludePaths, "server.cluster-validation.http.exclude-paths", fmt.Sprintf("Comma-separated list of URL paths that are excluded from the cluster validation check. Default: %s.", strings.Join(defaultClusterValidationExcludePaths, ",")))
 
 	fs.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
 	fs.IntVar(&cfg.serverTLSPort, "server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
@@ -115,6 +128,10 @@ func main() {
 	fs := flag.NewFlagSet("rollout-operator", flag.ExitOnError)
 	cfg.register(fs)
 	check(fs.Parse(os.Args[1:]))
+	if len(cfg.namespaceValidationExcludePaths) == 0 {
+		// Apply default.
+		cfg.namespaceValidationExcludePaths = defaultClusterValidationExcludePaths
+	}
 	check(cfg.validate())
 
 	logger, err := initLogger(cfg.logFormat, cfg.logLevel)
@@ -137,7 +154,7 @@ func main() {
 	}
 
 	// Expose HTTP endpoints.
-	srv := newServer(cfg.serverPort, logger, metrics)
+	srv := newServer(cfg, logger, metrics)
 	srv.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	srv.Handle("/ready", readyHandler(ready))
 	srv.PathPrefix("/debug/pprof").Handler(http.DefaultServeMux)
@@ -151,6 +168,18 @@ func main() {
 	if kubeConfig.UserAgent == "" {
 		kubeConfig.UserAgent = rest.DefaultKubernetesUserAgent()
 	}
+
+	httpRT := http.DefaultTransport
+	// HTTP client side cluster validation.
+	reporter := func(msg string, method string) {
+		level.Warn(logger).Log("msg", msg, "method", method, "cluster_validation_label", cfg.kubeNamespace)
+		metrics.InvalidClusterValidationLabels.WithLabelValues(method, "http", cfg.kubeNamespace).Inc()
+	}
+	httpRT = middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, httpRT)
+
+	kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+		return middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, rt)
+	})
 
 	// share the transport between all clients
 	httpClient, err := rest.HTTPClientFor(kubeConfig)
@@ -172,7 +201,7 @@ func main() {
 	check(errors.Wrap(err, "failed to init dynamicClient"))
 
 	// Start TLS server if enabled.
-	maybeStartTLSServer(cfg, logger, kubeClient, restart, metrics)
+	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics)
 
 	// Init the controller.
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
@@ -202,7 +231,7 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics) {
+func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics) {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
 		return
@@ -239,10 +268,10 @@ func maybeStartTLSServer(cfg config, logger log.Logger, kubeClient *kubernetes.C
 	}
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-		return admission.PrepareDownscale(ctx, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName)
+		return admission.PrepareDownscale(ctx, rt, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName)
 	}
 
-	tlsSrv, err := newTLSServer(cfg.serverTLSPort, logger, cert, metrics)
+	tlsSrv, err := newTLSServer(cfg, logger, cert, metrics)
 	check(errors.Wrap(err, "failed to create tls server"))
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, kubeClient))

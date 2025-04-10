@@ -35,10 +35,10 @@ const (
 	maxPrepareGoroutines        = 32
 )
 
-func PrepareDownscale(ctx context.Context, logger log.Logger, ar admissionv1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *admissionv1.AdmissionResponse {
+func PrepareDownscale(ctx context.Context, rt http.RoundTripper, logger log.Logger, ar admissionv1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *admissionv1.AdmissionResponse {
 	client := &http.Client{
 		Timeout:   5 * time.Second,
-		Transport: &nethttp.Transport{RoundTripper: http.DefaultTransport},
+		Transport: &nethttp.Transport{RoundTripper: rt},
 	}
 
 	if useZoneTracker {
