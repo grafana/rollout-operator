@@ -25,6 +25,11 @@ BORINGCRYPTO_BASE_IMAGE=gcr.io/distroless/base-nossl-debian12:nonroot
 help: ## Display this help and any documented user-facing targets
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_\.\-\/%]+:.*?##/ { printf "  %-45s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
+.PHONY: release-notes 
+release-notes: ## Generate the release notes for a GitHub release
+	@echo "Docker images: \`grafana/rollout-operator:${IMAGE_TAG}\` and \`grafana/rollout-operator-boringcrypto:${IMAGE_TAG}\`\n\n## Changelog"
+	@awk -v var="${IMAGE_TAG}" '$$0 ~ "## "var {flag=1; next} /^##/{flag=0} flag' CHANGELOG.md
+
 rollout-operator: $(GO_FILES) ## Build the rollout-operator binary
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 

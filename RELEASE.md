@@ -14,7 +14,7 @@
     ```
 4. Create a new GitHub release based on the tag. The release notes can be generated with:
     ```bash
-    $ echo "Docker images: \`grafana/rollout-operator:${tag}\` and \`grafana/rollout-operator-boringcrypto:${tag}\`\n\n## Changelog" && awk -v var="${tag}" '$0 ~ "## "var {flag=1; next} /^##/{flag=0} flag' CHANGELOG.md
+    $ IMAGE_TAG="${tag}" make release-notes
     ```
 5. Update the Helm Chart
   - Repository https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator
