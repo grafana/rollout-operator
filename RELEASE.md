@@ -12,7 +12,7 @@
     ```bash
     $ IMAGE_TAG="${tag}" make publish-images
     ```
-4. Create a new GitHub release based on the tag. The release notes can be generated with:
+4. Create a new GitHub release [here](https://github.com/grafana/rollout-operator/releases/new) based on the tag. The release notes can be generated with:
     ```bash
     $ IMAGE_TAG="${tag}" make release-notes
     ```
