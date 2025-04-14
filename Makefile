@@ -27,7 +27,7 @@ help: ## Display this help and any documented user-facing targets
 
 .PHONY: release-notes 
 release-notes: ## Generate the release notes for a GitHub release
-	@echo "Docker images: \`grafana/rollout-operator:${IMAGE_TAG}\` and \`grafana/rollout-operator-boringcrypto:${IMAGE_TAG}\`\n\n## Changelog"
+	@echo "Docker images: \`${IMAGE_PREFIX}/rollout-operator:${IMAGE_TAG}\` and \`${IMAGE_PREFIX}/rollout-operator-boringcrypto:${IMAGE_TAG}\`\n\n## Changelog"
 	@awk -v var="${IMAGE_TAG}" '$$0 ~ "## "var {flag=1; next} /^##/{flag=0} flag' CHANGELOG.md
 
 rollout-operator: $(GO_FILES) ## Build the rollout-operator binary
