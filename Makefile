@@ -25,11 +25,6 @@ BORINGCRYPTO_BASE_IMAGE=gcr.io/distroless/base-nossl-debian12:nonroot
 help: ## Display this help and any documented user-facing targets
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_\.\-\/%]+:.*?##/ { printf "  %-45s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-.PHONY: release-notes 
-release-notes: ## Generate the release notes for a GitHub release
-	@echo "Docker images: \`${IMAGE_PREFIX}/rollout-operator:${IMAGE_TAG}\` and \`${IMAGE_PREFIX}/rollout-operator-boringcrypto:${IMAGE_TAG}\`\n\n## Changelog"
-	@awk -v var="${IMAGE_TAG}" '$$0 ~ "## "var {flag=1; next} /^##/{flag=0} flag' CHANGELOG.md
-
 rollout-operator: $(GO_FILES) ## Build the rollout-operator binary
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
@@ -56,6 +51,11 @@ publish-standard-image: clean ## Build and publish only the standard rollout-ope
 .PHONY: publish-boringcrypto-image
 publish-boringcrypto-image: clean ## Build and publish only the boring-crypto rollout-operator image
 	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BASEIMAGE=$(BORINGCRYPTO_BASE_IMAGE) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
+
+.PHONY: release-notes 
+release-notes: ## Generate the release notes for a GitHub release
+	@echo "Docker images: \`${IMAGE_PREFIX}/rollout-operator:${IMAGE_TAG}\` and \`${IMAGE_PREFIX}/rollout-operator-boringcrypto:${IMAGE_TAG}\`\n\n## Changelog"
+	@awk -v var="${IMAGE_TAG}" '$$0 ~ "## "var {flag=1; next} /^##/{flag=0} flag' CHANGELOG.md
 
 .PHONY: test
 test: ## Run tests
