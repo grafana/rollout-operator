@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.26.0
+
 * [FEATURE] Add cross-cluster traffic protection. #195
 
 ## v0.25.0
