@@ -12,6 +12,7 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 	testCases := []struct {
 		name        string
 		namespace   string
+		stsName     string
 		serviceName string
 		from        int
 		to          int
@@ -21,7 +22,8 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 		{
 			name:        "URL without port",
 			namespace:   "test-namespace",
-			serviceName: "test-service",
+			stsName:     "test-service",
+			serviceName: "test-service-headless",
 			from:        0,
 			to:          2,
 			inputURL:    "http://example.com/api/prepare",
@@ -29,13 +31,13 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 				{
 					namespace: "test-namespace",
 					podName:   "test-service-0",
-					url:       mustParseURL(t, "http://test-service-0.test-service.test-namespace.svc.cluster.local./api/prepare"),
+					url:       mustParseURL(t, "http://test-service-0.test-service-headless.test-namespace.svc.cluster.local./api/prepare"),
 					replica:   0,
 				},
 				{
 					namespace: "test-namespace",
 					podName:   "test-service-1",
-					url:       mustParseURL(t, "http://test-service-1.test-service.test-namespace.svc.cluster.local./api/prepare"),
+					url:       mustParseURL(t, "http://test-service-1.test-service-headless.test-namespace.svc.cluster.local./api/prepare"),
 					replica:   1,
 				},
 			},
@@ -43,7 +45,8 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 		{
 			name:        "URL with port",
 			namespace:   "prod-namespace",
-			serviceName: "prod-service",
+			stsName:     "prod-service",
+			serviceName: "prod-service-headless",
 			from:        1,
 			to:          3,
 			inputURL:    "http://example.com:8080/api/prepare",
@@ -51,13 +54,13 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 				{
 					namespace: "prod-namespace",
 					podName:   "prod-service-1",
-					url:       mustParseURL(t, "http://prod-service-1.prod-service.prod-namespace.svc.cluster.local.:8080/api/prepare"),
+					url:       mustParseURL(t, "http://prod-service-1.prod-service-headless.prod-namespace.svc.cluster.local.:8080/api/prepare"),
 					replica:   1,
 				},
 				{
 					namespace: "prod-namespace",
 					podName:   "prod-service-2",
-					url:       mustParseURL(t, "http://prod-service-2.prod-service.prod-namespace.svc.cluster.local.:8080/api/prepare"),
+					url:       mustParseURL(t, "http://prod-service-2.prod-service-headless.prod-namespace.svc.cluster.local.:8080/api/prepare"),
 					replica:   2,
 				},
 			},
@@ -69,7 +72,7 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 			inputURL, err := url.Parse(tc.inputURL)
 			require.NoError(t, err)
 
-			result := createPrepareDownscaleEndpoints(tc.namespace, tc.serviceName, tc.from, tc.to, inputURL)
+			result := createPrepareDownscaleEndpoints(tc.namespace, tc.stsName, tc.serviceName, tc.from, tc.to, inputURL)
 
 			assert.Equal(t, tc.expected, result)
 		})
