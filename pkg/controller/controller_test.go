@@ -1007,8 +1007,8 @@ func convertEmptyMapToNil[K comparable, V any](m map[K]V) map[K]V {
 
 func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutGroups(t *testing.T) {
 	ingesters := []runtime.Object{
-		mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[config.RolloutGroupLabelKey] = "ingester" }),
-		mockStatefulSet("ingester-zone-b", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[config.RolloutGroupLabelKey] = "ingester" }),
+		mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) { sts.Labels[config.RolloutGroupLabelKey] = "ingester" }),
+		mockStatefulSet("ingester-zone-b", func(sts *v1.StatefulSet) { sts.Labels[config.RolloutGroupLabelKey] = "ingester" }),
 		mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
 		mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
 		mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash),
@@ -1016,8 +1016,8 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 	}
 
 	storeGateways := []runtime.Object{
-		mockStatefulSet("store-gateway-zone-a", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[config.RolloutGroupLabelKey] = "store-gateway" }),
-		mockStatefulSet("store-gateway-zone-b", func(sts *v1.StatefulSet) { sts.ObjectMeta.Labels[config.RolloutGroupLabelKey] = "store-gateway" }),
+		mockStatefulSet("store-gateway-zone-a", func(sts *v1.StatefulSet) { sts.Labels[config.RolloutGroupLabelKey] = "store-gateway" }),
+		mockStatefulSet("store-gateway-zone-b", func(sts *v1.StatefulSet) { sts.Labels[config.RolloutGroupLabelKey] = "store-gateway" }),
 		mockStatefulSetPod("store-gateway-zone-a-0", testLastRevisionHash),
 		mockStatefulSetPod("store-gateway-zone-a-1", testLastRevisionHash),
 		mockStatefulSetPod("store-gateway-zone-b-0", testLastRevisionHash),

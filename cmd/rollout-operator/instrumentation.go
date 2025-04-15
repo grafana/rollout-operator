@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 
+	"github.com/go-kit/log"
 	"github.com/gorilla/mux"
 	"github.com/grafana/dskit/instrument"
 	"github.com/grafana/dskit/middleware"
@@ -11,10 +12,11 @@ import (
 )
 
 type metrics struct {
-	RequestDuration     *prometheus.HistogramVec
-	ReceivedMessageSize *prometheus.HistogramVec
-	SentMessageSize     *prometheus.HistogramVec
-	InflightRequests    *prometheus.GaugeVec
+	RequestDuration                *prometheus.HistogramVec
+	ReceivedMessageSize            *prometheus.HistogramVec
+	SentMessageSize                *prometheus.HistogramVec
+	InflightRequests               *prometheus.GaugeVec
+	InvalidClusterValidationLabels *prometheus.CounterVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -38,10 +40,14 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "rollout_operator_inflight_requests",
 			Help: "Current number of inflight requests.",
 		}, []string{"method", "route"}),
+		InvalidClusterValidationLabels: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "rollout_operator_request_invalid_cluster_validation_labels_total",
+			Help: "Number of requests with invalid cluster validation label.",
+		}, []string{"method", "protocol", "request_cluster"}),
 	}
 }
 
-func newInstrumentedRouter(metrics *metrics) (*mux.Router, http.Handler) {
+func newInstrumentedRouter(metrics *metrics, cfg config, logger log.Logger) (*mux.Router, http.Handler) {
 	router := mux.NewRouter()
 
 	httpMiddleware := []middleware.Interface{
@@ -55,6 +61,15 @@ func newInstrumentedRouter(metrics *metrics) (*mux.Router, http.Handler) {
 			ResponseBodySize: metrics.SentMessageSize,
 			InflightRequests: metrics.InflightRequests,
 		},
+	}
+	if cfg.enableNamespaceValidation {
+		// HTTP server side cluster validation.
+		httpMiddleware = append(httpMiddleware, middleware.ClusterValidationMiddleware(
+			cfg.kubeNamespace,
+			cfg.namespaceValidationExcludePaths,
+			cfg.softNamespaceValidation,
+			logger,
+		))
 	}
 
 	return router, middleware.Merge(httpMiddleware...).Wrap(router)

@@ -147,7 +147,11 @@ func createPrepareDownscaleEndpoints(namespace, statefulsetName, serviceName str
 		}
 
 		ep.url = *url
-		ep.url.Host = fmt.Sprintf("%s.%v.%v.svc.cluster.local.", ep.podName, serviceName, ep.namespace)
+		newHost := fmt.Sprintf("%s.%v.%v.svc.cluster.local.", ep.podName, serviceName, ep.namespace)
+		if url.Port() != "" {
+			newHost = fmt.Sprintf("%s:%s", newHost, url.Port())
+		}
+		ep.url.Host = newHost
 
 		eps = append(eps, ep)
 	}
@@ -242,7 +246,8 @@ func callCancelDelayedDownscale(ctx context.Context, logger log.Logger, client h
 		g.Go(func() error {
 			target := ep.url.String()
 
-			epLogger := log.With(logger, "pod", ep.podName, "url", target)
+			requestStart := time.Now()
+			epLogger := log.With(logger, "pod", ep.podName, "url", target, "duration", log.Valuer(func() interface{} { return time.Since(requestStart) }))
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
 			if err != nil {

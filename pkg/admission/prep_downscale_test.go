@@ -22,8 +22,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	v1 "k8s.io/api/admission/v1"
-	apps "k8s.io/api/apps/v1"
+	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -234,8 +233,8 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 
 	namespace := "test"
 	stsName := "my-statefulset"
-	ar := v1.AdmissionReview{
-		Request: &v1.AdmissionRequest{
+	ar := admissionv1.AdmissionReview{
+		Request: &admissionv1.AdmissionRequest{
 			Kind: metav1.GroupVersionKind{
 				Group:   "apps",
 				Version: "v1",
@@ -258,7 +257,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		},
 	}
 	objects := []runtime.Object{
-		&apps.StatefulSet{
+		&appsv1.StatefulSet{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "StatefulSet",
 				APIVersion: "apps/v1",
@@ -270,7 +269,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 				Labels:    map[string]string{config.RolloutGroupLabelKey: "ingester"},
 			},
 		},
-		&apps.StatefulSet{
+		&appsv1.StatefulSet{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "StatefulSet",
 				APIVersion: "apps/v1",
@@ -285,7 +284,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 	}
 	if params.downscaleInProgress {
 		objects = append(objects,
-			&apps.StatefulSet{
+			&appsv1.StatefulSet{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "StatefulSet",
 					APIVersion: "apps/v1",
@@ -483,25 +482,25 @@ func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
 		Labels:    labels,
 	}
 	objects := []runtime.Object{
-		&apps.StatefulSet{
+		&appsv1.StatefulSet{
 			ObjectMeta: stsMeta,
-			Spec: apps.StatefulSetSpec{
+			Spec: appsv1.StatefulSetSpec{
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: stsMeta,
 				},
 			},
-			Status: apps.StatefulSetStatus{
+			Status: appsv1.StatefulSetStatus{
 				Replicas:        1,
 				UpdatedReplicas: 1,
 			},
 		},
-		&apps.StatefulSet{
+		&appsv1.StatefulSet{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "zone-b",
 				Namespace: namespace,
 				Labels:    labels,
 			},
-			Status: apps.StatefulSetStatus{
+			Status: appsv1.StatefulSetStatus{
 				Replicas:        1,
 				UpdatedReplicas: 1,
 			},
@@ -544,14 +543,14 @@ func TestFindStatefulSetWithNonUpdatedReplicas_UnavailableReplicasSameZone(t *te
 		Labels:    labels,
 	}
 	objects := []runtime.Object{
-		&apps.StatefulSet{
+		&appsv1.StatefulSet{
 			ObjectMeta: stsMeta,
-			Spec: apps.StatefulSetSpec{
+			Spec: appsv1.StatefulSetSpec{
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: stsMeta,
 				},
 			},
-			Status: apps.StatefulSetStatus{
+			Status: appsv1.StatefulSetStatus{
 				Replicas:        1,
 				UpdatedReplicas: 0,
 			},
@@ -575,9 +574,9 @@ func TestFindPodsForStatefulSet(t *testing.T) {
 		Namespace: namespace,
 		Labels:    labels,
 	}
-	sts := &apps.StatefulSet{
+	sts := &appsv1.StatefulSet{
 		ObjectMeta: stsMeta,
-		Spec: apps.StatefulSetSpec{
+		Spec: appsv1.StatefulSetSpec{
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: stsMeta,
 			},
@@ -706,8 +705,8 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 
 	namespace := "test"
 	stsName := "my-statefulset"
-	ar := v1.AdmissionReview{
-		Request: &v1.AdmissionRequest{
+	ar := admissionv1.AdmissionReview{
+		Request: &admissionv1.AdmissionRequest{
 			Kind: metav1.GroupVersionKind{
 				Group:   "apps",
 				Version: "v1",
@@ -730,7 +729,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 		},
 	}
 	objects := []runtime.Object{
-		&apps.StatefulSet{
+		&appsv1.StatefulSet{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "StatefulSet",
 				APIVersion: "apps/v1",
@@ -742,7 +741,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 				Labels:    map[string]string{config.RolloutGroupLabelKey: "ingester"},
 			},
 		},
-		&apps.StatefulSet{
+		&appsv1.StatefulSet{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "StatefulSet",
 				APIVersion: "apps/v1",
@@ -757,7 +756,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 	}
 	if params.downscaleInProgress {
 		objects = append(objects,
-			&apps.StatefulSet{
+			&appsv1.StatefulSet{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "StatefulSet",
 					APIVersion: "apps/v1",
@@ -824,37 +823,37 @@ func TestCheckReplicasChange(t *testing.T) {
 		name     string
 		oldInfo  *objectInfo
 		newInfo  *objectInfo
-		expected *v1.AdmissionResponse
+		expected *admissionv1.AdmissionResponse
 	}{
 		{
 			name:     "both replicas nil",
 			oldInfo:  &objectInfo{},
 			newInfo:  &objectInfo{},
-			expected: &v1.AdmissionResponse{Allowed: true},
+			expected: &admissionv1.AdmissionResponse{Allowed: true},
 		},
 		{
 			name:     "old replicas nil",
 			oldInfo:  &objectInfo{},
 			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
-			expected: &v1.AdmissionResponse{Allowed: true},
+			expected: &admissionv1.AdmissionResponse{Allowed: true},
 		},
 		{
 			name:     "new replicas nil",
 			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
 			newInfo:  &objectInfo{},
-			expected: &v1.AdmissionResponse{Allowed: true},
+			expected: &admissionv1.AdmissionResponse{Allowed: true},
 		},
 		{
 			name:     "upscale",
 			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
 			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(5); return &i }()},
-			expected: &v1.AdmissionResponse{Allowed: true},
+			expected: &admissionv1.AdmissionResponse{Allowed: true},
 		},
 		{
 			name:     "no replicas change",
 			oldInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
 			newInfo:  &objectInfo{replicas: func() *int32 { i := int32(3); return &i }()},
-			expected: &v1.AdmissionResponse{Allowed: true},
+			expected: &admissionv1.AdmissionResponse{Allowed: true},
 		},
 		{
 			name:     "downscale",
@@ -876,7 +875,7 @@ func TestCheckReplicasChange(t *testing.T) {
 
 func TestGetLabelsAndAnnotations(t *testing.T) {
 	ctx := context.Background()
-	ar := v1.AdmissionReview{}
+	ar := admissionv1.AdmissionReview{}
 	api := fake.NewSimpleClientset()
 
 	tests := []struct {
@@ -920,8 +919,8 @@ func TestGetLabelsAndAnnotations(t *testing.T) {
 }
 
 func TestCreateEndpoints(t *testing.T) {
-	ar := v1.AdmissionReview{
-		Request: &v1.AdmissionRequest{
+	ar := admissionv1.AdmissionReview{
+		Request: &admissionv1.AdmissionRequest{
 			Name:      "test",
 			Namespace: "default",
 		},

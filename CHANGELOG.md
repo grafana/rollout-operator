@@ -2,6 +2,67 @@
 
 ## main / unreleased
 
+## v0.26.0
+
+* [FEATURE] Add cross-cluster traffic protection. #195
+
+## v0.25.0
+
+* [ENHANCEMENT] Updated dependencies, including: #203
+  * `github.com/prometheus/client_golang` from `v1.20.5` to `v1.21.1`
+  * `github.com/prometheus/common` from `v0.62.0` to `v0.63.0`
+  * `golang.org/x/sync` from `v0.11.0` to `v0.12.0`
+  * `k8s.io/api` from `v0.32.1` to `v0.32.3`
+  * `k8s.io/apimachinery` from `v0.32.1` to `v0.32.3`
+  * `k8s.io/client-go` from `v0.32.1` to `v0.32.3`
+  * `sigs.k8s.io/controller-runtime` from `v0.20.1` to `v0.20.4`
+
+## v0.24.0
+
+* [ENHANCEMENT] Update Go to `1.24` #196
+* [ENHANCEMENT] Updated dependencies, including: #197
+  * `github.com/prometheus/common` from `v0.61.0` to `v0.62.0`
+  * `golang.org/x/sync` from `v0.10.0` to `v0.11.0`
+  * `k8s.io/api` from `v0.32.0` to `v0.32.1`
+  * `k8s.io/apimachinery` from `v0.32.0` to `v0.32.1`
+  * `k8s.io/client-go` from `v0.32.0` to `v0.32.1`
+  * `sigs.k8s.io/controller-runtime` from `v0.19.3` to `v0.20.1`
+
+## v0.23.0
+
+* [ENHANCEMENT] Make timeout for requests to Pods and to the Kubernetes control plane configurable. #188
+* [ENHANCEMENT] Updated dependencies, including: #189 #191
+  * `github.com/prometheus/client_golang` from `v1.20.4` to `v1.20.5`
+  * `github.com/prometheus/common` from `v0.59.1` to `v0.61.0`
+  * `k8s.io/api` from `v0.31.1` to `v0.32.0`
+  * `k8s.io/apimachinery` from `v0.31.1` to `v0.32.0`
+  * `k8s.io/client-go` from `v0.31.1` to `v0.32.0`
+  * `sigs.k8s.io/controller-runtime` from `v0.19.0` to `v0.19.3`
+  * `golang.org/x/net` from `v0.28.0` to `v0.33.0`
+
+## v0.22.0
+
+* [ENHANCEMENT] New parameter log.format allows to set logging format to logfmt (default) or json (new). #184
+* [ENHANCEMENT] Add a 5 minute timeout to requests to Pods and to the Kubernetes control plane. #186
+ 
+## v0.21.0
+
+* [ENHANCEMENT] Log debug information about StatefulSets as they are created, updated and deleted. #182
+
+## v0.20.1
+
+* [BUGFIX] Improved handling of URL ports in `createPrepareDownscaleEndpoints` function. The function now correctly preserves the port when replacing the host in the URL. #176
+
+## v0.20.0
+
+* [ENHANCEMENT] Updated dependencies, including: #174
+  * `github.com/prometheus/client_golang` from `v1.19.1` to `v1.20.4`
+  * `github.com/prometheus/common` from `v0.55.0` to `v0.59.1`
+  * `k8s.io/api` from `v0.30.3` to `v0.31.1`
+  * `k8s.io/apimachinery` from `v0.30.3` to `v0.31.1`
+  * `k8s.io/client-go` from `v0.30.3` to `v0.31.1`
+  * `sigs.k8s.io/controller-runtime` from `v0.18.5` to `v0.19.0`
+
 ## v0.19.1
 
 * [CHANGE] Renamed `grafana.com/rollout-mirror-replicas-from-resource-write-back-status-replicas` annotation to `grafana.com/rollout-mirror-replicas-from-resource-write-back`, because it was too long (over 64 chars). #171
