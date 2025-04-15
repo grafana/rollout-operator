@@ -15,7 +15,6 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"golang.org/x/sync/errgroup"
 	admissionv1 "k8s.io/api/admission/v1"
-	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -464,7 +463,7 @@ func getLabelsAndAnnotations(ctx context.Context, ar admissionv1.AdmissionReview
 	return lbls, annotations, nil
 }
 
-func getStatefulSet(ar v1.AdmissionReview, info *objectInfo) (*appsv1.StatefulSet, error) {
+func getStatefulSet(ar admissionv1.AdmissionReview, info *objectInfo) (*appsv1.StatefulSet, error) {
 	switch o := info.obj.(type) {
 	case *appsv1.StatefulSet:
 		statefulset := &appsv1.StatefulSet{}
