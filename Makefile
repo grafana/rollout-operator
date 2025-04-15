@@ -52,6 +52,11 @@ publish-standard-image: clean ## Build and publish only the standard rollout-ope
 publish-boringcrypto-image: clean ## Build and publish only the boring-crypto rollout-operator image
 	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BASEIMAGE=$(BORINGCRYPTO_BASE_IMAGE) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
 
+.PHONY: release-notes 
+release-notes: ## Generate the release notes for a GitHub release
+	@echo "Docker images: \`${IMAGE_PREFIX}/rollout-operator:${IMAGE_TAG}\` and \`${IMAGE_PREFIX}/rollout-operator-boringcrypto:${IMAGE_TAG}\`\n\n## Changelog"
+	@awk -v var="${IMAGE_TAG}" '$$0 ~ "## "var {flag=1; next} /^##/{flag=0} flag' CHANGELOG.md
+
 .PHONY: test
 test: ## Run tests
 	go test ./...
