@@ -16,8 +16,7 @@
          {
              "description": "Group all go dependencies together to reduce noise",
              "matchDatasources": ["go"],
-             "groupName": "go",
-             "enabled": true
+             "groupName": "go dependencies",
          },
          {
              "description": "Disable Docker updates",
