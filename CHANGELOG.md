@@ -2,12 +2,17 @@
 
 ## main / unreleased
 
+* [CHANGE] Rename metric `rollout_operator_request_invalid_cluster_validation_labels_total` to `rollout_operator_client_invalid_cluster_validation_label_requests_total`. #217
+
 ## v0.26.0
 
-* [FEATURE] Add cross-cluster traffic protection. #195
+* [FEATURE] Add cross-cluster traffic protection. #195b
+  * Controlled through the flags `-server.cluster-validation.http.enabled`, `-server.cluster-validation.http.soft-validation`, `-server.cluster-validation.http.exclude-paths`.
+  * Rejected requests can be monitored via the metric `rollout_operator_request_invalid_cluster_validation_labels_total`.
 
 ## v0.25.0
 
+* [ENHANCEMENT] 
 * [ENHANCEMENT] Updated dependencies, including: #203
   * `github.com/prometheus/client_golang` from `v1.20.5` to `v1.21.1`
   * `github.com/prometheus/common` from `v0.62.0` to `v0.63.0`
