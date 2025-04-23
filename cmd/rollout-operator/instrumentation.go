@@ -41,7 +41,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help: "Current number of inflight requests.",
 		}, []string{"method", "route"}),
 		InvalidClusterValidationLabels: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-			Name: "rollout_operator_request_invalid_cluster_validation_labels_total",
+			Name: "rollout_operator_client_invalid_cluster_validation_label_requests_total",
 			Help: "Number of requests with invalid cluster validation label.",
 		}, []string{"method", "protocol", "request_cluster"}),
 	}
