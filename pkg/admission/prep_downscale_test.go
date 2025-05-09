@@ -873,7 +873,7 @@ func TestCheckReplicasChange(t *testing.T) {
 	}
 }
 
-func TestGetStatefulSetInfo(t *testing.T) {
+func TestGetStatefulSetPrepareInfo(t *testing.T) {
 	ctx := context.Background()
 	ar := admissionv1.AdmissionReview{}
 	api := fake.NewSimpleClientset()
@@ -881,7 +881,7 @@ func TestGetStatefulSetInfo(t *testing.T) {
 	tests := []struct {
 		name       string
 		info       *objectInfo
-		expectInfo *statefulSetInfo
+		expectInfo *statefulSetPrepareInfo
 		expectErr  bool
 	}{
 		{
@@ -902,7 +902,7 @@ func TestGetStatefulSetInfo(t *testing.T) {
 					},
 				},
 			},
-			expectInfo: &statefulSetInfo{
+			expectInfo: &statefulSetPrepareInfo{
 				prepareDownscale: true,
 				path:             "path",
 				port:             "port",
@@ -914,13 +914,13 @@ func TestGetStatefulSetInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stsInfo, err := getStatefulSetInfo(ctx, ar, api, tt.info)
+			stsPrepareInfo, err := getStatefulSetPrepareInfo(ctx, ar, api, tt.info)
 			if (err != nil) != tt.expectErr {
-				t.Errorf("getStatefulSetInfo() error = %v, expectErr %v", err, tt.expectErr)
+				t.Errorf("getStatefulSetPrepareInfo() error = %v, expectErr %v", err, tt.expectErr)
 				return
 			}
-			if !reflect.DeepEqual(stsInfo, tt.expectInfo) {
-				t.Errorf("getStatefulSetInfo() ssInfo= %v, want %v", stsInfo, tt.expectInfo)
+			if !reflect.DeepEqual(stsPrepareInfo, tt.expectInfo) {
+				t.Errorf("getStatefulSetPrepareInfo() stsPrepareInfo= %v, want %v", stsPrepareInfo, tt.expectInfo)
 			}
 		})
 	}

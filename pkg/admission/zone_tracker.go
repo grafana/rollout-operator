@@ -67,17 +67,17 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 		return response
 	}
 
-	stsInfo, err := getStatefulSetInfo(ctx, ar, api, oldInfo)
+	stsPrepareInfo, err := getStatefulSetPrepareInfo(ctx, ar, api, oldInfo)
 	if err != nil {
 		return allowWarn(logger, fmt.Sprintf("%s, allowing the change", err))
 	}
 
-	if !stsInfo.prepareDownscale {
+	if !stsPrepareInfo.prepareDownscale {
 		// Nothing to do.
 		return &admissionv1.AdmissionResponse{Allowed: true}
 	}
 
-	if stsInfo.port == "" {
+	if stsPrepareInfo.port == "" {
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePortAnnotationKey))
 		return deny(
 			fmt.Sprintf(
@@ -87,7 +87,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 		)
 	}
 
-	if stsInfo.path == "" {
+	if stsPrepareInfo.path == "" {
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePathAnnotationKey))
 		return deny(
 			fmt.Sprintf(
@@ -97,7 +97,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 		)
 	}
 
-	if stsInfo.serviceName == "" {
+	if stsPrepareInfo.serviceName == "" {
 		level.Warn(logger).Log("msg", "downscale not allowed because the serviceName is not set or empty")
 		return deny(
 			fmt.Sprintf(
@@ -107,8 +107,8 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 		)
 	}
 
-	if stsInfo.rolloutGroup != "" {
-		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, stsInfo.rolloutGroup)
+	if stsPrepareInfo.rolloutGroup != "" {
+		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, stsPrepareInfo.rolloutGroup)
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
 			return deny(
@@ -160,7 +160,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 	}
 
 	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
-	eps := createEndpoints(ar, oldInfo, newInfo, stsInfo.port, stsInfo.path, stsInfo.serviceName)
+	eps := createEndpoints(ar, oldInfo, newInfo, stsPrepareInfo.port, stsPrepareInfo.path, stsPrepareInfo.serviceName)
 
 	err = sendPrepareShutdownRequests(ctx, logger, client, eps)
 	if err != nil {
