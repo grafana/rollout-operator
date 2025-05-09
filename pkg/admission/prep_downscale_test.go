@@ -873,46 +873,54 @@ func TestCheckReplicasChange(t *testing.T) {
 	}
 }
 
-func TestGetLabelsAndAnnotations(t *testing.T) {
+func TestGetStatefulSetPrepareInfo(t *testing.T) {
 	ctx := context.Background()
 	ar := admissionv1.AdmissionReview{}
 	api := fake.NewSimpleClientset()
 
 	tests := []struct {
-		name        string
-		info        *objectInfo
-		expectedLbl map[string]string
-		expectedAnn map[string]string
-		expectErr   bool
+		name       string
+		info       *objectInfo
+		expectInfo *statefulSetPrepareInfo
+		expectErr  bool
 	}{
 		{
-			name: "Deployment",
+			name: "StatefulSet",
 			info: &objectInfo{
-				obj: &appsv1.Deployment{
+				obj: &appsv1.StatefulSet{
 					ObjectMeta: metav1.ObjectMeta{
-						Labels:      map[string]string{"label1": "value1"},
-						Annotations: map[string]string{"annotation1": "value1"},
+						Labels: map[string]string{
+							config.PrepareDownscaleLabelKey: config.PrepareDownscaleLabelValue,
+						},
+						Annotations: map[string]string{
+							config.PrepareDownscalePathAnnotationKey: "path",
+							config.PrepareDownscalePortAnnotationKey: "port",
+						},
+					},
+					Spec: appsv1.StatefulSetSpec{
+						ServiceName: "serviceName",
 					},
 				},
 			},
-			expectedLbl: map[string]string{"label1": "value1"},
-			expectedAnn: map[string]string{"annotation1": "value1"},
-			expectErr:   false,
+			expectInfo: &statefulSetPrepareInfo{
+				prepareDownscale: true,
+				path:             "path",
+				port:             "port",
+				serviceName:      "serviceName",
+			},
+			expectErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lbls, anns, err := getLabelsAndAnnotations(ctx, ar, api, tt.info)
+			stsPrepareInfo, err := getStatefulSetPrepareInfo(ctx, ar, api, tt.info)
 			if (err != nil) != tt.expectErr {
-				t.Errorf("getLabelsAndAnnotations() error = %v, expectErr %v", err, tt.expectErr)
+				t.Errorf("getStatefulSetPrepareInfo() error = %v, expectErr %v", err, tt.expectErr)
 				return
 			}
-			if !reflect.DeepEqual(lbls, tt.expectedLbl) {
-				t.Errorf("getLabelsAndAnnotations() labels = %v, want %v", lbls, tt.expectedLbl)
-			}
-			if !reflect.DeepEqual(anns, tt.expectedAnn) {
-				t.Errorf("getLabelsAndAnnotations() annotations = %v, want %v", anns, tt.expectedAnn)
+			if !reflect.DeepEqual(stsPrepareInfo, tt.expectInfo) {
+				t.Errorf("getStatefulSetPrepareInfo() stsPrepareInfo= %v, want %v", stsPrepareInfo, tt.expectInfo)
 			}
 		})
 	}
@@ -927,12 +935,13 @@ func TestCreateEndpoints(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		oldInfo  *objectInfo
-		newInfo  *objectInfo
-		port     string
-		path     string
-		expected []endpoint
+		name        string
+		oldInfo     *objectInfo
+		newInfo     *objectInfo
+		port        string
+		path        string
+		serviceName string
+		expected    []endpoint
 	}{
 		{
 			name: "downscale by 2",
@@ -942,15 +951,16 @@ func TestCreateEndpoints(t *testing.T) {
 			newInfo: &objectInfo{
 				replicas: func() *int32 { i := int32(3); return &i }(),
 			},
-			port: "8080",
-			path: "prepare-downscale",
+			port:        "8080",
+			path:        "prepare-downscale",
+			serviceName: "service-name",
 			expected: []endpoint{
 				{
-					url:   "test-4.test.default.svc.cluster.local:8080/prepare-downscale",
+					url:   "test-4.service-name.default.svc.cluster.local:8080/prepare-downscale",
 					index: 4,
 				},
 				{
-					url:   "test-3.test.default.svc.cluster.local:8080/prepare-downscale",
+					url:   "test-3.service-name.default.svc.cluster.local:8080/prepare-downscale",
 					index: 3,
 				},
 			},
@@ -959,7 +969,7 @@ func TestCreateEndpoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := createEndpoints(ar, tt.oldInfo, tt.newInfo, tt.port, tt.path)
+			actual := createEndpoints(ar, tt.oldInfo, tt.newInfo, tt.port, tt.path, tt.serviceName)
 			if len(actual) != len(tt.expected) {
 				t.Errorf("createEndpoints() = %v, want %v", actual, tt.expected)
 				return

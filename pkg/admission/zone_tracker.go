@@ -67,19 +67,17 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 		return response
 	}
 
-	// Get the labels and annotations from the old object including the prepare downscale label
-	lbls, annotations, err := getLabelsAndAnnotations(ctx, ar, api, oldInfo)
+	stsPrepareInfo, err := getStatefulSetPrepareInfo(ctx, ar, api, oldInfo)
 	if err != nil {
 		return allowWarn(logger, fmt.Sprintf("%s, allowing the change", err))
 	}
 
-	if lbls[config.PrepareDownscaleLabelKey] != config.PrepareDownscaleLabelValue {
-		// Not labeled, nothing to do.
+	if !stsPrepareInfo.prepareDownscale {
+		// Nothing to do.
 		return &admissionv1.AdmissionResponse{Allowed: true}
 	}
 
-	port := annotations[config.PrepareDownscalePortAnnotationKey]
-	if port == "" {
+	if stsPrepareInfo.port == "" {
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePortAnnotationKey))
 		return deny(
 			fmt.Sprintf(
@@ -89,8 +87,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 		)
 	}
 
-	path := annotations[config.PrepareDownscalePathAnnotationKey]
-	if path == "" {
+	if stsPrepareInfo.path == "" {
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePathAnnotationKey))
 		return deny(
 			fmt.Sprintf(
@@ -100,9 +97,18 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 		)
 	}
 
-	rolloutGroup := lbls[config.RolloutGroupLabelKey]
-	if rolloutGroup != "" {
-		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, rolloutGroup)
+	if stsPrepareInfo.serviceName == "" {
+		level.Warn(logger).Log("msg", "downscale not allowed because the serviceName is not set or empty")
+		return deny(
+			fmt.Sprintf(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because the serviceName is not set or empty.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
+			),
+		)
+	}
+
+	if stsPrepareInfo.rolloutGroup != "" {
+		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, stsPrepareInfo.rolloutGroup)
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
 			return deny(
@@ -154,7 +160,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 	}
 
 	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
-	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
+	eps := createEndpoints(ar, oldInfo, newInfo, stsPrepareInfo.port, stsPrepareInfo.path, stsPrepareInfo.serviceName)
 
 	err = sendPrepareShutdownRequests(ctx, logger, client, eps)
 	if err != nil {

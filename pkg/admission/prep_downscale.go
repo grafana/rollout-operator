@@ -86,20 +86,18 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.Admissio
 		return response
 	}
 
-	// Get the labels and annotations from the old object including the prepare downscale label
-	lbls, annotations, err := getLabelsAndAnnotations(ctx, ar, api, oldInfo)
+	stsPrepareInfo, err := getStatefulSetPrepareInfo(ctx, ar, api, oldInfo)
 	if err != nil {
 		return allowWarn(logger, fmt.Sprintf("%s, allowing the change", err))
 	}
 
-	// Since it's a downscale, check if the resource has the label that indicates it needs to be prepared to be downscaled.
-	if lbls[config.PrepareDownscaleLabelKey] != config.PrepareDownscaleLabelValue {
-		// Not labeled, nothing to do.
+	// Since it's a downscale, check if the resource needs to be prepared to be downscaled.
+	if !stsPrepareInfo.prepareDownscale {
+		// Nothing to do.
 		return &admissionv1.AdmissionResponse{Allowed: true}
 	}
 
-	port := annotations[config.PrepareDownscalePortAnnotationKey]
-	if port == "" {
+	if stsPrepareInfo.port == "" {
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePortAnnotationKey))
 		return deny(
 			fmt.Sprintf(
@@ -109,8 +107,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.Admissio
 		)
 	}
 
-	path := annotations[config.PrepareDownscalePathAnnotationKey]
-	if path == "" {
+	if stsPrepareInfo.path == "" {
 		level.Warn(logger).Log("msg", fmt.Sprintf("downscale not allowed because the %v annotation is not set or empty", config.PrepareDownscalePathAnnotationKey))
 		return deny(
 			fmt.Sprintf(
@@ -120,9 +117,18 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.Admissio
 		)
 	}
 
-	rolloutGroup := lbls[config.RolloutGroupLabelKey]
-	if rolloutGroup != "" {
-		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, rolloutGroup)
+	if stsPrepareInfo.serviceName == "" {
+		level.Warn(logger).Log("msg", "downscale not allowed because the serviceName is not set or empty")
+		return deny(
+			fmt.Sprintf(
+				"downscale of %s/%s in %s from %d to %d replicas is not allowed because the serviceName is not set or empty.",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas,
+			),
+		)
+	}
+
+	if stsPrepareInfo.rolloutGroup != "" {
+		stsList, err := findStatefulSetsForRolloutGroup(ctx, api, ar.Request.Namespace, stsPrepareInfo.rolloutGroup)
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while finding other statefulsets", "err", err)
 			return deny(
@@ -164,7 +170,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.Admissio
 	}
 
 	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
-	eps := createEndpoints(ar, oldInfo, newInfo, port, path)
+	eps := createEndpoints(ar, oldInfo, newInfo, stsPrepareInfo.port, stsPrepareInfo.path, stsPrepareInfo.serviceName)
 
 	if err := sendPrepareShutdownRequests(ctx, logger, client, eps); err != nil {
 		// Down-scale operation is disallowed because at least one pod failed to
@@ -206,6 +212,38 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.Admissio
 	}
 }
 
+type statefulSetPrepareInfo struct {
+	prepareDownscale bool
+	port             string
+	path             string
+	rolloutGroup     string
+	serviceName      string
+}
+
+func getStatefulSetPrepareInfo(ctx context.Context, ar admissionv1.AdmissionReview, api kubernetes.Interface, info *objectInfo) (*statefulSetPrepareInfo, error) {
+	var sts *appsv1.StatefulSet
+	switch o := info.obj.(type) {
+	case *appsv1.StatefulSet:
+		sts = o
+	case *autoscalingv1.Scale:
+		var err error
+		sts, err = getStatefulSet(ctx, ar, api)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported type %s (go type %T)", info.gvk, info.obj)
+	}
+
+	return &statefulSetPrepareInfo{
+		prepareDownscale: sts.Labels[config.PrepareDownscaleLabelKey] == config.PrepareDownscaleLabelValue,
+		port:             sts.Annotations[config.PrepareDownscalePortAnnotationKey],
+		path:             sts.Annotations[config.PrepareDownscalePathAnnotationKey],
+		rolloutGroup:     sts.Labels[config.RolloutGroupLabelKey],
+		serviceName:      sts.Spec.ServiceName,
+	}, nil
+}
+
 // deny returns a *v1.AdmissionResponse with Allowed: false and the message provided
 func deny(msg string) *admissionv1.AdmissionResponse {
 	return &admissionv1.AdmissionResponse{
@@ -216,8 +254,8 @@ func deny(msg string) *admissionv1.AdmissionResponse {
 	}
 }
 
-func getResourceAnnotations(ctx context.Context, ar admissionv1.AdmissionReview, api kubernetes.Interface) (map[string]string, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.getResourceAnnotations()")
+func getStatefulSet(ctx context.Context, ar admissionv1.AdmissionReview, api kubernetes.Interface) (*appsv1.StatefulSet, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.getStatefulSet()")
 	defer span.Finish()
 
 	span.SetTag("object.namespace", ar.Request.Namespace)
@@ -229,7 +267,7 @@ func getResourceAnnotations(ctx context.Context, ar admissionv1.AdmissionReview,
 		if err != nil {
 			return nil, err
 		}
-		return obj.Annotations, nil
+		return obj, nil
 	}
 	return nil, fmt.Errorf("unsupported resource %s", ar.Request.Resource.Resource)
 }
@@ -428,51 +466,20 @@ func checkReplicasChange(logger log.Logger, oldInfo, newInfo *objectInfo) *admis
 	return nil
 }
 
-func getLabelsAndAnnotations(ctx context.Context, ar admissionv1.AdmissionReview, api kubernetes.Interface, info *objectInfo) (map[string]string, map[string]string, error) {
-	var lbls, annotations map[string]string
-	var err error
-
-	switch o := info.obj.(type) {
-	case *appsv1.Deployment:
-		lbls = o.Labels
-		annotations = o.Annotations
-	case *appsv1.StatefulSet:
-		lbls = o.Labels
-		annotations = o.Annotations
-	case *appsv1.ReplicaSet:
-		lbls = o.Labels
-		annotations = o.Annotations
-	case *autoscalingv1.Scale:
-		lbls, err = getResourceLabels(ctx, ar, api)
-		if err != nil {
-			return nil, nil, err
-		}
-		annotations, err = getResourceAnnotations(ctx, ar, api)
-		if err != nil {
-			return nil, nil, err
-		}
-	default:
-		return nil, nil, fmt.Errorf("unsupported type %T", o)
-	}
-
-	return lbls, annotations, nil
-}
-
-func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInfo, port, path string) []endpoint {
+func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInfo, port, path, serviceName string) []endpoint {
 	diff := (*oldInfo.replicas - *newInfo.replicas)
 	eps := make([]endpoint, diff)
 
 	// The DNS entry for a pod of a stateful set is
 	// ingester-zone-a-0.$(servicename).$(namespace).svc.cluster.local
-	// The service in this case is ingester-zone-a as well.
 	// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
 
-	for i := 0; i < int(diff); i++ {
+	for i := range int(diff) {
 		index := int(*oldInfo.replicas) - i - 1 // nr in statefulset
 		eps[i].url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
 			ar.Request.Name, // pod name
 			index,
-			ar.Request.Name, // svc name
+			serviceName,
 			ar.Request.Namespace,
 			port,
 			path,
