@@ -12,8 +12,10 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/grafana/dskit/clusterutil"
+	"github.com/grafana/dskit/user"
 )
 
 type clusterValidationError struct {
@@ -81,7 +83,9 @@ func validateClusterValidationRoundTripperInputParameters(cluster string, invali
 // The check is ignored if the request's path belongs to the list of excluded paths.
 // If the softValidation parameter is true, errors related to the cluster label validation are logged, but not returned.
 // Otherwise, an error is returned.
-func ClusterValidationMiddleware(cluster string, excludedPaths []string, softValidation bool, logger log.Logger) Interface {
+func ClusterValidationMiddleware(
+	cluster string, excludedPaths []string, softValidation bool, invalidClusterRequests *prometheus.CounterVec, logger log.Logger,
+) Interface {
 	validateClusterValidationMiddlewareInputParameters(cluster, logger)
 	var reB strings.Builder
 	// Allow for a potential path prefix being configured.
@@ -94,7 +98,7 @@ func ClusterValidationMiddleware(cluster string, excludedPaths []string, softVal
 
 	return Func(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if err := checkClusterFromRequest(r, cluster, softValidation, reExcludedPath, logger); err != nil {
+			if err := checkClusterFromRequest(r, cluster, softValidation, reExcludedPath, invalidClusterRequests, logger); err != nil {
 				clusterValidationErr := clusterValidationError{ClusterValidationErrorMessage: err.Error()}
 				clusterValidationErr.writeAsJSON(w)
 				return
@@ -113,34 +117,59 @@ func validateClusterValidationMiddlewareInputParameters(cluster string, logger l
 	}
 }
 
-func checkClusterFromRequest(r *http.Request, expectedCluster string, softValidationEnabled bool, reExcludedPath *regexp.Regexp, logger log.Logger) error {
+func checkClusterFromRequest(
+	r *http.Request, expectedCluster string, softValidationEnabled bool, reExcludedPath *regexp.Regexp,
+	invalidClusterRequests *prometheus.CounterVec, logger log.Logger,
+) error {
 	if reExcludedPath != nil && reExcludedPath.MatchString(r.URL.Path) {
 		return nil
 	}
+
+	logger = log.With(
+		logger,
+		"path", r.URL.Path,
+		"method", r.Method,
+		"cluster_validation_label", expectedCluster,
+		"soft_validation", softValidationEnabled,
+		"tenant", r.Header.Get(user.OrgIDHeaderName),
+		"user_agent", r.Header.Get("User-Agent"),
+		"host", r.Host,
+		"client_address", r.RemoteAddr,
+	)
+
 	reqCluster, err := clusterutil.GetClusterFromRequest(r)
 	if err == nil {
 		if reqCluster == expectedCluster {
 			return nil
 		}
+
 		var wrongClusterErr error
 		if !softValidationEnabled {
 			wrongClusterErr = fmt.Errorf("rejected request with wrong cluster validation label %q - it should be %q", reqCluster, expectedCluster)
 		}
-		level.Warn(logger).Log("msg", "request with wrong cluster validation label", "path", r.URL.Path, "cluster_validation_label", expectedCluster, "request_cluster_validation_label", reqCluster, "soft_validation", softValidationEnabled)
+
+		invalidClusterRequests.WithLabelValues("http", r.URL.Path, expectedCluster, reqCluster).Inc()
+		level.Warn(logger).Log("msg", "request with wrong cluster validation label", "request_cluster_validation_label", reqCluster)
 		return wrongClusterErr
 	}
+
 	if errors.Is(err, clusterutil.ErrNoClusterValidationLabelInHeader) {
 		var emptyClusterErr error
 		if !softValidationEnabled {
 			emptyClusterErr = fmt.Errorf("rejected request with empty cluster validation label - it should be %q", expectedCluster)
 		}
-		level.Warn(logger).Log("msg", "request with no cluster validation label", "path", r.URL.Path, "cluster_validation_label", expectedCluster, "soft_validation", softValidationEnabled)
+
+		invalidClusterRequests.WithLabelValues("http", r.URL.Path, expectedCluster, "").Inc()
+		level.Warn(logger).Log("msg", "request with no cluster validation label")
 		return emptyClusterErr
 	}
+
 	var rejectedRequestErr error
 	if !softValidationEnabled {
 		rejectedRequestErr = fmt.Errorf("rejected request: %w", err)
 	}
-	level.Warn(logger).Log("msg", "detected error during cluster validation label extraction", "path", r.URL.Path, "cluster_validation_label", expectedCluster, "soft_validation", softValidationEnabled, "err", err)
+
+	invalidClusterRequests.WithLabelValues("http", r.URL.Path, expectedCluster, "").Inc()
+	level.Warn(logger).Log("msg", "detected error during cluster validation label extraction", "err", err)
 	return rejectedRequestErr
 }
