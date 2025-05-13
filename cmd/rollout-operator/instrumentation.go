@@ -12,10 +12,10 @@ import (
 )
 
 type metrics struct {
-	RequestDuration                *prometheus.HistogramVec
-	ReceivedMessageSize            *prometheus.HistogramVec
-	SentMessageSize                *prometheus.HistogramVec
-	InflightRequests               *prometheus.GaugeVec
+	RequestDuration                      *prometheus.HistogramVec
+	ReceivedMessageSize                  *prometheus.HistogramVec
+	SentMessageSize                      *prometheus.HistogramVec
+	InflightRequests                     *prometheus.GaugeVec
 	ClientInvalidClusterValidationLabels *prometheus.CounterVec
 	ServerInvalidClusterValidationLabels *prometheus.CounterVec
 }
