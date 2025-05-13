@@ -12,11 +12,12 @@ import (
 )
 
 type metrics struct {
-	RequestDuration                *prometheus.HistogramVec
-	ReceivedMessageSize            *prometheus.HistogramVec
-	SentMessageSize                *prometheus.HistogramVec
-	InflightRequests               *prometheus.GaugeVec
-	InvalidClusterValidationLabels *prometheus.CounterVec
+	RequestDuration                             *prometheus.HistogramVec
+	ReceivedMessageSize                         *prometheus.HistogramVec
+	SentMessageSize                             *prometheus.HistogramVec
+	InflightRequests                            *prometheus.GaugeVec
+	ClientInvalidClusterValidationLabelRequests *prometheus.CounterVec
+	ServerInvalidClusterValidaionLabelRequests  *prometheus.CounterVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -40,10 +41,11 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "rollout_operator_inflight_requests",
 			Help: "Current number of inflight requests.",
 		}, []string{"method", "route"}),
-		InvalidClusterValidationLabels: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+		ClientInvalidClusterValidationLabelRequests: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_client_invalid_cluster_validation_label_requests_total",
 			Help: "Number of requests with invalid cluster validation label.",
 		}, []string{"method", "protocol", "request_cluster"}),
+		ServerInvalidClusterValidaionLabelRequests: middleware.NewInvalidClusterRequests(reg, "rollout_operator"),
 	}
 }
 
@@ -68,6 +70,7 @@ func newInstrumentedRouter(metrics *metrics, cfg config, logger log.Logger) (*mu
 			cfg.kubeNamespace,
 			cfg.namespaceValidationExcludePaths,
 			cfg.softNamespaceValidation,
+			metrics.ServerInvalidClusterValidaionLabelRequests,
 			logger,
 		))
 	}
