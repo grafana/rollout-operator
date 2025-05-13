@@ -173,7 +173,7 @@ func main() {
 	// HTTP client side cluster validation.
 	reporter := func(msg string, method string) {
 		level.Warn(logger).Log("msg", msg, "method", method, "cluster_validation_label", cfg.kubeNamespace)
-		metrics.ClientInvalidClusterValidationLabels.WithLabelValues(method, "http", cfg.kubeNamespace).Inc()
+		metrics.ClientInvalidClusterValidationLabelRequests.WithLabelValues(method, "http", cfg.kubeNamespace).Inc()
 	}
 	httpRT = middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, httpRT)
 
