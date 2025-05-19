@@ -4,12 +4,13 @@
 
 * [CHANGE] Rename metric `rollout_operator_request_invalid_cluster_validation_labels_total` to `rollout_operator_client_invalid_cluster_validation_label_requests_total`. #217
 * [ENHANCEMENT] Add metric `rollout_operator_server_invalid_cluster_validation_label_requests_total`. #223
-* [ENHANCEMENT] Updated dependencies, including: #223
+* [ENHANCEMENT] Updated dependencies, including: #223 #224
   * `github.com/prometheus/client_golang` from `v1.21.1` to `v1.22.0`
+  * `github.com/prometheus/common` from `v0.63.0` to `v0.64.0`
   * `golang.org/x/sync` from `v0.12.0` to `v0.14.0`
-  * `k8s.io/api` from `v0.32.3` to `v0.33.0`
-  * `k8s.io/apimachinery` from `v0.32.3` to `v0.33.0`
-  * `k8s.io/client-go` from `v0.32.3` to `v0.33.0`
+  * `k8s.io/api` from `v0.32.3` to `v0.33.1`
+  * `k8s.io/apimachinery` from `v0.32.3` to `v0.33.1`
+  * `k8s.io/client-go` from `v0.32.3` to `v0.33.1`
 * [BUGFIX] Use a StatefulSet's `.spec.serviceName` when constructing the prepare-downscale endpoint for a pod. #221
 
 ## v0.26.0
