@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.27.0
+
 * [CHANGE] Rename metric `rollout_operator_request_invalid_cluster_validation_labels_total` to `rollout_operator_client_invalid_cluster_validation_label_requests_total`. #217
 * [ENHANCEMENT] Add metric `rollout_operator_server_invalid_cluster_validation_label_requests_total`. #223
 * [ENHANCEMENT] Updated dependencies, including: #223 #224
