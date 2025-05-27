@@ -2,6 +2,9 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #227
+  * `sigs.k8s.io/controller-runtime` from `v0.20.4` to `v0.21.0`
+
 ## v0.27.0
 
 * [CHANGE] Rename metric `rollout_operator_request_invalid_cluster_validation_labels_total` to `rollout_operator_client_invalid_cluster_validation_label_requests_total`. #217
