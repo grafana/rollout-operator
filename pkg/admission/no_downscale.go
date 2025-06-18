@@ -8,7 +8,9 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/spanlogger"
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
@@ -23,6 +25,8 @@ import (
 const (
 	NoDownscaleWebhookPath = "/admission/no-downscale"
 )
+
+var tracer = otel.Tracer("pkg/admission")
 
 func NoDownscale(ctx context.Context, l log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
 	logger, ctx := spanlogger.New(ctx, l, "admission.NoDownscale()", tenantResolver)
@@ -147,12 +151,12 @@ func allowErr(logger log.Logger, msg string, err error) *v1.AdmissionResponse {
 }
 
 func getResourceLabels(ctx context.Context, ar v1.AdmissionReview, api kubernetes.Interface) (map[string]string, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.getResourceLabels()")
-	defer span.Finish()
-
-	span.SetTag("object.namespace", ar.Request.Namespace)
-	span.SetTag("object.name", ar.Request.Name)
-	span.SetTag("object.resource", ar.Request.Resource.Resource)
+	ctx, span := tracer.Start(ctx, "admission.getResourceLabels()", trace.WithAttributes(
+		attribute.String("object.namespace", ar.Request.Namespace),
+		attribute.String("object.name", ar.Request.Name),
+		attribute.String("object.resource", ar.Request.Resource.Resource),
+	))
+	defer span.End()
 
 	switch ar.Request.Resource.Resource {
 	case "statefulsets":

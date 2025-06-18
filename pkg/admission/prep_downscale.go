@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/spanlogger"
-	"github.com/opentracing-contrib/go-stdlib/nethttp"
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -37,8 +40,10 @@ const (
 
 func PrepareDownscale(ctx context.Context, rt http.RoundTripper, logger log.Logger, ar admissionv1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *admissionv1.AdmissionResponse {
 	client := &http.Client{
-		Timeout:   5 * time.Second,
-		Transport: &nethttp.Transport{RoundTripper: rt},
+		Timeout: 5 * time.Second,
+		Transport: otelhttp.NewTransport(rt, otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
+			return otelhttptrace.NewClientTrace(ctx)
+		})),
 	}
 
 	if useZoneTracker {
@@ -255,11 +260,11 @@ func deny(msg string) *admissionv1.AdmissionResponse {
 }
 
 func getStatefulSet(ctx context.Context, ar admissionv1.AdmissionReview, api kubernetes.Interface) (*appsv1.StatefulSet, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.getStatefulSet()")
-	defer span.Finish()
-
-	span.SetTag("object.namespace", ar.Request.Namespace)
-	span.SetTag("object.name", ar.Request.Name)
+	ctx, span := tracer.Start(ctx, "admission.getStatefulSet()", trace.WithAttributes(
+		attribute.String("object.namespace", ar.Request.Namespace),
+		attribute.String("object.name", ar.Request.Name),
+	))
+	defer span.End()
 
 	switch ar.Request.Resource.Resource {
 	case "statefulsets":
@@ -273,11 +278,11 @@ func getStatefulSet(ctx context.Context, ar admissionv1.AdmissionReview, api kub
 }
 
 func addDownscaledAnnotationToStatefulSet(ctx context.Context, api kubernetes.Interface, namespace, stsName string) error {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.addDownscaledAnnotationToStatefulSet()")
-	defer span.Finish()
-
-	span.SetTag("object.namespace", namespace)
-	span.SetTag("object.name", stsName)
+	ctx, span := tracer.Start(ctx, "admission.addDownscaledAnnotationToStatefulSet()", trace.WithAttributes(
+		attribute.String("object.namespace", namespace),
+		attribute.String("object.name", stsName),
+	))
+	defer span.End()
 
 	client := api.AppsV1().StatefulSets(namespace)
 	patch := fmt.Sprintf(`{"metadata":{"annotations":{"%v":"%v"}}}`, config.LastDownscaleAnnotationKey, time.Now().UTC().Format(time.RFC3339))
@@ -344,10 +349,10 @@ func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, excludeStsNam
 //
 // The StatefulSet whose name matches the input excludeStsName is not checked.
 func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.Interface, namespace string, stsList *appsv1.StatefulSetList, excludeStsName string) (*statefulSetDownscale, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.findStatefulSetWithNonUpdatedReplicas()")
-	defer span.Finish()
-
-	span.SetTag("object.namespace", namespace)
+	ctx, span := tracer.Start(ctx, "admission.findStatefulSetWithNonUpdatedReplicas()", trace.WithAttributes(
+		attribute.String("object.namespace", namespace),
+	))
+	defer span.End()
 
 	for _, sts := range stsList.Items {
 		if sts.Name == excludeStsName {
@@ -371,11 +376,11 @@ func findStatefulSetWithNonUpdatedReplicas(ctx context.Context, api kubernetes.I
 
 // countRunningAndReadyPods counts running and ready pods for a StatefulSet.
 func countRunningAndReadyPods(ctx context.Context, api kubernetes.Interface, namespace string, sts *appsv1.StatefulSet) (int, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.countRunningAndReadyPods()")
-	defer span.Finish()
-
-	span.SetTag("object.namespace", namespace)
-	span.SetTag("object.name", sts.Name)
+	ctx, span := tracer.Start(ctx, "admission.countRunningAndReadyPods()", trace.WithAttributes(
+		attribute.String("object.namespace", namespace),
+		attribute.String("object.name", sts.Name),
+	))
+	defer span.End()
 
 	pods, err := findPodsForStatefulSet(ctx, api, namespace, sts)
 	if err != nil {
@@ -402,11 +407,11 @@ func findPodsForStatefulSet(ctx context.Context, api kubernetes.Interface, names
 }
 
 func findStatefulSetsForRolloutGroup(ctx context.Context, api kubernetes.Interface, namespace, rolloutGroup string) (*appsv1.StatefulSetList, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.findStatefulSetsForRolloutGroup()")
-	defer span.Finish()
-
-	span.SetTag("object.namespace", namespace)
-	span.SetTag("rollout_group", rolloutGroup)
+	ctx, span := tracer.Start(ctx, "admission.findStatefulSetsForRolloutGroup()", trace.WithAttributes(
+		attribute.String("object.namespace", namespace),
+		attribute.String("rollout_group", rolloutGroup),
+	))
+	defer span.End()
 
 	groupReq, err := labels.NewRequirement(config.RolloutGroupLabelKey, selection.Equals, []string{rolloutGroup})
 	if err != nil {
@@ -510,9 +515,6 @@ func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
-	defer ht.Finish()
-
 	resp, err := client.Do(req)
 	if err != nil {
 		level.Error(logger).Log("msg", fmt.Sprintf("error sending HTTP %s request", method), "err", err)
@@ -532,8 +534,8 @@ func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.
 }
 
 func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) error {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.sendPrepareShutdownRequests()")
-	defer span.Finish()
+	ctx, span := tracer.Start(ctx, "admission.sendPrepareShutdownRequests()", trace.WithAttributes())
+	defer span.End()
 
 	if len(eps) == 0 {
 		return nil
@@ -558,8 +560,8 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 
 // undoPrepareShutdownRequests sends an HTTP DELETE to each of the given endpoints.
 func undoPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "admission.undoPrepareShutdownRequests()")
-	defer span.Finish()
+	ctx, span := tracer.Start(ctx, "admission.undoPrepareShutdownRequests()", trace.WithAttributes())
+	defer span.End()
 
 	if len(eps) == 0 {
 		return

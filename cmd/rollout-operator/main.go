@@ -142,16 +142,20 @@ func main() {
 	ready := atomic.NewBool(false)
 	restart := make(chan string)
 
-	name := os.Getenv("JAEGER_SERVICE_NAME")
-	if name == "" {
+	var name string
+	if otelEnvName := os.Getenv("OTEL_SERVICE_NAME"); otelEnvName != "" {
+		name = otelEnvName
+	} else if jaegerEnvName := os.Getenv("JAEGER_SERVICE_NAME"); jaegerEnvName != "" {
+		name = jaegerEnvName
+	} else {
 		name = "rollout-operator"
 	}
 
-	if trace, err := tracing.NewFromEnv(name); err != nil {
+	trace, err := tracing.NewOTelOrJaegerFromEnv(name, logger)
+	if err != nil {
 		fatal(fmt.Errorf("failed to set up tracing: %w", err))
-	} else {
-		defer trace.Close()
 	}
+	defer trace.Close()
 
 	// Expose HTTP endpoints.
 	srv := newServer(cfg, logger, metrics)

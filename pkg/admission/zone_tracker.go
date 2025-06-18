@@ -10,7 +10,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/spanlogger"
-	"github.com/opentracing/opentracing-go"
 	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -204,8 +203,8 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 
 // Create the ConfigMap and populate each zone with the current time as a starting point
 func (zt *zoneTracker) createConfigMap(ctx context.Context, stsList *appsv1.StatefulSetList) (*corev1.ConfigMap, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "zoneTracker.createConfigMap()")
-	defer span.Finish()
+	ctx, span := tracer.Start(ctx, "zoneTracker.createConfigMap()")
+	defer span.End()
 
 	defaultInfo := &zoneInfo{LastDownscaled: time.Now().UTC().Format(time.RFC3339)}
 	zones := make(map[string]zoneInfo, len(stsList.Items))
@@ -237,8 +236,8 @@ func (zt *zoneTracker) createConfigMap(ctx context.Context, stsList *appsv1.Stat
 
 // Get the zoneTracker ConfigMap if it exists, or nil if it does not exist
 func (zt *zoneTracker) getConfigMap(ctx context.Context) (*corev1.ConfigMap, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "zoneTracker.getConfigMap()")
-	defer span.Finish()
+	ctx, span := tracer.Start(ctx, "zoneTracker.getConfigMap()")
+	defer span.End()
 
 	cm, err := zt.client.CoreV1().ConfigMaps(zt.namespace).Get(ctx, zt.configMapName, metav1.GetOptions{})
 	if err != nil {
@@ -254,8 +253,8 @@ func (zt *zoneTracker) getConfigMap(ctx context.Context) (*corev1.ConfigMap, err
 
 // Get the zoneTracker ConfigMap if it exists, otherwise create it
 func (zt *zoneTracker) getOrCreateConfigMap(ctx context.Context, stsList *appsv1.StatefulSetList) (*corev1.ConfigMap, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "zoneTracker.getOrCreateConfigMap()")
-	defer span.Finish()
+	ctx, span := tracer.Start(ctx, "zoneTracker.getOrCreateConfigMap()")
+	defer span.End()
 
 	if cm, err := zt.getConfigMap(ctx); err != nil {
 		return nil, err
@@ -288,8 +287,8 @@ func (zt *zoneTracker) loadZones(ctx context.Context, stsList *appsv1.StatefulSe
 
 // Save the zones map to the zoneTracker ConfigMap
 func (zt *zoneTracker) saveZones(ctx context.Context) error {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "zoneTracker.saveZones()")
-	defer span.Finish()
+	ctx, span := tracer.Start(ctx, "zoneTracker.saveZones()")
+	defer span.End()
 
 	// Convert the zones map to ConfigMap data
 	data := make(map[string]string)
