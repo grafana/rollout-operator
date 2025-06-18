@@ -566,6 +566,11 @@ go.opentelemetry.io/contrib/bridges/prometheus
 # go.opentelemetry.io/contrib/exporters/autoexport v0.61.0
 ## explicit; go 1.23.0
 go.opentelemetry.io/contrib/exporters/autoexport
+# go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.60.0
+## explicit; go 1.22.0
+go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace
+go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace/internal/semconv
+go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace/internal/semconvutil
 # go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0
 ## explicit; go 1.22.0
 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp

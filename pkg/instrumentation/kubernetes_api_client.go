@@ -1,17 +1,19 @@
 package instrumentation
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strconv"
 	"time"
 
 	"github.com/grafana/dskit/instrument"
-	"github.com/opentracing-contrib/go-stdlib/nethttp"
-	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"k8s.io/client-go/rest"
 )
 
@@ -37,16 +39,15 @@ func InstrumentKubernetesAPIClient(cfg *rest.Config, reg prometheus.Registerer) 
 
 func newInstrumentation(rt http.RoundTripper, hist *prometheus.HistogramVec) *kubernetesAPIClientInstrumentation {
 	return &kubernetesAPIClientInstrumentation{
-		next: &nethttp.Transport{RoundTripper: rt},
+		next: otelhttp.NewTransport(rt, otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
+			return otelhttptrace.NewClientTrace(ctx)
+		})),
 		hist: hist,
 	}
 }
 
 func (k *kubernetesAPIClientInstrumentation) RoundTrip(req *http.Request) (*http.Response, error) {
 	start := time.Now()
-
-	req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
-	defer ht.Finish()
 
 	resp, err := k.next.RoundTrip(req)
 	duration := time.Since(start)

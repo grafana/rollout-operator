@@ -5,6 +5,7 @@
 * [ENHANCEMENT] Updated dependencies, including: #227 #231
   * `golang.org/x/sync` from `v0.14.0` to `v0.15.0`
   * `sigs.k8s.io/controller-runtime` from `v0.20.4` to `v0.21.0`
+* [ENHANCEMENT] Migrate to OpenTelemetry tracing library, removing the dependency on OpenTracing. You can now configure tracing using the standard `OTEL_` [environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#batch-span-processor). Previous configurations using `JAEGER_` environment variables will still work, but are deprecated. #234
 
 ## v0.27.0
 

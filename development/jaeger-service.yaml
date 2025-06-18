@@ -11,8 +11,8 @@ spec:
       port: 16686
       targetPort: 16686
       name: http
-    - protocol: UDP
-      port: 6831
-      targetPort: 6831
-      name: thrift-compact-udp
+    - protocol: TCP
+      port: 4318
+      targetPort: 4318
+      name: otlp-http
   type: ClusterIP
