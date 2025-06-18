@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.28.0
+
 * [ENHANCEMENT] Updated dependencies, including: #227 #231
   * `golang.org/x/sync` from `v0.14.0` to `v0.15.0`
   * `sigs.k8s.io/controller-runtime` from `v0.20.4` to `v0.21.0`
