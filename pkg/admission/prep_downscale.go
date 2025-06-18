@@ -534,7 +534,7 @@ func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.
 }
 
 func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) error {
-	ctx, span := tracer.Start(ctx, "admission.sendPrepareShutdownRequests()", trace.WithAttributes())
+	ctx, span := tracer.Start(ctx, "admission.sendPrepareShutdownRequests()")
 	defer span.End()
 
 	if len(eps) == 0 {
@@ -560,7 +560,7 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 
 // undoPrepareShutdownRequests sends an HTTP DELETE to each of the given endpoints.
 func undoPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) {
-	ctx, span := tracer.Start(ctx, "admission.undoPrepareShutdownRequests()", trace.WithAttributes())
+	ctx, span := tracer.Start(ctx, "admission.undoPrepareShutdownRequests()")
 	defer span.End()
 
 	if len(eps) == 0 {
