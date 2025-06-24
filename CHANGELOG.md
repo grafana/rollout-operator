@@ -2,6 +2,14 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #236
+  * `github.com/prometheus/common` from `v0.64.0` to `v0.65.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.60.0` to `v0.61.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.60.0` to `v0.61.0`
+  * `k8s.io/api` from `v0.33.1` to `v0.33.2`
+  * `k8s.io/apimachinery` from `v0.33.1` to `v0.33.2`
+  * `k8s.io/client-go` from `v0.33.1` to `v0.33.2`
+
 ## v0.28.0
 
 * [ENHANCEMENT] Updated dependencies, including: #227 #231
