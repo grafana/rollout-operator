@@ -165,10 +165,13 @@ func main() {
 	check(srv.Start())
 
 	// Build the Kubernetes client config.
-	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile, cfg.kubeClientTimeout)
+	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile)
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
 	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
 
+	if kubeConfig.Timeout == 0 {
+		kubeConfig.Timeout = cfg.kubeClientTimeout
+	}
 	if kubeConfig.UserAgent == "" {
 		kubeConfig.UserAgent = rest.DefaultKubernetesUserAgent()
 	}
@@ -305,13 +308,12 @@ func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, resta
 
 }
 
-func buildKubeConfig(apiURL, cfgFile string, timeout time.Duration) (*rest.Config, error) {
+func buildKubeConfig(apiURL, cfgFile string) (*rest.Config, error) {
 	if cfgFile != "" {
 		config, err := clientcmd.BuildConfigFromFlags(apiURL, cfgFile)
 		if err != nil {
 			return nil, err
 		}
-		config.Timeout = timeout
 		return config, nil
 	}
 
