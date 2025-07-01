@@ -82,7 +82,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.IntVar(&cfg.serverPort, "server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
 	fs.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "Timeout for requests made to the Kubernetes API")
+	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "HTTP client timeout. This applies to requests issued to both the Kubernetes API and Kubernetes resource endpoints.")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
 	fs.BoolVar(&cfg.enableNamespaceValidation, "server.cluster-validation.http.enabled", false, "Enable validation of HTTP requests targeting this namespace?")
@@ -165,10 +165,13 @@ func main() {
 	check(srv.Start())
 
 	// Build the Kubernetes client config.
-	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile, cfg.kubeClientTimeout)
+	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile)
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
 	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
 
+	if kubeConfig.Timeout == 0 {
+		kubeConfig.Timeout = cfg.kubeClientTimeout
+	}
 	if kubeConfig.UserAgent == "" {
 		kubeConfig.UserAgent = rest.DefaultKubernetesUserAgent()
 	}
@@ -305,13 +308,12 @@ func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, resta
 
 }
 
-func buildKubeConfig(apiURL, cfgFile string, timeout time.Duration) (*rest.Config, error) {
+func buildKubeConfig(apiURL, cfgFile string) (*rest.Config, error) {
 	if cfgFile != "" {
 		config, err := clientcmd.BuildConfigFromFlags(apiURL, cfgFile)
 		if err != nil {
 			return nil, err
 		}
-		config.Timeout = timeout
 		return config, nil
 	}
 
