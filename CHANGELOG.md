@@ -9,6 +9,7 @@
   * `k8s.io/api` from `v0.33.1` to `v0.33.2`
   * `k8s.io/apimachinery` from `v0.33.1` to `v0.33.2`
   * `k8s.io/client-go` from `v0.33.1` to `v0.33.2`
+* [BUGFIX] Always configure HTTP client with a timeout. #240
 
 ## v0.28.0
 
