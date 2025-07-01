@@ -170,8 +170,8 @@ github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+
 github.com/gorilla/mux v1.7.0/go.mod h1:1lud6UwP+6orDFRuTfBEV8e9/aOM/c4fVVCaMa2zaAs=
 github.com/gorilla/mux v1.8.1 h1:TuBL49tXwgrFYWhqrNgrUNEY92u81SPhu7sTdzQEiWY=
 github.com/gorilla/mux v1.8.1/go.mod h1:AKf9I4AEqPTmMytcMc0KkNouC66V3BtZ4qD5fmWSiMQ=
-github.com/grafana/dskit v0.0.0-20250627131744-6e0e9e3dac34 h1:zsVhN5yDqSCsH+aZKHSBzVNV3Epk1N8CNKvHllSXzEY=
-github.com/grafana/dskit v0.0.0-20250627131744-6e0e9e3dac34/go.mod h1:JO5e0gs13dzqKYIF5cSa5YCNU5ydrziLP6dDzw0mPqc=
+github.com/grafana/dskit v0.0.0-20250701095749-fb98bd4afb14 h1:4zx2NbDkabF1YdyVLg10SyGUR+o6sI8cV3ft4rxRf84=
+github.com/grafana/dskit v0.0.0-20250701095749-fb98bd4afb14/go.mod h1:gVg14WngG7SMnJ/5mZGNFAs31+7BhspoWfmZ/U4rb90=
 github.com/grafana/otel-profiling-go v0.5.1 h1:stVPKAFZSa7eGiqbYuG25VcqYksR6iWvF3YH66t4qL8=
 github.com/grafana/otel-profiling-go v0.5.1/go.mod h1:ftN/t5A/4gQI19/8MoWurBEtC6gFw8Dns1sJZ9W4Tls=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.3 h1:5ZPtiqj0JL5oKWmcsq4VMaAW5ukBEgSGXEN89zeH1Jo=
