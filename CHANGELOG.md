@@ -8,6 +8,7 @@
   * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.60.0` to `v0.62.0`
   * `go.opentelemetry.io/otel` from `v1.36.0` to `v1.37.0`
   * `go.opentelemetry.io/otel/trace` from `v1.36.0` to `v1.37.0`
+  * `golang.org/x/sync` from `v0.15.0` to `v0.16.0`
   * `k8s.io/api` from `v0.33.1` to `v0.33.2`
   * `k8s.io/apimachinery` from `v0.33.1` to `v0.33.2`
   * `k8s.io/client-go` from `v0.33.1` to `v0.33.2`
