@@ -64,12 +64,11 @@ func newInstrumentedRouter(metrics *metrics, cfg config, logger log.Logger) (*mu
 			InflightRequests: metrics.InflightRequests,
 		},
 	}
-	if cfg.enableNamespaceValidation {
+	if cfg.clusterValidationCfg.Enabled {
 		// HTTP server side cluster validation.
 		httpMiddleware = append(httpMiddleware, middleware.ClusterValidationMiddleware(
 			cfg.kubeNamespace,
-			cfg.namespaceValidationExcludePaths,
-			cfg.softNamespaceValidation,
+			cfg.clusterValidationCfg,
 			metrics.ServerInvalidClusterValidaionLabelRequests,
 			logger,
 		))
