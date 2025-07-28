@@ -248,7 +248,7 @@ github.com/google/uuid
 # github.com/gorilla/mux v1.8.1
 ## explicit; go 1.20
 github.com/gorilla/mux
-# github.com/grafana/dskit v0.0.0-20250718123059-f0494e388de2
+# github.com/grafana/dskit v0.0.0-20250723143816-ff33c5829b96
 ## explicit; go 1.23.0
 github.com/grafana/dskit/clusterutil
 github.com/grafana/dskit/flagext
