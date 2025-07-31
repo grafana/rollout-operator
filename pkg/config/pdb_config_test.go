@@ -1,12 +1,13 @@
 package config
 
 import (
+	"regexp"
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"regexp"
-	"testing"
 )
 
 // TestMaxUnavailable validates the determination of the number of unavailable pods based on a fixed value config or a percentage of StatefulSet replicas
@@ -33,7 +34,7 @@ func TestMaxUnavailable(t *testing.T) {
 // TestPodPartitionZoneMatch validates the regular expression parsing of a Pod name to return a logical partition name
 func TestPodPartitionZoneMatch(t *testing.T) {
 	pdbCfg := PdbConfig{
-		podNamePartition: regexp.MustCompile("^[a-z\\-]+-(zone-[a-z]-[0-9]+)$"),
+		podNamePartition: regexp.MustCompile(`^[a-z\-]+-(zone-[a-z]-[0-9]+)$`),
 	}
 
 	// test successful matches
