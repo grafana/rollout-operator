@@ -26,6 +26,8 @@ type zoneTracker struct {
 	client        kubernetes.Interface
 	namespace     string
 	configMapName string
+
+	rolloutGroupDownscalingInProgress sync.Map
 }
 
 type zoneInfo struct {
@@ -156,6 +158,14 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 			level.Warn(logger).Log("msg", msg)
 			return deny(msg)
 		}
+		lockedFor, alreadyLocked := zt.rolloutGroupDownscalingInProgress.LoadOrStore(stsPrepareInfo.rolloutGroup, ar.Request.Name)
+		if alreadyLocked {
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %s is already in process of updating replicas",
+				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, lockedFor)
+			level.Warn(logger).Log("msg", msg)
+			return deny(msg)
+		}
+		defer zt.rolloutGroupDownscalingInProgress.Delete(stsPrepareInfo.rolloutGroup)
 	}
 
 	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
@@ -267,6 +277,9 @@ func (zt *zoneTracker) getOrCreateConfigMap(ctx context.Context, stsList *appsv1
 
 // Load the zones from the zoneTracker ConfigMap into the zones map
 func (zt *zoneTracker) loadZones(ctx context.Context, stsList *appsv1.StatefulSetList) error {
+	zt.mu.Lock()
+	defer zt.mu.Unlock()
+
 	cm, err := zt.getOrCreateConfigMap(ctx, stsList)
 	if err != nil {
 		return err
