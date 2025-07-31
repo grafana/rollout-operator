@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/grafana/rollout-operator/pkg/config"
-	"github.com/grafana/rollout-operator/pkg/util"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,6 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 // A podStatusResult holds the status of a pod availability within a zone / StatefulSet
@@ -60,7 +62,7 @@ func (a *k8sClients) findRelatedStatefulSets(sts *appsv1.StatefulSet, selector *
 		// fall back to finding stateful sets in the same rollout_group
 		rolloutGroup, exists := sts.Labels[config.RolloutGroupLabelKey]
 		if !exists || len(rolloutGroup) == 0 {
-			return nil, errors.New(fmt.Sprintf("unable to find %s label on StatefulSet %s", config.RolloutGroupLabelKey, sts.Name))
+			return nil, fmt.Errorf("unable to find %s label on StatefulSet %s", config.RolloutGroupLabelKey, sts.Name)
 		}
 
 		groupReq, err := labels.NewRequirement(config.RolloutGroupLabelKey, selection.Equals, []string{rolloutGroup})
@@ -111,7 +113,7 @@ func (a *k8sClients) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1
 		if pod.UID != pd.UID && !util.IsPodRunningAndReady(&pd) {
 			result.notReady++
 		}
-		
+
 		result.tested++
 	}
 

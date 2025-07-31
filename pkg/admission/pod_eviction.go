@@ -4,16 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/spanlogger"
-	"github.com/grafana/rollout-operator/pkg/config"
-	"github.com/grafana/rollout-operator/pkg/util"
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 const (
