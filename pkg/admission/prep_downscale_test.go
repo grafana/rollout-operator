@@ -150,6 +150,7 @@ type templateParams struct {
 	DownScalePortKey  string
 	DownScalePort     string
 	DownScaleLabelKey string
+	RolloutGroup      string
 }
 
 type fakeHttpClient struct {
@@ -215,6 +216,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		DownScalePortKey:  config.PrepareDownscalePortAnnotationKey,
 		DownScalePort:     u.Port(),
 		DownScaleLabelKey: config.PrepareDownscaleLabelKey,
+		RolloutGroup:      "ingester",
 	}
 
 	newParams := templateParams{
@@ -224,6 +226,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		DownScalePortKey:  config.PrepareDownscalePortAnnotationKey,
 		DownScalePort:     u.Port(),
 		DownScaleLabelKey: config.PrepareDownscaleLabelKey,
+		RolloutGroup:      "ingester",
 	}
 
 	rawObject, err := statefulSetTemplate(newParams)
@@ -619,7 +622,7 @@ metadata:
   name: web
   labels:
     {{.DownScaleLabelKey}}: "true"
-    rollout-group: "ingester"
+    rollout-group: "{{.RolloutGroup}}"
   annotations:
     {{.DownScalePathKey}}: {{.DownScalePath}}
     {{.DownScalePortKey}}: "{{.DownScalePort}}"
@@ -687,6 +690,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 		DownScalePortKey:  config.PrepareDownscalePortAnnotationKey,
 		DownScalePort:     u.Port(),
 		DownScaleLabelKey: config.PrepareDownscaleLabelKey,
+		RolloutGroup:      "ingester",
 	}
 
 	newParams := templateParams{
@@ -696,6 +700,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 		DownScalePortKey:  config.PrepareDownscalePortAnnotationKey,
 		DownScalePort:     u.Port(),
 		DownScaleLabelKey: config.PrepareDownscaleLabelKey,
+		RolloutGroup:      "ingester",
 	}
 
 	rawObject, err := statefulSetTemplate(newParams)
