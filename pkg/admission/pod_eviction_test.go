@@ -3,9 +3,10 @@ package admission
 import (
 	"context"
 	"fmt"
+	"strings"
+	"testing"
+
 	"github.com/google/uuid"
-	"github.com/grafana/dskit/spanlogger"
-	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/stretchr/testify/require"
 	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -17,8 +18,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
-	"strings"
-	"testing"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 const (
@@ -116,11 +117,6 @@ func (c *testContext) assertResponse(t *testing.T, allowed bool, reason string) 
 	// Verify response
 	require.Equal(t, allowed, response.Allowed)
 	require.Equal(t, reason, response.Warnings[0])
-}
-
-func (c *testContext) newSpanLogger() *spanlogger.SpanLogger {
-	logger, _ := spanlogger.New(c.ctx, c.logs, "admission.PodEviction()", tenantResolver)
-	return logger
 }
 
 func TestPodEviction_NotCreateEvent(t *testing.T) {
