@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-app-zone-b
+  namespace: rollout-operator-development
+  labels:
+    name: test-app-zone-b
+spec:
+  selector:
+    name: test-app-zone-b
+    rollout-group: test-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: test-app-zone-b
+  namespace: rollout-operator-development
+  labels:
+    grafana.com/prepare-downscale: "true"
+    rollout-group: test-app
+  annotations:
+    grafana.com/prepare-downscale-http-path: "/"
+    grafana.com/prepare-downscale-http-port: "80"
+spec:
+  replicas: 4
+  serviceName: test-app
+  selector:
+    matchLabels:
+      name: test-app-zone-b
+      rollout-group: test-app
+  template:
+    metadata:
+      labels:
+        name: test-app-zone-b
+        rollout-group: test-app
+    spec:
+      containers:
+        - name: app
+          image: nginx:latest
+  updateStrategy:
+    type: OnDelete
