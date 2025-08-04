@@ -18,73 +18,15 @@ You'll then be able to access the rollout operator at `http://localhost:8080`, a
 
 You can use the StatefulSets to exercise the operator across a multi-zone `test-app` environment.
 
-# PodDisruptionZoneBudget (PDZB)
+# ZoneAwarePodDisruptionBudget (PDZB)
 
-Supplied in this directory are manifest files for enabling the `PDZB`. This includes;
+Included is a `ZoneAwarePodDisruptionBudget` which can be used to enforce a multi-zone `PDB`.
 
-* a custom resource definition for the `PodDisruptionZoneBudget` kind
-* a custom resource of a `PodDisruptionZoneBudget` kind for use with the `test-app` rollout-group
-* a `ValidatingWebhookConfiguration` kind for registering the rollout-operator for pod evictions 
-
-Additionally, the rollout-operator Role has been modified to grant the following;
+To disable this functionality from the `test-app`;
 
 ```text
-- apiGroups:
-      - rollout-operator.grafana.com
-    resources:
-      - poddisruptionzonebudgets
-    verbs:
-      - get
-      - list
-      - watch
+kubectl delete -f rollout-operator-pod-disruption-zone-budget.yaml
 ```
-
-This custom resource definition defines a namespace scoped resource which can be used to set configuration for the zone aware pod disruption budget eviction handler.
-
-When used in conjunction with the pod eviction `ValidatingWebhookConfiguration`, a pod eviction webhook is registered for approving voluntary pod eviction requests.
-
-Unlike a regular `PodDisruptionBudget` which evaluates across all pods within it's scope, the `PodDisruptionZoneBudget` evaluates against unavailable pod counts against other zones.
-
-Consider the following topology where the `PDZB` has `maxUnavailability=1`
-
-* StatefulSet `ingester-zone-a` manages pods `ingester-zone-a-0` and `ingester-zone-a-1`
-* StatefulSet `ingester-zone-b` manages pods `ingester-zone-b-0` and `ingester-zone-b-1`
-* StatefulSet `ingester-zone-c` manages pods `ingester-zone-c-0` and `ingester-zone-c-1`
-
-When a pod eviction request is received, the availability of the pods in the `other` zones are considered.
-
-If `ingester-zone-a-0` is to be evicted, it will be allowed if there are no disruptions in either zone b or zone c. 
-
-If `ingester-zone-a-1` has failed and `ingester-zone-a-0` is to be evicted, it will be allowed if there are no disruptions in either zone b or zone c. 
-
-*The already disrupted zone can be further disrupted as long as the other zones meet the unavailability criteria.*
-
-If `ingester-zone-a-0` is to be evicted, and `ingester-zone-b-0` has failed, the eviction request will be denied. 
-
-*A pod eviction is only allowed if the number of unavailable pods within each other zone is less than the maxUnavailability value.*
-
-## PDZB Partitions
-
-The `PodDisruptionZoneBudget` can be extended to limit the scope of the availability check to just a specific partition. 
-
-*A pod eviction is only allowed if the number of unavailable pods serving a specific partition within each other zone is less than the maxUnavailability value.*
-
-If `ingester-zone-b-0` has failed and `ingester-zone-a-1` is to be evicted, it will be allowed if there are no disruptions in either zone b or zone c for partition `1`.
-
-If `ingester-zone-b-0` has failed and `ingester-zone-a-0` is to be evicted, it will be denied as the partition `0` in zone b is disrupted.
-
-## PDZB Configuration
-
-The exact resource attributes should be referenced via the provided custom resource definition file. 
-
-Included in the configuration options is the ability to;
-
-* set a fixed max unavailable threshold
-* set a percentage of unavailable StatefulSet members as the threshold
-* set the selector to match the StatefulSets across the zones
-* set the regular expression to determine a partition from a pod name
-
-*Note - the max unavailable can be set to 0. In this case no voluntary evictions in any zone will be allowed.*
 
 # Minikube & Docker Desktop
 
@@ -115,13 +57,13 @@ kubectl get crds -n rollout-operator-development
 
 List custom resources;
 ```
-kubectl get poddisruptionzonebudgets.rollout-operator.grafana.com -n rollout-operator-development
-kubectl get poddisruptionzonebudgets -n rollout-operator-development
+kubectl get zoneawarepoddisruptionbudgets.rollout-operator.grafana.com -n rollout-operator-development
+kubectl get zoneawarepoddisruptionbudgets -n rollout-operator-development
 ```
 
 List the custom resource configuration by name;
 ```
-get poddisruptionzonebudget test-app -n rollout-operator-development -o yaml 
+get zoneawarepoddisruptionbudget test-app -n rollout-operator-development -o yaml 
 ```
 
 List all resources in namespace;

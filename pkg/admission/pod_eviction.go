@@ -24,23 +24,30 @@ const (
 	eviction = "eviction"
 
 	// labels we use in logging
-	logMsg          = "msg"
-	logStatefulSet  = "sts"
-	logLabel        = "label"
-	logErr          = "err"
-	logPod          = "pod"
-	logZones        = "zones"
-	logPartition    = "partition"
-	logUnder        = "under"
-	logUnknown      = "unknown"
-	logAllow        = "pod eviction allowed"
-	logDeny         = "pod eviction denied"
-	logUnavailable0 = "max unavailable = 0"
+	logMsg   = "msg"
+	logAllow = "pod eviction allowed"
+	logDeny  = "pod eviction denied"
 )
 
 // A partitionMatcher is a utility to assist in matching pods to a partition.
 type partitionMatcher struct {
 	same func(pod *corev1.Pod) bool
+}
+
+// A pdbValidator abstracts the different PDB implementations
+type pdbValidator struct {
+
+	// considerSts returns true if this StatefulSet should be considered in the PDB tallies
+	considerSts func(sts *appsv1.StatefulSet) bool
+
+	// considerPod returns a matcher which is used to test if a pod should be considered in the PDB tallies
+	considerPod partitionMatcher
+
+	// validate validates that the PDB will not be breached across all zones
+	validate func(result *podStatusResult, maxUnavailable int) error
+
+	// successMessage returns a success message we return in the eviction response
+	successMessage func() string
 }
 
 // plural appends an 's' to the given string if the value is > 1.
@@ -49,6 +56,29 @@ func plural(s string, value int) string {
 		return fmt.Sprintf("%ss", s)
 	}
 	return s
+}
+
+// pdbMessage creates a message which includes the number of not ready and unknown pods within the given span
+func pdbMessage(result *podStatusResult, span string) string {
+	msg := ""
+	if result.notReady > 0 {
+		// 1 pod not ready
+		msg += fmt.Sprintf("%d %s not ready", result.notReady, plural("pod", result.notReady))
+		if result.unknown > 0 {
+			msg += ", "
+		}
+	}
+	if result.unknown > 0 {
+		// 2 pods unknown
+		msg += fmt.Sprintf("%d %s unknown", result.unknown, plural("pod", result.unknown))
+	}
+
+	// under ingester-zone-a partition 0
+	// under ingester-zone-a
+	if len(span) > 0 {
+		msg += fmt.Sprintf(" under %s", span)
+	}
+	return msg
 }
 
 // A admissionReviewRequest holds the context of the request we are processing.
@@ -123,26 +153,26 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 
 	// validate that this is a valid pod eviction create request
 	if err = request.validate(); err != nil {
-		_ = level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - not a valid create pod eviction request", logAllow), logErr, err)
+		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - not a valid create pod eviction request", logAllow), "err", err)
 		return request.allowWithReason(err.Error())
 	}
 
 	// get the pod which has been requested for eviction
 	if pod, err = request.clients.podByName(request.req.Request.Namespace, request.req.Request.Name); err != nil {
-		_ = level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to find pod by name", logAllow))
+		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to find pod by name", logAllow))
 		return request.allowWithReason(err.Error())
 	}
 
 	// if the pod has not yet reached a running state or has already been disrupted then we don't deny this eviction request
 	// TODO - check on this
 	if !util.IsPodRunningAndReady(pod) {
-		_ = level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - pod is not ready", logAllow))
+		level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - pod is not ready", logAllow))
 		return request.allowWithReason("pod is not ready")
 	}
 
 	// rollout-group label is needed to find a matching custom resource which is used for configuration
 	if rolloutGroup, found := pod.Labels[config.RolloutGroupLabelKey]; !found || len(rolloutGroup) == 0 {
-		_ = level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to find required label on pod", logAllow), logLabel, config.RolloutGroupLabelKey)
+		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to find required label on pod", logAllow), "label", config.RolloutGroupLabelKey)
 		return request.allowWithReason("unable to find label on pod")
 	}
 
@@ -151,104 +181,166 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 
 	// get the StatefulSet who manages this pod
 	if sts, err = request.clients.owner(pod); err != nil {
-		_ = level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to find pod owner", logAllow), logErr, err)
-		return request.allowWithReason("unable to find a StatefulSet as pod owner")
+		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to find pod owner", logAllow), "err", err)
+		return request.allowWithReason(err.Error())
 	}
 
 	// ie ingester-zone-a
 	request.log.SetSpanAndLogTag("owner", sts.Name)
 
-	PdbConfig, err := config.GetCustomResourceConfig(request.clients.ctx, request.req.Request.Namespace, pod.Labels[config.RolloutGroupLabelKey], request.clients.dynamicClient, request.log)
+	// RolloutGroupLabelKey --> ingester
+	pdbConfig, err := config.GetCustomResourceConfig(request.clients.ctx, request.req.Request.Namespace, pod.Labels[config.RolloutGroupLabelKey], request.clients.dynamicClient, request.log)
 	if err != nil {
 		return request.allowWithReason(err.Error())
 	}
 
 	// the number of allowed unavailable pods in other zones.
-	maxUnavailable := PdbConfig.MaxUnavailablePods(sts)
+	maxUnavailable := pdbConfig.MaxUnavailablePods(sts)
 	if maxUnavailable == 0 {
-		_ = level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logDeny, logUnavailable0))
-		return request.denyWithReason(logUnavailable0)
+		level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - max unavailable = 0", logDeny))
+		return request.denyWithReason("max unavailable = 0")
 	}
 
 	// Find the other StatefulSets which span all zones.
 	// Assumption - each StatefulSet manages all the pods for a single zone. This list of StatefulSets covers all zones.
 	// During a migration it may be possible to break this assumption, but during a migration the maxUnavailable will be set to 0 and the eviction request will be denied.
-	otherStatefulSets, err := request.clients.findRelatedStatefulSets(sts, PdbConfig.StsSelector())
+	otherStatefulSets, err := request.clients.findRelatedStatefulSets(sts, pdbConfig.StsSelector())
 	if err != nil || otherStatefulSets == nil || len(otherStatefulSets.Items) <= 1 {
-		_ = level.Error(request.log).Log(logMsg, "unable to find related stateful sets - continuing with single zone")
+		level.Error(request.log).Log(logMsg, "unable to find related stateful sets - continuing with single zone")
 		otherStatefulSets = &appsv1.StatefulSetList{Items: []appsv1.StatefulSet{*sts}}
 	}
 
 	// this is the partition of the pod being evicted - for classic zones the partition will be an empty string
-	partition := PdbConfig.PodPartition(pod)
-	matcher := partitionMatcher{
-		same: func(pd *corev1.Pod) bool {
-			return PdbConfig.PodPartition(pd) == partition
-		},
+	partition, err := pdbConfig.PodPartition(pod)
+	if err != nil {
+		return request.denyWithReason(err.Error())
 	}
 
 	// include the partition we are considering
 	if len(partition) > 0 {
-		request.log.SetSpanAndLogTag(logPartition, partition)
+		request.log.SetSpanAndLogTag("partition", partition)
 	}
 
 	// include the number of zones we will be considering
-	request.log.SetSpanAndLogTag(logZones, len(otherStatefulSets.Items))
+	request.log.SetSpanAndLogTag("zones", len(otherStatefulSets.Items))
 
-	singleZone := len(otherStatefulSets.Items) == 1
+	var pdb *pdbValidator
 
+	if len(otherStatefulSets.Items) == 1 {
+		// single zone mode - we include the pod being evicted into the calculation and the maxAvailable is applied to the single zone / StatefulSet
+		pdb = makePdbValidatorSingleZone(&otherStatefulSets.Items[0])
+	} else if len(partition) > 0 {
+		// partition mode - the pod tallies are applied to all pods in other zones which relate to this partition
+		pdb = makePdbValidatorPartition(sts, partition, len(otherStatefulSets.Items), pdbConfig, request.log)
+	} else {
+		// zone mode - each zone is individually evaluated against the pdb
+		pdb = makePdbValidatorZones(sts, len(otherStatefulSets.Items))
+	}
+
+	accumulatedResult := &podStatusResult{}
 	for _, otherSts := range otherStatefulSets.Items {
-		// exclude our StatefulSet from this iteration unless we only have found a single zone
-		if !singleZone && otherSts.UID == sts.UID {
+		// test on whether we exclude the eviction pod's StatefulSet from the tally
+		if !pdb.considerSts(&otherSts) {
 			continue
 		}
 
-		// find the number of not ready pods on this StatefulSet which match the given criteria
-		result, err := request.clients.podsNotRunningAndReady(&otherSts, pod, matcher)
+		result, err := request.clients.podsNotRunningAndReady(&otherSts, pod, pdb.considerPod)
 		if err != nil {
-			// TODO - should we allow or deny this ??
-			_ = level.Error(request.log).Log(logMsg, "unable to determine pod status in related StatefulSet", logStatefulSet, otherSts.Name)
-			continue
+			level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to determine pod status in related StatefulSet", logDeny), "sts", otherSts.Name)
+			return request.denyWithReason("unable to determine pod status in related StatefulSet")
 		}
 
-		// Note - if we are in a singleZone mode then we apply the PDB to the single zone and the unavailable pods calculation reflects the state after eviction
-		if result.notReady+result.unknown >= maxUnavailable || (singleZone && result.notReady+result.unknown+1 > maxUnavailable) {
-			_ = level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - pdb exceeded", logDeny), logStatefulSet, otherSts.Name, "notReady", result.notReady, logUnknown, result.unknown, "tested", result.tested, "maxUnavailable", maxUnavailable)
+		accumulatedResult.tested += result.tested
+		accumulatedResult.notReady += result.notReady
+		accumulatedResult.unknown += result.unknown
+	}
 
-			// Build a nice reason to assist with any debugging
-			msg := ""
-			if result.notReady > 0 {
-				msg += fmt.Sprintf("%d %s not ready", result.notReady, plural(logPod, result.notReady))
-				if result.unknown > 0 {
-					msg += ", "
+	if err = pdb.validate(accumulatedResult, maxUnavailable); err != nil {
+		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - pdb exceeded", logDeny), "err", err)
+		return request.denyWithReason(err.Error())
+	}
+
+	return request.allowWithReason(pdb.successMessage())
+}
+
+// makePdbValidatorSingleZone returns a pdbValidator which evaluates the PDB for a single zone / StatefulSet
+func makePdbValidatorSingleZone(sts *appsv1.StatefulSet) *pdbValidator {
+
+	pdb := pdbValidator{
+		considerSts: func(sts *appsv1.StatefulSet) bool {
+			return true
+		},
+		validate: func(result *podStatusResult, maxUnavailable int) error {
+			// add 1 to reflect the pod which is being requested for eviction
+			if result.notReady+result.unknown+1 > maxUnavailable {
+				return errors.New(pdbMessage(result, sts.Name))
+			}
+			return nil
+		},
+		successMessage: func() string {
+			return fmt.Sprintf("pdb met in single zone %s", sts.Name)
+		},
+		considerPod: partitionMatcher{
+			same: func(pd *corev1.Pod) bool {
+				return true
+			},
+		},
+	}
+	return &pdb
+}
+
+func makePdbValidatorPartition(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config.PdbConfig, log *spanlogger.SpanLogger) *pdbValidator {
+
+	// partition mode - we apply the unavailable tally across all zones which relate to this partition
+	pdb := pdbValidator{
+		considerSts: func(otherSts *appsv1.StatefulSet) bool {
+			return otherSts.UID != sts.UID
+		},
+		validate: func(result *podStatusResult, maxUnavailable int) error {
+			if result.notReady+result.unknown >= maxUnavailable {
+				return errors.New(pdbMessage(result, "partition "+partition))
+			}
+			return nil
+		},
+		successMessage: func() string {
+			return fmt.Sprintf("pdb met for partition %s across %d zones", partition, zones)
+		},
+		considerPod: partitionMatcher{
+			same: func(pd *corev1.Pod) bool {
+				thisPartition, err := pdbConfig.PodPartition(pd)
+				if err != nil {
+					// the partition name was successfully extracted from the pod being evicted
+					// so if this regex has failed then the assumption is that it is not the same partition, as would have a different naming convention
+					// or the regex is too tightly defined
+					level.Error(log).Log(logMsg, "Unable to extract partition from pod name - check the pod partition name regex", "name", pd.Name)
 				}
-			}
-			if result.unknown > 0 {
-				// 1 pod not ready, 1 pod unknown under ingester-zone-a
-				// 1 pod unknown under ingester-zone-a
-				msg += fmt.Sprintf("%d %s %s %s %s", result.unknown, plural(logPod, result.unknown), logUnknown, logUnder, otherSts.Name)
-			} else if len(partition) > 0 {
-				// 1 pod not ready under ingester-zone-a partition 0
-				msg += fmt.Sprintf(" %s %s %s %s", logUnder, otherSts.Name, logPartition, partition)
-			} else {
-				// 1 pod not ready under ingester-zone-a
-				msg += fmt.Sprintf(" %s %s", logUnder, otherSts.Name)
-			}
-
-			return request.denyWithReason(msg)
-		}
-
+				return thisPartition == partition
+			},
+		},
 	}
 
-	// a string we will use when logging
-	scope := logZones
-	if len(partition) > 0 {
-		scope += fmt.Sprintf(" %s %s", logPartition, partition)
-	}
+	return &pdb
+}
 
-	// all relevant pods in adjacent zones are available
-	// all relevant pods in adjacent zones partition 1 are available
-	msg := fmt.Sprintf("all relevant pods in adjacent %s are available", scope)
-	_ = level.Info(request.log).Log(logMsg, msg)
-	return request.allowWithReason(msg)
+func makePdbValidatorZones(sts *appsv1.StatefulSet, zones int) *pdbValidator {
+	pdb := pdbValidator{
+		considerSts: func(otherSts *appsv1.StatefulSet) bool {
+			return otherSts.UID != sts.UID
+		},
+		validate: func(result *podStatusResult, maxUnavailable int) error {
+			if result.notReady+result.unknown >= maxUnavailable {
+				return errors.New(pdbMessage(result, ""))
+			}
+			return nil
+		},
+		successMessage: func() string {
+			return fmt.Sprintf("pdb met across %d zones", zones)
+		},
+		considerPod: partitionMatcher{
+			same: func(pd *corev1.Pod) bool {
+				return true
+			},
+		},
+	}
+	return &pdb
 }

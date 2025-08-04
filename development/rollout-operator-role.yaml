@@ -31,7 +31,7 @@ rules:
   - apiGroups:
       - rollout-operator.grafana.com
     resources:
-      - poddisruptionzonebudgets
+      - zoneawarepoddisruptionbudgets
     verbs:
       - get
       - list
