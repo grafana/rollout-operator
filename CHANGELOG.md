@@ -3,7 +3,8 @@
 ## main / unreleased
 
 * [CHANGE] Rename flag `server.cluster-validation.http.exclude-paths` to `server.cluster-validation.http.excluded-paths` to align with `dskit`. #247
-* [ENHANCEMENT] Updated dependencies, including: #236 #238 #242 #247
+* [ENHANCEMENT] Updated dependencies, including: #236 #238 #242 #247 #257
+  * `github.com/prometheus/client_golang` from `v1.22.0` to `v1.23.0`
   * `github.com/prometheus/common` from `v0.64.0` to `v0.65.0`
   * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.60.0` to `v0.62.0`
   * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.60.0` to `v0.62.0`
