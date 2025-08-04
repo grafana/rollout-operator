@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -317,6 +318,7 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 	path := "/prepare-downscale"
 	rolloutGroupIngester := "ingester"
 	ingesterZoneA := "ingester-zone-a"
+	ingesterZoneB := "ingester-zone-b"
 	rolloutGroupIndexGateway := "index-gateway"
 	indexGatewayZoneA := "index-gateway-zone-a"
 
@@ -378,17 +380,37 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 
 	zt := newZoneTracker(api, namespace, "testconfigmap")
 
-	// mimic in progress downscaling request of rollout group ingester
-	zt.rolloutGroupDownscalingInProgress.Store(rolloutGroupIngester, ingesterZoneA)
+	// block the ingester-zone-a downscale request for rollout group ingester
+	ingesterZoneAPrepDownscaleDone := make(chan struct{})
+	ingesterZoneADownscaleInitiated := atomic.Bool{}
+	go func() {
+		f := newFakeHttpClient(func(r *http.Request) (*http.Response, error) {
+			ingesterZoneADownscaleInitiated.Store(true)
+			<-ingesterZoneAPrepDownscaleDone
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
+			}, nil
+		})
 
-	// downscale request for rollout group ingester should fail
-	ar := buildAdmissionRequest(rolloutGroupIngester, ingesterZoneA)
+		ar := buildAdmissionRequest(rolloutGroupIngester, ingesterZoneA)
+		admissionResponse := zt.prepareDownscale(context.Background(), logger, ar, api, f)
+		require.True(t, admissionResponse.Allowed, admissionResponse.Result.Message)
+	}()
+
+	// wait for ingester-zone-a downscale request to get accepted before checking rejection of downscale requests for ingester group
+	require.Eventually(t, func() bool {
+		return ingesterZoneADownscaleInitiated.Load()
+	}, time.Second, time.Millisecond)
+
+	// ingester-zone-b downscale request for rollout group ingester should get rejected
+	ar := buildAdmissionRequest(rolloutGroupIngester, ingesterZoneB)
 	admissionResponse := zt.prepareDownscale(context.Background(), logger, ar, api, f)
 	require.False(t, admissionResponse.Allowed)
-	require.Equal(t, "downscale of statefulsets/ingester-zone-a in test from 5 to 2 replicas is not allowed because statefulset ingester-zone-a is already in process of updating replicas", admissionResponse.Result.Message)
+	require.Equal(t, "downscale of statefulsets/ingester-zone-b in test from 5 to 2 replicas is not allowed because statefulset ingester-zone-a is already in process of updating replicas", admissionResponse.Result.Message)
 
-	require.NoError(t, zt.loadZones(context.Background(), nil))
 	// no zones should have been updated
+	require.NoError(t, zt.loadZones(context.Background(), nil))
 	require.Len(t, zt.zones, 0)
 
 	// while downscale request for group index-gateway should pass
@@ -396,23 +418,25 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 	admissionResponse = zt.prepareDownscale(context.Background(), logger, ar, api, f)
 	require.True(t, admissionResponse.Allowed)
 
-	require.NoError(t, zt.loadZones(context.Background(), nil))
 	// only index-gateway-zone-a should have been updated
+	require.NoError(t, zt.loadZones(context.Background(), nil))
 	require.Len(t, zt.zones, 1)
 	_, zoneUpdated := zt.zones[indexGatewayZoneA]
 	require.True(t, zoneUpdated)
 
-	// clearing the in progress downscaling request of rollout group ingester should let new requests to go through
-	zt.rolloutGroupDownscalingInProgress.Delete(rolloutGroupIngester)
-	ar = buildAdmissionRequest(rolloutGroupIngester, ingesterZoneA)
+	// finishing the in progress downscaling request for rollout group ingester should let new requests to go through
+	close(ingesterZoneAPrepDownscaleDone)
+	ar = buildAdmissionRequest(rolloutGroupIngester, ingesterZoneB)
 	admissionResponse = zt.prepareDownscale(context.Background(), logger, ar, api, f)
 	require.True(t, admissionResponse.Allowed)
 
+	// index-gateway-zone-a and ingester-zone-(a|b) should have been updated
 	require.NoError(t, zt.loadZones(context.Background(), nil))
-	// both index-gateway-zone-a and ingester-zone-a should have been updated
-	require.Len(t, zt.zones, 2)
+	require.Len(t, zt.zones, 3)
 	_, zoneUpdated = zt.zones[indexGatewayZoneA]
 	require.True(t, zoneUpdated)
 	_, zoneUpdated = zt.zones[ingesterZoneA]
+	require.True(t, zoneUpdated)
+	_, zoneUpdated = zt.zones[ingesterZoneB]
 	require.True(t, zoneUpdated)
 }
