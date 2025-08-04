@@ -1,10 +1,10 @@
 apiVersion: rollout-operator.grafana.com/v1
-kind: PodDisruptionZoneBudget
+kind: ZoneAwarePodDisruptionBudget
 metadata:
-  name: test-app
+  name: test-app-rollout
   namespace: rollout-operator-development
   labels:
-    name: test-app
+    name: test-app-rollout
 spec:
   maxUnavailable: 1
   selector:

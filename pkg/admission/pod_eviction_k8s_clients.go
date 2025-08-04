@@ -43,15 +43,20 @@ func (a *k8sClients) podByName(namespace string, name string) (*corev1.Pod, erro
 
 // owner returns the StatefulSet which manages a pod or an error if the owner can not be found or is not a StatefulSet
 func (a *k8sClients) owner(pod *corev1.Pod) (*appsv1.StatefulSet, error) {
-	if owner := metav1.GetControllerOf(pod); owner != nil && owner.Kind == "StatefulSet" {
-		var sts *appsv1.StatefulSet
-		var err error
-		if sts, err = a.kubeClient.AppsV1().StatefulSets(pod.Namespace).Get(a.ctx, owner.Name, metav1.GetOptions{}); err != nil {
-			return nil, err
-		}
+	owner := metav1.GetControllerOf(pod)
+	if owner == nil {
+		return nil, errors.New("unable to find a StatefulSet pod owner")
+	} else if owner.Kind != "StatefulSet" {
+		return nil, fmt.Errorf("pod owner is not a StatefulSet - %s has owner %s (%s)", pod.Name, owner.Name, owner.Kind)
+	}
+
+	if sts, err := a.kubeClient.AppsV1().StatefulSets(pod.Namespace).Get(a.ctx, owner.Name, metav1.GetOptions{}); err != nil {
+		return nil, err
+	} else if sts == nil {
+		return nil, fmt.Errorf("unable to find StatefulSet by name - %s", owner.Name)
+	} else {
 		return sts, nil
 	}
-	return nil, errors.New("unable to find a StatefulSet pod owner")
 }
 
 // findRelatedStatefulSets returns all StatefulSets which match the given Selector.
@@ -102,7 +107,12 @@ func (a *k8sClients) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1
 	result := &podStatusResult{tested: 0, notReady: 0, unknown: 0}
 
 	// replicas is the number of Pods created by the StatefulSet controller.
-	replicas := int(sts.Status.Replicas)
+	// Spec.Replicas - the desired number of pods as set from config or by a controller
+	// Status.Replicas - the number of pods created by the Stateful set
+	// In a normal running state these values will be equal.
+	// If the system is up-scaled or down-scaled the Spec.Replicas will initially increase or decrease and eventually the Status.Replicas will converge
+	// Taking the max value errs on the side of caution
+	replicas := max(int(sts.Status.Replicas), int(*sts.Spec.Replicas))
 	for _, pd := range list.Items {
 
 		// we do not consider pods which are in a different partition

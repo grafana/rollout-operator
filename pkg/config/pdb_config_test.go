@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"regexp"
 	"testing"
 
@@ -34,22 +35,97 @@ func TestMaxUnavailable(t *testing.T) {
 // TestPodPartitionZoneMatch validates the regular expression parsing of a Pod name to return a logical partition name
 func TestPodPartitionZoneMatch(t *testing.T) {
 	pdbCfg := PdbConfig{
-		podNamePartition: regexp.MustCompile(`^[a-z\-]+-(zone-[a-z]-[0-9]+)$`),
+		podNamePartition:           regexp.MustCompile(`^[a-z\-]+-(zone-[a-z]-[0-9]+)$`),
+		podNamePartitionRegexGroup: 1,
 	}
 
 	// test successful matches
 	for _, name := range []string{"ingester-zone-a-0", "test-app-zone-a-0"} {
 		pod := newPod(name)
-		p := pdbCfg.PodPartition(pod)
+		p, err := pdbCfg.PodPartition(pod)
+		require.NoError(t, err)
 		require.Equal(t, "zone-a-0", p)
 	}
 
 	// test no match
 	for _, name := range []string{"", "ingester-zone-a", "test-app-1"} {
 		pod := newPod(name)
-		p := pdbCfg.PodPartition(pod)
-		require.Equal(t, "", p)
+		_, err := pdbCfg.PodPartition(pod)
+		require.NotNil(t, err)
 	}
+}
+
+// TestPodPartitionZoneMatch validates the regular expression parsing of a Pod name to return a logical partition name
+func TestPodPartitionZoneMatchWithGrouping(t *testing.T) {
+	pdbCfg := PdbConfig{
+		podNamePartition:           regexp.MustCompile(`^ingester(-foo)?-zone-[a-z]-([0-9]+)$`),
+		podNamePartitionRegexGroup: 2,
+	}
+
+	// test successful matches
+	for _, name := range []string{"ingester-foo-zone-a-0", "ingester-zone-a-0"} {
+		pod := newPod(name)
+		p, err := pdbCfg.PodPartition(pod)
+		require.NoError(t, err)
+		require.Equal(t, "0", p)
+	}
+}
+
+func TestBadRegex(t *testing.T) {
+	raw := map[string]interface{}{}
+	raw["podNamePartitionRegex"] = "(a bad regex["
+
+	_, _, err := valueAsRegex(raw, "podNamePartitionRegex")
+	require.ErrorContains(t, err, "error parsing regexp: missing closing ]: `[$`")
+
+	raw["podNamePartitionRegex"] = "ingester-zone-[a-z]-[0-9]+"
+	_, _, err = valueAsRegex(raw, "podNamePartitionRegex")
+	require.ErrorContains(t, err, "regular expression requires at least one subexpression")
+
+	raw["podNamePartitionRegex"] = "ingester-zone-([a-z])-([0-9]+)"
+	_, _, err = valueAsRegex(raw, "podNamePartitionRegex")
+	require.ErrorContains(t, err, "regular expression has multiple subexpressions and requires an ,$index suffix")
+
+	raw["podNamePartitionRegex"] = "ingester-zone-([a-z])-([0-9]+),$foo"
+	_, _, err = valueAsRegex(raw, "podNamePartitionRegex")
+	require.ErrorContains(t, err, "regular expression has multiple subexpressions and requires an ,$index suffix")
+
+	raw["podNamePartitionRegex"] = "ingester-zone-([a-z])-([0-9]+),$0"
+	_, _, err = valueAsRegex(raw, "podNamePartitionRegex")
+	fmt.Printf("%s\n", err.Error())
+	require.ErrorContains(t, err, "regular expression subexpression index must be greater than 0")
+
+	raw["podNamePartitionRegex"] = "ingester-zone-([a-z])-([0-9]+),$10"
+	_, _, err = valueAsRegex(raw, "podNamePartitionRegex")
+	fmt.Printf("%s\n", err.Error())
+	require.ErrorContains(t, err, "regular expression subexpression index out of range")
+
+}
+
+func TestRegexGrouping(t *testing.T) {
+	raw := map[string]interface{}{
+		"podNamePartitionRegex": "ingester(-foo)?-zone-[a-z]-([0-9]+),$2",
+	}
+	regex, group, err := valueAsRegex(raw, "podNamePartitionRegex")
+	require.NotNil(t, regex)
+	require.Equal(t, 2, group)
+	require.Nil(t, err)
+
+	cfg := &PdbConfig{
+		podNamePartitionRegexGroup: group,
+		podNamePartition:           regex,
+	}
+
+	p, err := cfg.PodPartition(newPod("foo"))
+	require.NotNil(t, err)
+
+	p, err = cfg.PodPartition(newPod("ingester-foo-zone-a-1"))
+	require.NoError(t, err)
+	require.Equal(t, "1", p)
+
+	p, err = cfg.PodPartition(newPod("ingester-zone-a-1"))
+	require.NoError(t, err)
+	require.Equal(t, "1", p)
 }
 
 // newSts returns a minimal StatefulSet which only has a name and replica count attributes set
