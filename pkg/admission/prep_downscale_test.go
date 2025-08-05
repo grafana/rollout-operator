@@ -956,11 +956,11 @@ func TestCreateEndpoints(t *testing.T) {
 			serviceName: "service-name",
 			expected: []endpoint{
 				{
-					url:   "test-4.service-name.default.svc.cluster.local:8080/prepare-downscale",
+					url:   "test-4.service-name.default.svc.cluster.local.:8080/prepare-downscale",
 					index: 4,
 				},
 				{
-					url:   "test-3.service-name.default.svc.cluster.local:8080/prepare-downscale",
+					url:   "test-3.service-name.default.svc.cluster.local.:8080/prepare-downscale",
 					index: 3,
 				},
 			},
