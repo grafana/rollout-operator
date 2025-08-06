@@ -16,10 +16,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	fakedynamic "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const (
@@ -42,11 +42,12 @@ const (
 )
 
 type testContext struct {
-	ctx     context.Context
-	logs    *dummyLogger
-	client  *fake.Clientset
-	dynamic *fakedynamic.FakeDynamicClient
-	request admissionv1.AdmissionReview
+	ctx      context.Context
+	logs     *dummyLogger
+	client   *fake.Clientset
+	request  admissionv1.AdmissionReview
+	pdbCache *zpdb.ZpdbCache
+	podCache *zpdb.PodEvictionCache
 }
 
 // A dummyLogger accumulates log lines into a slice so we can assert that certain logs were recorded
@@ -100,24 +101,36 @@ func newTestContext(request admissionv1.AdmissionReview, pdbRawConfig *unstructu
 	testCtx := &testContext{}
 	testCtx.ctx = context.Background()
 	testCtx.client = fake.NewClientset(objects...)
-	if pdbRawConfig != nil {
-		testCtx.dynamic = fakedynamic.NewSimpleDynamicClient(runtime.NewScheme(), pdbRawConfig)
-	} else {
-		testCtx.dynamic = fakedynamic.NewSimpleDynamicClient(runtime.NewScheme())
-	}
+	testCtx.podCache = zpdb.NewPodEvictionCache()
+	testCtx.pdbCache = zpdb.NewZpdbCache()
 
+	if pdbRawConfig != nil {
+		_, _ = testCtx.pdbCache.AddOrUpdateRaw(pdbRawConfig)
+	}
 	testCtx.request = request
 	testCtx.logs = newDummyLogger()
 	return testCtx
 }
 
-// assertResponse asserts that the pod eviction resource is as expected.
-func (c *testContext) assertResponse(t *testing.T, allowed bool, reason string) {
-	response := PodEviction(context.Background(), c.logs, c.request, c.client, c.dynamic)
+func (c *testContext) assertDenyResponse(t *testing.T, reason string, statusCode int) {
+	response := PodEviction(context.Background(), c.logs, c.request, c.client, c.pdbCache, c.podCache)
+	require.NotNil(t, response.UID)
+	require.False(t, response.Allowed)
+	require.Equal(t, reason, response.Result.Message)
+	require.Equal(t, int32(statusCode), response.Result.Code)
+}
 
-	// Verify response
-	require.Equal(t, allowed, response.Allowed)
-	require.Equal(t, reason, response.Warnings[0])
+func (c *testContext) assertAllowResponse(t *testing.T) {
+	response := PodEviction(context.Background(), c.logs, c.request, c.client, c.pdbCache, c.podCache)
+	require.NotNil(t, response.UID)
+	require.True(t, response.Allowed)
+}
+
+func (c *testContext) assertAllowResponseWithWarning(t *testing.T, warning string) {
+	response := PodEviction(context.Background(), c.logs, c.request, c.client, c.pdbCache, c.podCache)
+	require.NotNil(t, response.UID)
+	require.True(t, response.Allowed)
+	require.Equal(t, warning, response.Warnings[0])
 }
 
 func TestPodEviction_NotCreateEvent(t *testing.T) {
@@ -125,7 +138,7 @@ func TestPodEviction_NotCreateEvent(t *testing.T) {
 	ar := createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace)
 	ar.Request.Operation = admissionv1.Delete
 	testCtx := newTestContext(ar, nil)
-	testCtx.assertResponse(t, true, "request operation is not create")
+	testCtx.assertAllowResponseWithWarning(t, "request operation is not create")
 
 	expectedLogEntries := []string{
 		"method=admission.PodEviction()",
@@ -142,17 +155,17 @@ func TestPodEviction_NotEvictionSubResource(t *testing.T) {
 	ar := createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace)
 	ar.Request.SubResource = "foo"
 	testCtx := newTestContext(ar, nil)
-	testCtx.assertResponse(t, true, "request SubResource is not eviction")
+	testCtx.assertAllowResponseWithWarning(t, "request SubResource is not eviction")
 }
 
 func TestPodEviction_EmptyName(t *testing.T) {
 	testCtx := newTestContext(createBasicEvictionAdmissionReview("", testNamespace), nil)
-	testCtx.assertResponse(t, true, "namespace or name are not found")
+	testCtx.assertAllowResponseWithWarning(t, "namespace or name are not found")
 }
 
 func TestPodEviction_PodNotFound(t *testing.T) {
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil)
-	testCtx.assertResponse(t, true, "pods \"ingester-zone-a-0\" not found")
+	testCtx.assertAllowResponseWithWarning(t, "pods \"ingester-zone-a-0\" not found")
 	testCtx.logs.assertHasLog(t, []string{"pod eviction allowed - unable to find pod by name"})
 }
 
@@ -160,24 +173,15 @@ func TestPodEviction_PodNotReady(t *testing.T) {
 	pod := newPodNoOwner(testPodZoneA0)
 	pod.Status.Phase = corev1.PodFailed
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil, pod)
-	testCtx.assertResponse(t, true, "pod is not ready")
+	testCtx.assertAllowResponseWithWarning(t, "pod is not ready")
 	testCtx.logs.assertHasLog(t, []string{"pod eviction allowed - pod is not ready"})
 }
 
 func TestPodEviction_PodWithNoOwner(t *testing.T) {
 	pod := newPodNoOwner(testPodZoneA0)
-	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil, pod)
-	testCtx.assertResponse(t, true, "unable to find a StatefulSet pod owner")
+	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), pod)
+	testCtx.assertAllowResponseWithWarning(t, "unable to find a StatefulSet pod owner")
 	testCtx.logs.assertHasLog(t, []string{"pod eviction allowed - unable to find pod owner"})
-}
-
-func TestPodEviction_MissingRolloutGroupLabelOnPod(t *testing.T) {
-	pod := newPodNoOwner(testPodZoneA0)
-	delete(pod.Labels, config.RolloutGroupLabelKey)
-
-	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil, pod)
-	testCtx.assertResponse(t, true, "unable to find label on pod")
-	testCtx.logs.assertHasLog(t, []string{"msg=pod eviction allowed - unable to find required label on pod", "label=rollout-group"})
 }
 
 func TestPodEviction_UnableToRetrievePdbConfig(t *testing.T) {
@@ -185,7 +189,7 @@ func TestPodEviction_UnableToRetrievePdbConfig(t *testing.T) {
 	pod := newPod(testPodZoneA0, sts)
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil, pod, sts)
-	testCtx.assertResponse(t, true, "unable to load ZoneAwarePodDisruptionBudget config")
+	testCtx.assertDenyResponse(t, "no pod disruption budgets found for pod", 500)
 }
 
 func TestPodEviction_MaxUnavailableEq0(t *testing.T) {
@@ -193,7 +197,7 @@ func TestPodEviction_MaxUnavailableEq0(t *testing.T) {
 	pod := newPod(testPodZoneA0, sts)
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(0, rolloutGroupValue), pod, sts)
-	testCtx.assertResponse(t, false, "max unavailable = 0")
+	testCtx.assertDenyResponse(t, "max unavailable = 0", 403)
 	testCtx.logs.assertHasLog(t, []string{"msg=pod eviction denied - max unavailable = 0"})
 }
 
@@ -202,7 +206,7 @@ func TestPodEviction_MaxUnavailablePercentageEq0(t *testing.T) {
 	pod := newPod(testPodZoneA0, sts)
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailablePercent(0, rolloutGroupValue), pod, sts)
-	testCtx.assertResponse(t, false, "max unavailable = 0")
+	testCtx.assertDenyResponse(t, "max unavailable = 0", 403)
 	testCtx.logs.assertHasLog(t, []string{"msg=pod eviction denied - max unavailable = 0"})
 }
 
@@ -215,7 +219,7 @@ func TestPodEviction_SingleZoneSinglePod(t *testing.T) {
 	pod := newPod(testPodZoneA0, sts)
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), pod, sts)
-	testCtx.assertResponse(t, true, "pdb met in single zone ingester-zone-a")
+	testCtx.assertAllowResponse(t)
 }
 
 // TestPodEviction_SingleZoneMultiplePods - a single zone with 1 pod not ready
@@ -226,11 +230,11 @@ func TestPodEviction_SingleZoneMultiplePods(t *testing.T) {
 	pod2 := newPod(testPodZoneA2, sts)
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), pod0, pod1, pod2, sts)
-	testCtx.assertResponse(t, true, "pdb met in single zone ingester-zone-a")
+	testCtx.assertAllowResponse(t)
 
 	pod2.Status.Phase = corev1.PodPending
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), pod0, pod1, pod2, sts)
-	testCtx.assertResponse(t, false, "1 pod not ready under ingester-zone-a")
+	testCtx.assertDenyResponse(t, "1 pod not ready under ingester-zone-a", 429)
 }
 
 // TestPodEviction_SingleZoneMultiplePodsUpscale - the StatefulSet spec replica is reporting more than we see reported when listing the pods
@@ -240,7 +244,7 @@ func TestPodEviction_SingleZoneMultiplePodsUpscale(t *testing.T) {
 	pod1 := newPod(testPodZoneA1, sts)
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), pod0, pod1, sts)
-	testCtx.assertResponse(t, false, "1 pod unknown under ingester-zone-a")
+	testCtx.assertDenyResponse(t, "1 pod unknown under ingester-zone-a", 429)
 }
 
 func TestPodEviction_MultiZoneClassic(t *testing.T) {
@@ -265,18 +269,20 @@ func TestPodEviction_MultiZoneClassic(t *testing.T) {
 	}
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
-	testCtx.assertResponse(t, true, "pdb met across 3 zones")
+	require.False(t, testCtx.podCache.Evicted(objs[3].(*corev1.Pod)))
+	testCtx.assertAllowResponse(t)
+	require.True(t, testCtx.podCache.Evicted(objs[3].(*corev1.Pod)))
 
 	// mark a pod in the same zone as failed - we will allow this eviction
 	objs[5].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
-	testCtx.assertResponse(t, true, "pdb met across 3 zones")
+	testCtx.assertAllowResponse(t)
 
 	// mark a pod in the another zone as failed - we will deny this eviction
 	objs[11].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
-	testCtx.assertResponse(t, false, "1 pod not ready")
-	testCtx.logs.assertHasLog(t, []string{"msg=pod eviction denied - pdb exceeded"})
+	testCtx.assertDenyResponse(t, "1 pod not ready", 429)
+	testCtx.logs.assertHasLog(t, []string{"msg=pod eviction denied - zpdb exceeded"})
 
 	// reset so all the pods are reporting running
 	objs[5].(*corev1.Pod).Status.Phase = corev1.PodRunning
@@ -285,8 +291,8 @@ func TestPodEviction_MultiZoneClassic(t *testing.T) {
 	// but zone b sts has more replicas than we will see pods for
 	objs[1].(*appsv1.StatefulSet).Status.Replicas = 4
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
-	testCtx.assertResponse(t, false, "1 pod unknown")
-	testCtx.logs.assertHasLog(t, []string{"msg=pod eviction denied - pdb exceeded"})
+	testCtx.assertDenyResponse(t, "1 pod unknown", 429)
+	testCtx.logs.assertHasLog(t, []string{"msg=pod eviction denied - zpdb exceeded"})
 }
 
 func TestPodEviction_MultiZoneClassicMaxUnavailable2(t *testing.T) {
@@ -311,27 +317,27 @@ func TestPodEviction_MultiZoneClassicMaxUnavailable2(t *testing.T) {
 	}
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(2, rolloutGroupValue), objs...)
-	testCtx.assertResponse(t, true, "pdb met across 3 zones")
+	testCtx.assertAllowResponse(t)
 
 	// mark a pod in the same zone as failed - we will allow this eviction as we can have 2 pods unavailable
 	objs[5].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(2, rolloutGroupValue), objs...)
-	testCtx.assertResponse(t, true, "pdb met across 3 zones")
+	testCtx.assertAllowResponse(t)
 
 	// mark another pod in the same zone as failed - we will allow this eviction
 	objs[4].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(2, rolloutGroupValue), objs...)
-	testCtx.assertResponse(t, true, "pdb met across 3 zones")
+	testCtx.assertAllowResponse(t)
 
 	// mark a pod in the another zone as failed - we have 2 pods offline in our zone and one pod offline in another zone
 	objs[11].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(2, rolloutGroupValue), objs...)
-	testCtx.assertResponse(t, true, "pdb met across 3 zones")
+	testCtx.assertAllowResponse(t)
 
 	// mark a pod in the last zone as failed - we have 2 pods offline in our zone and a pod offline in both other zones
 	objs[6].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(2, rolloutGroupValue), objs...)
-	testCtx.assertResponse(t, false, "2 pods not ready")
+	testCtx.assertDenyResponse(t, "2 pods not ready", 429)
 }
 
 func TestPodEviction_PartitionZones(t *testing.T) {
@@ -359,22 +365,22 @@ func TestPodEviction_PartitionZones(t *testing.T) {
 	podPartitionZoneRegex := "[a-z\\-]+-zone-[a-z]-([0-9]+)"
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
-	testCtx.assertResponse(t, true, "pdb met for partition 0 across 3 zones")
+	testCtx.assertAllowResponse(t)
 
 	// mark a pod in the same zone as failed - we will allow this eviction
 	objs[4].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
-	testCtx.assertResponse(t, true, "pdb met for partition 0 across 3 zones")
+	testCtx.assertAllowResponse(t)
 
 	// mark a pod in the another zone + partition as failed - we will allow this eviction
 	objs[11].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
-	testCtx.assertResponse(t, true, "pdb met for partition 0 across 3 zones")
+	testCtx.assertAllowResponse(t)
 
 	// mark a pod in the another zone + same partition as failed - we will deny this eviction
 	objs[6].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
-	testCtx.assertResponse(t, false, "1 pod not ready under partition 0")
+	testCtx.assertDenyResponse(t, "1 pod not ready under partition 0", 429)
 
 	// reset so all the pods are reporting running
 	objs[4].(*corev1.Pod).Status.Phase = corev1.PodRunning
@@ -384,10 +390,10 @@ func TestPodEviction_PartitionZones(t *testing.T) {
 	// but zone b sts has more replicas than we will see pods for
 	objs[1].(*appsv1.StatefulSet).Status.Replicas = 4
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
-	testCtx.assertResponse(t, false, "1 pod unknown under partition 0")
+	testCtx.assertDenyResponse(t, "1 pod unknown under partition 0", 429)
 
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, "ingester(-foo)?-zone-[a-z]-([0-9]+),$2"), objs...)
-	testCtx.assertResponse(t, false, "1 pod unknown under partition 0")
+	testCtx.assertDenyResponse(t, "1 pod unknown under partition 0", 429)
 }
 
 func TestPodEviction_PartitionZonesMaxUnavailable2(t *testing.T) {
@@ -417,15 +423,15 @@ func TestPodEviction_PartitionZonesMaxUnavailable2(t *testing.T) {
 	// mark 1 pod in the another zone + same partition as failed
 	objs[6].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
-	testCtx.assertResponse(t, false, "1 pod not ready under partition 0")
+	testCtx.assertDenyResponse(t, "1 pod not ready under partition 0", 429)
 
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(2, rolloutGroupValue, podPartitionZoneRegex), objs...)
-	testCtx.assertResponse(t, true, "pdb met for partition 0 across 3 zones")
+	testCtx.assertAllowResponse(t)
 
 	// mark another pod in the another zone + same partition as failed
 	objs[9].(*corev1.Pod).Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(2, rolloutGroupValue, podPartitionZoneRegex), objs...)
-	testCtx.assertResponse(t, false, "2 pods not ready under partition 0")
+	testCtx.assertDenyResponse(t, "2 pods not ready under partition 0", 429)
 }
 
 // createBasicEvictionAdmissionReview returns a pod eviction request for the given pod name
@@ -534,7 +540,7 @@ func newSts(name string) *appsv1.StatefulSet {
 	}
 }
 
-// newPDBMaxUnavailable returns a raw custom resource configuration which can be used with the config.PdbConfig
+// newPDBMaxUnavailable returns a raw custom resource configuration which can be used with the ZpdbConfig
 // This configuration has maxUnavailable=X and has a name of the given rollout-group
 func newPDBMaxUnavailable(maxUnavailable int, rolloutGroup string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
@@ -557,7 +563,7 @@ func newPDBMaxUnavailable(maxUnavailable int, rolloutGroup string) *unstructured
 	}
 }
 
-// newPDBMaxUnavailablePercent returns a raw custom resource configuration which can be used with the config.PdbConfig
+// newPDBMaxUnavailablePercent returns a raw custom resource configuration which can be used with the ZpdbConfig
 // This configuration has maxUnavailablePercentage=X and has a name of the given rollout-group
 func newPDBMaxUnavailablePercent(maxUnavailablePercentage int, rolloutGroup string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
@@ -580,7 +586,7 @@ func newPDBMaxUnavailablePercent(maxUnavailablePercentage int, rolloutGroup stri
 	}
 }
 
-// newPDBMaxUnavailableWithRegex returns a raw custom resource configuration which can be used with the config.PdbConfig
+// newPDBMaxUnavailableWithRegex returns a raw custom resource configuration which can be used with the ZpdbConfig
 // This configuration has maxUnavailable=X, has a name of the given rollout-group and sets the podNamePartitionRegex
 func newPDBMaxUnavailableWithRegex(maxUnavailable int, rolloutGroup string, podNamePartitionRegex string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{

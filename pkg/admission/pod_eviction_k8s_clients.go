@@ -10,11 +10,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
+	config2 "github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 // A podStatusResult holds the status of a pod availability within a zone / StatefulSet
@@ -27,22 +26,20 @@ type podStatusResult struct {
 	unknown int
 }
 
-// A k8sClients holds the Kubernetes API clients used to query Kubernetes
-type k8sClients struct {
+// A k8sClient holds the Kubernetes API client used to query Kubernetes
+type k8sClient struct {
 	ctx context.Context
 	// The client we use to query for StatefulSets and Pods
 	kubeClient kubernetes.Interface
-	// The client we use to query for the custom resource used for PDB configuration
-	dynamicClient dynamic.Interface
 }
 
 // podByName searches and returns a Pod for the given namespace and name
-func (a *k8sClients) podByName(namespace string, name string) (*corev1.Pod, error) {
+func (a *k8sClient) podByName(namespace string, name string) (*corev1.Pod, error) {
 	return a.kubeClient.CoreV1().Pods(namespace).Get(a.ctx, name, metav1.GetOptions{})
 }
 
 // owner returns the StatefulSet which manages a pod or an error if the owner can not be found or is not a StatefulSet
-func (a *k8sClients) owner(pod *corev1.Pod) (*appsv1.StatefulSet, error) {
+func (a *k8sClient) owner(pod *corev1.Pod) (*appsv1.StatefulSet, error) {
 	owner := metav1.GetControllerOf(pod)
 	if owner == nil {
 		return nil, errors.New("unable to find a StatefulSet pod owner")
@@ -51,7 +48,7 @@ func (a *k8sClients) owner(pod *corev1.Pod) (*appsv1.StatefulSet, error) {
 	}
 
 	if sts, err := a.kubeClient.AppsV1().StatefulSets(pod.Namespace).Get(a.ctx, owner.Name, metav1.GetOptions{}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to find StatefulSet by name - %s - %v", owner.Name, err)
 	} else if sts == nil {
 		return nil, fmt.Errorf("unable to find StatefulSet by name - %s", owner.Name)
 	} else {
@@ -60,38 +57,15 @@ func (a *k8sClients) owner(pod *corev1.Pod) (*appsv1.StatefulSet, error) {
 }
 
 // findRelatedStatefulSets returns all StatefulSets which match the given Selector.
-// If the selector is not set, a fallback selector is created which matches StatefulSets with the same rollout-group label as the given StatefulSet
-func (a *k8sClients) findRelatedStatefulSets(sts *appsv1.StatefulSet, selector *labels.Selector) (*appsv1.StatefulSetList, error) {
-
-	if selector == nil {
-		// fall back to finding stateful sets in the same rollout_group
-		rolloutGroup, exists := sts.Labels[config.RolloutGroupLabelKey]
-		if !exists || len(rolloutGroup) == 0 {
-			return nil, fmt.Errorf("unable to find %s label on StatefulSet %s", config.RolloutGroupLabelKey, sts.Name)
-		}
-
-		groupReq, err := labels.NewRequirement(config.RolloutGroupLabelKey, selection.Equals, []string{rolloutGroup})
-		if err != nil {
-			return nil, err
-		}
-
-		sel := labels.NewSelector().Add(*groupReq)
-		return a.kubeClient.AppsV1().StatefulSets(sts.Namespace).List(a.ctx, metav1.ListOptions{
-			LabelSelector: sel.String(),
-		})
-	} else {
-		return a.kubeClient.AppsV1().StatefulSets(sts.Namespace).List(a.ctx, metav1.ListOptions{
-			LabelSelector: (*selector).String(),
-		})
-	}
-
+func (a *k8sClient) findRelatedStatefulSets(sts *appsv1.StatefulSet, selector *labels.Selector) (*appsv1.StatefulSetList, error) {
+	return a.kubeClient.AppsV1().StatefulSets(sts.Namespace).List(a.ctx, metav1.ListOptions{LabelSelector: (*selector).String()})
 }
 
 // podsNotRunningAndReady finds the pods managed by a given StatefulSet. Each pod is inspected to see if it is ready and running. A tally of the total number of pods and the number not ready/running is returned.
 // It is possible for pods to be in a state where they are not yet returned by the pod listing. These pods should be considered and are reported as unknown.
 // The number of unknown pods is determined as the difference between the StatefulSets State.Replica count minus the number of pods listed.
 // The given Pod is excluded from testing, but is included in the total of tested pods
-func (a *k8sClients) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, matcher partitionMatcher) (*podStatusResult, error) {
+func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, matcher partitionMatcher, evictionCache *config2.PodEvictionCache) (*podStatusResult, error) {
 	podsSelector := labels.NewSelector().Add(
 		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
@@ -120,7 +94,9 @@ func (a *k8sClients) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1
 			continue
 		}
 
-		if pod.UID != pd.UID && !util.IsPodRunningAndReady(&pd) {
+		// if a pod has recently been evicted then we assume it is not ready
+		// this is avoiding a possible race condition of concurrent eviction requests are occurring and an eviction has not yet caused a pod state change
+		if pod.UID != pd.UID && (evictionCache.Evicted(&pd) || !util.IsPodRunningAndReady(&pd)) {
 			result.notReady++
 		}
 

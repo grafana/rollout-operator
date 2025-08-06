@@ -1,4 +1,4 @@
-package config
+package zpdb
 
 import (
 	"fmt"
@@ -9,13 +9,16 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 // TestMaxUnavailable validates the determination of the number of unavailable pods based on a fixed value config or a percentage of StatefulSet replicas
 func TestMaxUnavailable(t *testing.T) {
 	sts := newSts("test-sts")
 
-	pdbCfg := PdbConfig{}
+	pdbCfg := ZpdbConfig{}
 	require.Equal(t, 0, pdbCfg.MaxUnavailablePods(sts))
 
 	pdbCfg.maxUnavailable = 1
@@ -34,14 +37,14 @@ func TestMaxUnavailable(t *testing.T) {
 
 // TestPodPartitionZoneMatch validates the regular expression parsing of a Pod name to return a logical partition name
 func TestPodPartitionZoneMatch(t *testing.T) {
-	pdbCfg := PdbConfig{
+	pdbCfg := ZpdbConfig{
 		podNamePartition:           regexp.MustCompile(`^[a-z\-]+-(zone-[a-z]-[0-9]+)$`),
 		podNamePartitionRegexGroup: 1,
 	}
 
 	// test successful matches
 	for _, name := range []string{"ingester-zone-a-0", "test-app-zone-a-0"} {
-		pod := newPod(name)
+		pod := newPodCfgTest(name)
 		p, err := pdbCfg.PodPartition(pod)
 		require.NoError(t, err)
 		require.Equal(t, "zone-a-0", p)
@@ -49,7 +52,7 @@ func TestPodPartitionZoneMatch(t *testing.T) {
 
 	// test no match
 	for _, name := range []string{"", "ingester-zone-a", "test-app-1"} {
-		pod := newPod(name)
+		pod := newPodCfgTest(name)
 		_, err := pdbCfg.PodPartition(pod)
 		require.NotNil(t, err)
 	}
@@ -57,14 +60,14 @@ func TestPodPartitionZoneMatch(t *testing.T) {
 
 // TestPodPartitionZoneMatch validates the regular expression parsing of a Pod name to return a logical partition name
 func TestPodPartitionZoneMatchWithGrouping(t *testing.T) {
-	pdbCfg := PdbConfig{
+	pdbCfg := ZpdbConfig{
 		podNamePartition:           regexp.MustCompile(`^ingester(-foo)?-zone-[a-z]-([0-9]+)$`),
 		podNamePartitionRegexGroup: 2,
 	}
 
 	// test successful matches
 	for _, name := range []string{"ingester-foo-zone-a-0", "ingester-zone-a-0"} {
-		pod := newPod(name)
+		pod := newPodCfgTest(name)
 		p, err := pdbCfg.PodPartition(pod)
 		require.NoError(t, err)
 		require.Equal(t, "0", p)
@@ -111,21 +114,62 @@ func TestRegexGrouping(t *testing.T) {
 	require.Equal(t, 2, group)
 	require.Nil(t, err)
 
-	cfg := &PdbConfig{
+	cfg := &ZpdbConfig{
 		podNamePartitionRegexGroup: group,
 		podNamePartition:           regex,
 	}
 
-	p, err := cfg.PodPartition(newPod("foo"))
+	_, err = cfg.PodPartition(newPodCfgTest("foo"))
 	require.NotNil(t, err)
 
-	p, err = cfg.PodPartition(newPod("ingester-foo-zone-a-1"))
+	p, err := cfg.PodPartition(newPodCfgTest("ingester-foo-zone-a-1"))
 	require.NoError(t, err)
 	require.Equal(t, "1", p)
 
-	p, err = cfg.PodPartition(newPod("ingester-zone-a-1"))
+	p, err = cfg.PodPartition(newPodCfgTest("ingester-zone-a-1"))
 	require.NoError(t, err)
 	require.Equal(t, "1", p)
+}
+
+func TestParseAndValidate(t *testing.T) {
+	name := "test-zpdb"
+	rolloutGroup := "test"
+	_, err := ParseAndValidate(rawConfigInvalidKind())
+	require.ErrorContains(t, err, "unexpected object kind - expecting ZoneAwarePodDisruptionBudget")
+
+	_, err = ParseAndValidate(rawConfig(name, rolloutGroup, int64(1), int64(-1), ""))
+	require.ErrorContains(t, err, "invalid value - max unavailable must be 0 <= val")
+
+	_, err = ParseAndValidate(rawConfigMaxUnavailablePercentage(name, rolloutGroup, int64(1), int64(-1), ""))
+	require.ErrorContains(t, err, "invalid value - max unavailable percentage must be 0 <= val <= 100")
+
+	_, err = ParseAndValidate(rawConfigMaxUnavailablePercentage(name, rolloutGroup, int64(1), int64(101), ""))
+	require.ErrorContains(t, err, "invalid value - max unavailable percentage must be 0 <= val <= 100")
+
+	_, err = ParseAndValidate(rawConfig(name, rolloutGroup, int64(1), int64(1), "([bad_regex"))
+	require.ErrorContains(t, err, "invalid value - regex is not valid")
+
+	cfg, err := ParseAndValidate(rawConfig(name, rolloutGroup, int64(1), int64(0), ""))
+	require.NoError(t, err)
+	require.Equal(t, cfg.maxUnavailable, 0)
+
+	cfg, err = ParseAndValidate(rawConfig(name, rolloutGroup, int64(1), int64(1), ""))
+	require.NoError(t, err)
+	require.Equal(t, cfg.maxUnavailable, 1)
+
+	cfg, err = ParseAndValidate(rawConfigMaxUnavailablePercentage(name, rolloutGroup, int64(1), int64(0), ""))
+	require.NoError(t, err)
+	require.Equal(t, cfg.maxUnavailablePercentage, 0)
+
+	cfg, err = ParseAndValidate(rawConfigMaxUnavailablePercentage(name, rolloutGroup, int64(1), int64(100), ""))
+	require.NoError(t, err)
+	require.Equal(t, cfg.maxUnavailablePercentage, 100)
+
+	// simple regex test - other tests more extensively validate the regex parsing
+	cfg, err = ParseAndValidate(rawConfig(name, rolloutGroup, int64(1), int64(1), "[a-z]+\\-([0-9]+)"))
+	require.NoError(t, err)
+	require.Equal(t, cfg.maxUnavailable, 1)
+	require.NotNil(t, cfg.podNamePartitionRegexGroup)
 }
 
 // newSts returns a minimal StatefulSet which only has a name and replica count attributes set
@@ -142,10 +186,66 @@ func newSts(name string) *appsv1.StatefulSet {
 }
 
 // newPod returns a minimal Pod which only has a name set
-func newPod(name string) *corev1.Pod {
+func newPodCfgTest(name string) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
+		},
+	}
+}
+
+func rawConfig(name string, rolloutGroup string, generation int64, maxUnavailable int64, podNamePartitionRegex string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rollout-operator.grafana.com/v1",
+			"kind":       "ZoneAwarePodDisruptionBudget",
+			"metadata": map[string]interface{}{
+				"name":       name,
+				"namespace":  "testnamespace",
+				"generation": generation,
+			},
+			"spec": map[string]interface{}{
+				"maxUnavailable": maxUnavailable,
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						config.RolloutGroupLabelKey: rolloutGroup,
+					},
+				},
+				"podNamePartitionRegex": podNamePartitionRegex,
+			},
+		},
+	}
+}
+
+func rawConfigMaxUnavailablePercentage(name string, rolloutGroup string, generation int64, maxUnavailablePercentage int64, podNamePartitionRegex string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rollout-operator.grafana.com/v1",
+			"kind":       "ZoneAwarePodDisruptionBudget",
+			"metadata": map[string]interface{}{
+				"name":       name,
+				"namespace":  "testnamespace",
+				"generation": generation,
+			},
+			"spec": map[string]interface{}{
+				"maxUnavailablePercentage": maxUnavailablePercentage,
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						config.RolloutGroupLabelKey: rolloutGroup,
+					},
+				},
+				"podNamePartitionRegex": podNamePartitionRegex,
+			},
+		},
+	}
+}
+
+func rawConfigInvalidKind() *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rollout-operator.grafana.com/v1",
+			"kind":       "Foo",
+			"spec":       map[string]interface{}{},
 		},
 	}
 }

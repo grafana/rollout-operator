@@ -416,13 +416,15 @@ subjects:
 Whenever the certificate expires, the `rollout-operator` will detect it and will restart, which will trigger the self-signed certificate generation again if it's configured.
 The default expiration for the self-signed certificate is 1 year and it can be changed by setting the flag `-server-tls.self-signed-cert.expiration`.
 
-# ZoneAwarePodDisruptionBudget (PDZB)
+# ZoneAwarePodDisruptionBudget (ZPDB)
 
 A custom `PodDisruptionBudget` is available for use with the `rollout-operator`. 
 
 This is for use with `StatefulSets` which span multiple logical zones and allows for a `maxUnavailable` PDB is to be evaluated against the pods in other zones.
 
 Unlike a regular `PodDisruptionBudget` which evaluates across all pods, the `ZoneAwarePodDisruptionBudget` evaluates against unavailable pod counts in other zones.
+
+This allows an operator to perform maintenance on a single zone whilst ensuring sufficient pod availability in other zones.
 
 Consider the following topology where the `PDZB` has `maxUnavailability=1`;
 
@@ -444,13 +446,13 @@ If `ingester-zone-a-0` is to be evicted, and `ingester-zone-b-0` has failed, the
 
 ## Partition awareness
 
-The `PDZB` can be configured for partition awareness. This is intended for multi-zone `ingesters` running with `ingest_storage_enabled=true`.
+The `ZPDB` can be configured for partition awareness. This is intended for multi-zone `ingesters` running with `ingest_storage_enabled=true`.
 
-In this configuration, the `PDB` determines the `partition` for a pod being evicted, and considers this eviction against the unavailable counts for all pods which serve this partition. 
+In this configuration, the `PDB` determines the `partition` for a pod being evicted, and considers this eviction against the unavailable counts for ALL pods which serve this partition. 
 
 *A pod eviction is only allowed if the number of unavailable pods serving a specific partition is less than the maxUnavailability value.*
 
-Using the same topology as the previous section where the `PDZB` has `maxUnavailability=1`;
+Using the same topology as the previous section where the `ZPDB` has `maxUnavailability=1`;
 
 If `ingester-zone-b-0` has failed and `ingester-zone-a-1` is to be evicted, it will be allowed as there are no disruptions in either zone `b` or zone `c` for partition `1`.
 
@@ -468,7 +470,7 @@ The pod eviction web hook is exposed via the `/pods/eviction` endpoint.
 
 The following is required to enable the `ZoneAwarePodDisruptionBudget`;
 
-* a custom resource definition for the `ZoneAwarePodDisruptionBudget` kind - a sample is provided in [development](./development/custom-resource-definition-pod-disruption-zone-budget.yaml)
+* a custom resource definition for the `ZoneAwarePodDisruptionBudget` kind - a sample is provided in [development](./development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml)
 * a `ValidatingWebhookConfiguration` for registering the `rollout-operator` for pod evictions - a sample is provided in [development](./development/eviction-webhook.yaml)
 * an update to the `rollout-operator-webhook-role` role - see below
 * a `ZoneAwarePodDisruptionBudget` kind for each set of `StatefulSets` - see below
@@ -500,7 +502,7 @@ spec:
   selector:
     matchLabels:
       rollout-group: ingester
-  # podNamePartitionRegex: "[a-z\\-]+-zone-[a-z]-([0-9]+)"
+  # podNamePartitionRegex: "[a-z\\-]+-zone-[a-z]-([0-9]+),$1"
 ```
 
 ### Configuration options
@@ -511,9 +513,11 @@ Functionality includes the ability to;
 
 * set a fixed max unavailable threshold
 * set a percentage of unavailable StatefulSet members as the threshold - this is evaluated against the StatefulSet's `spec.Replicas`
-* set the selector to match StatefulSets
+* set the selector to match the applicable Pods and StatefulSets
 * set the regular expression to determine a partition name from a pod name (if using partition awareness)
 
 Note - the max unavailable can be set to 0. In this case no voluntary evictions in any zone will be allowed.
 
 Note - if the partition regular expression requires a grouping directive this can be set as a suffix to the regex. For instance `ingester(-foo)?-zone-[a-z]-([0-9]+),$2`
+
+Note - a validating webhook configuration is provided in [development](./development/zone-aware-pod-disruption-budget-validating-webhook.yaml) which allows the `rollout-operator` to verify a `ZoneAwarePodDisruptionBudget` configuration being created or updated. This will ensure that no in-valid configuration can be applied.

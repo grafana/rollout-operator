@@ -36,6 +36,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
+	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
@@ -205,10 +206,13 @@ func main() {
 	dynamicClient, err := dynamic.NewForConfigAndClient(kubeConfig, httpClient)
 	check(errors.Wrap(err, "failed to init dynamicClient"))
 
-	// Start TLS server if enabled.
-	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, dynamicClient, restart, metrics)
+	p := zpdb.NewPdbObserver(kubeClient, dynamicClient, cfg.kubeNamespace, logger)
+	check(errors.Wrap(p.Init(), "failed to init zpdb observer"))
 
-	// Init the controller.
+	// Start TLS server if enabled.
+	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, p.PdbCache(), p.PodEvictionCache())
+
+	// Init the controller
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
 	check(errors.Wrap(c.Init(), "failed to init controller"))
 
@@ -216,6 +220,7 @@ func main() {
 	go func() {
 		waitForSignalOrRestart(logger, restart)
 		c.Stop()
+		p.Stop()
 	}()
 
 	// The operator is ready once the controller successfully initialised.
@@ -236,7 +241,7 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, dynamicClient *dynamic.DynamicClient, restart chan string, metrics *metrics) {
+func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, pdbCache *zpdb.ZpdbCache, podEvictionCache *zpdb.PodEvictionCache) {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
 		return
@@ -277,7 +282,11 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 	}
 
 	podEvictionFunc := func(ctx context.Context, l log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-		return admission.PodEviction(ctx, logger, ar, api, dynamicClient)
+		return admission.PodEviction(ctx, logger, ar, api, pdbCache, podEvictionCache)
+	}
+
+	zpdbValidationFunc := func(ctx context.Context, l log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {
+		return admission.ZoneAwarePdbValidatorHandler(ctx, l, ar)
 	}
 
 	tlsSrv, err := newTLSServer(cfg, logger, cert, metrics)
@@ -285,6 +294,7 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, kubeClient))
 	tlsSrv.Handle(admission.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, kubeClient))
+	tlsSrv.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(zpdbValidationFunc, logger, kubeClient))
 	check(errors.Wrap(tlsSrv.Start(), "failed to start tls server"))
 }
 
