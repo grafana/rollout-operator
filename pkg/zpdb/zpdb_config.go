@@ -1,29 +1,21 @@
-package config
+package zpdb
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math"
 	"regexp"
 	"strconv"
 
-	"github.com/grafana/dskit/spanlogger"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 )
 
 const (
 	// strings needed to find the custom resource - keep as const as easier to change if we update the custom resource definition
-	pdbCustomResourceKind       = "ZoneAwarePodDisruptionBudget"
-	pdbCustomResourceNamePlural = "zoneawarepoddisruptionbudgets"
-	pdbCustomResourceSpecGroup  = "rollout-operator.grafana.com"
-	pdbCustomResourceVersion    = "v1"
+	pdbCustomResourceKind = "ZoneAwarePodDisruptionBudget"
 
 	// default values
 	defaultMaxUnavailable = 1
@@ -34,10 +26,12 @@ const (
 	fieldPodNamePartitionRegex    = "podNamePartitionRegex"
 )
 
-// A PdbConfig holds the configuration of a ZoneAwarePodDisruptionBudget custom resource.
-// The custom resource is loaded by name through the kubernetes dynamic client and mapped to a PdbConfig.
-// An example custom resource definition and custom resource file can be found in the development directory.
-type PdbConfig struct {
+// A ZpdbConfig holds the configuration of a ZoneAwarePodDisruptionBudget custom resource.
+type ZpdbConfig struct {
+	name string
+
+	generation int64
+
 	// the max unavailable pods in another zone before we deny an eviction
 	maxUnavailable int
 
@@ -54,9 +48,29 @@ type PdbConfig struct {
 	podNamePartitionRegexGroup int
 }
 
+func (c *ZpdbConfig) Name() string {
+	return c.name
+}
+
+func (c *ZpdbConfig) Generation() int64 {
+	return c.generation
+}
+
+// MatchesPod returns true if this PdbConfig label selector matches this pod
+func (c *ZpdbConfig) MatchesPod(pod *corev1.Pod) bool {
+	selector := *c.stsSelector
+	return selector.Matches(labels.Set(pod.Labels))
+}
+
+// MatchesSts returns true if this PdbConfig label selector matches this pod
+func (c *ZpdbConfig) MatchesSts(sts *appsv1.StatefulSet) bool {
+	selector := *c.stsSelector
+	return selector.Matches(labels.Set(sts.Labels))
+}
+
 // MaxUnavailablePods returns the number of allowed unavailable pods.
 // When the max unavailable configuration is a percentage, the returned value is calculated off the StatefulSet's Spec.Replica count.
-func (c *PdbConfig) MaxUnavailablePods(sts *appsv1.StatefulSet) int {
+func (c *ZpdbConfig) MaxUnavailablePods(sts *appsv1.StatefulSet) int {
 	if c.maxUnavailable > 0 {
 		return c.maxUnavailable
 	}
@@ -74,13 +88,13 @@ func (c *PdbConfig) MaxUnavailablePods(sts *appsv1.StatefulSet) int {
 
 // StsSelector returns the Selector which can be used to find the other StatefulSets which span all zones.
 // Note that this can be nil
-func (c *PdbConfig) StsSelector() *labels.Selector {
+func (c *ZpdbConfig) StsSelector() *labels.Selector {
 	return c.stsSelector
 }
 
 // PodPartition returns the partition name that a Pod covers.
 // Note that if no podNamePartitionRegex has been set then an empty string will be returned.
-func (c *PdbConfig) PodPartition(pod *corev1.Pod) (string, error) {
+func (c *ZpdbConfig) PodPartition(pod *corev1.Pod) (string, error) {
 	if c.podNamePartition == nil {
 		return "", nil
 	}
@@ -99,7 +113,7 @@ func (c *PdbConfig) PodPartition(pod *corev1.Pod) (string, error) {
 func valueAsRegex(config map[string]interface{}, field string) (*regexp.Regexp, int, error) {
 	if val, found := config[field]; found && len(val.(string)) > 0 {
 		groupingIndex := 1
-		grpRgx := regexp.MustCompile("^.+(,\\$([0-9]+))$")
+		grpRgx := regexp.MustCompile(`^.+(,\$([0-9]+))$`)
 		grpMatch := grpRgx.FindStringSubmatch(val.(string))
 		grpSet := false
 		if len(grpMatch) == 3 {
@@ -135,64 +149,56 @@ func valueAsRegex(config map[string]interface{}, field string) (*regexp.Regexp, 
 	return nil, 0, nil
 }
 
-// GetCustomResourceConfig attempts to load a ZoneAwarePodDisruptionBudget configuration for the given name and namespace.
-// This name will most likely be the rollout-group name. ie "ingester".
-// The function will return an error if there are any errors in the configuration
-func GetCustomResourceConfig(ctx context.Context, namespace string, name string, client dynamic.Interface, log *spanlogger.SpanLogger) (*PdbConfig, error) {
-
-	gvr := schema.GroupVersionResource{
-		Group:    pdbCustomResourceSpecGroup,
-		Version:  pdbCustomResourceVersion,
-		Resource: pdbCustomResourceNamePlural, // must be plural
+// ParseAndValidate attempts to parse the given Unstructured to a ZpdbConfig.
+// An error is returned if any configuration errors are found.
+func ParseAndValidate(obj *unstructured.Unstructured) (*ZpdbConfig, error) {
+	var mapSpec map[string]interface{}
+	var err error
+	if spec, found, err := unstructured.NestedMap(obj.Object, "spec"); err != nil {
+		return nil, err
+	} else if !found {
+		return nil, errors.New("no spec found in unstructured object")
+	} else if obj.GetKind() != pdbCustomResourceKind {
+		return nil, fmt.Errorf("unexpected object kind - expecting %s", pdbCustomResourceKind)
+	} else {
+		mapSpec = spec
 	}
 
-	// The custom resource name provides a unique CR within the namespace
-	// Currently the ZoneAwarePodDisruptionBudget is used in multi-zone ingester & store-gateways, and the manifest is created via multi-zone.libsonnet
-	unstructuredObj, err := client.Resource(gvr).Namespace(namespace).Get(ctx, name+"-rollout", metav1.GetOptions{})
-
-	if err != nil {
-		return nil, fmt.Errorf("unable to load %s config", pdbCustomResourceKind)
-	}
-
-	var tmpConfig map[string]interface{}
-	if spec, found, err := unstructured.NestedMap(unstructuredObj.Object, "spec"); err == nil && found {
-		tmpConfig = spec
-	}
-
-	PdbConfig := &PdbConfig{
+	cfg := &ZpdbConfig{
 		maxUnavailable: defaultMaxUnavailable,
+		name:           obj.GetName(),
+		generation:     obj.GetGeneration(),
 	}
 
 	// We favour the maxUnavailable value, taking the first value > 0
 	// maxUnavailable == maxUnavailablePercentage == 0 has the same effect
-	if val, found := tmpConfig[fieldMaxUnavailable]; found && val != nil {
-		PdbConfig.maxUnavailable = int(val.(int64))
-		if PdbConfig.maxUnavailable < 0 {
+	if val, found := mapSpec[fieldMaxUnavailable]; found && val != nil {
+		cfg.maxUnavailable = int(val.(int64))
+		if cfg.maxUnavailable < 0 {
 			// fatal
-			return nil, fmt.Errorf("invalid value - max unavailable must be 0 <= val - %d", PdbConfig.maxUnavailable)
+			return nil, fmt.Errorf("invalid value - max unavailable must be 0 <= val - %d", cfg.maxUnavailable)
 		}
-	} else if val, found := tmpConfig[fieldMaxUnavailablePercentage]; found && val != nil {
-		PdbConfig.maxUnavailablePercentage = int(val.(int64))
-		PdbConfig.maxUnavailable = 0
-		if PdbConfig.maxUnavailablePercentage < 0 || PdbConfig.maxUnavailablePercentage > 100 {
+	} else if val, found := mapSpec[fieldMaxUnavailablePercentage]; found && val != nil {
+		cfg.maxUnavailablePercentage = int(val.(int64))
+		cfg.maxUnavailable = 0
+		if cfg.maxUnavailablePercentage < 0 || cfg.maxUnavailablePercentage > 100 {
 			// fatal
-			return nil, fmt.Errorf("invalid value - max unavailable percentage must be 0 <= val <= 100 - %d", PdbConfig.maxUnavailablePercentage)
+			return nil, fmt.Errorf("invalid value - max unavailable percentage must be 0 <= val <= 100 - %d", cfg.maxUnavailablePercentage)
 		}
 	}
 
-	PdbConfig.podNamePartition, PdbConfig.podNamePartitionRegexGroup, err = valueAsRegex(tmpConfig, fieldPodNamePartitionRegex)
-	if err != nil {
-		// fatal
+	if cfg.podNamePartition, cfg.podNamePartitionRegexGroup, err = valueAsRegex(mapSpec, fieldPodNamePartitionRegex); err != nil {
 		return nil, fmt.Errorf("invalid value - regex is not valid: %v", err)
 	}
 
-	if mlMap, found, err := unstructured.NestedStringMap(unstructuredObj.Object, "spec", "selector", "matchLabels"); err == nil && found {
-		selector := labels.SelectorFromSet(mlMap)
-		PdbConfig.stsSelector = &selector
-	} else {
-		// fatal
+	if mlMap, found, err := unstructured.NestedStringMap(obj.Object, "spec", "selector", "matchLabels"); err != nil {
 		return nil, fmt.Errorf("invalid value - selector is not valid: %v", err)
+	} else if !found {
+		return nil, fmt.Errorf("invalid value - selector is not found")
+	} else {
+		selector := labels.SelectorFromSet(mlMap)
+		cfg.stsSelector = &selector
 	}
 
-	return PdbConfig, nil
+	return cfg, nil
 }

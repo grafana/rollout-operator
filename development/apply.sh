@@ -19,5 +19,5 @@ select yn in "Yes" "No"; do
 done
 
 kubectl apply --wait -f "$SCRIPT_DIR/namespace.yaml"
-kubectl apply --wait -f "$SCRIPT_DIR/custom-resource-definition-pod-disruption-zone-budget.yaml"
-find "$SCRIPT_DIR" -type f -name '*.yaml' -not -name 'namespace.yaml' -not -name 'custom-resource-definition-pod-disruption-zone-budget.yaml' -exec kubectl apply --namespace=rollout-operator-development --wait -f {} \;
+kubectl apply --wait -f "$SCRIPT_DIR/zone-aware-pod-disruption-budget-custom-resource-definition.yaml"
+find "$SCRIPT_DIR" -type f -name '*.yaml' -not -name 'namespace.yaml' -not -name 'zone-aware-pod-disruption-budget-custom-resource-definition.yaml' -exec kubectl apply --namespace=rollout-operator-development --wait -f {} \;

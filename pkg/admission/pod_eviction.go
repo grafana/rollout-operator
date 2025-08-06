@@ -1,9 +1,14 @@
+// Provenance-includes-location: https://github.com/kubernetes/kubernetes
+// Provenance-includes-license: Apache-2.0
+// Provenance-includes-copyright: The Kubernetes Authors.
+
 package admission
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -11,11 +16,10 @@ import (
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/dynamic"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/grafana/rollout-operator/pkg/config"
-	"github.com/grafana/rollout-operator/pkg/util"
+	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const (
@@ -27,6 +31,16 @@ const (
 	logMsg   = "msg"
 	logAllow = "pod eviction allowed"
 	logDeny  = "pod eviction denied"
+
+	// the AdmissionResponse HTTP status codes sent in deny responses
+	// PDB has been reached
+	httpStatusPdbExceeded = 429
+	// maxUnavailable=0
+	httpStatusPdbDisabled = 403
+	// unable to determine status of pods/statefulsets
+	httpStatusInternalError = 500
+	// configuration error
+	httpStatusMisconfiguration = 400
 )
 
 // A partitionMatcher is a utility to assist in matching pods to a partition.
@@ -34,7 +48,7 @@ type partitionMatcher struct {
 	same func(pod *corev1.Pod) bool
 }
 
-// A pdbValidator abstracts the different PDB implementations
+// A pdbValidator abstracts the different ZPDB implementations
 type pdbValidator struct {
 
 	// considerSts returns true if this StatefulSet should be considered in the PDB tallies
@@ -81,11 +95,47 @@ func pdbMessage(result *podStatusResult, span string) string {
 	return msg
 }
 
+// a lock used to control finding a specific PDB lock
+var lock = sync.RWMutex{}
+
+// a map of ZPDB name to lock
+var locks = make(map[string]*sync.Mutex, 5)
+
+// findLock returns a Mutex for each unique name, creating the Mutex if required.
+func findLock(name string) *sync.Mutex {
+	lock.RLock()
+	if pdbLock, exists := locks[name]; exists {
+		lock.RUnlock()
+		return pdbLock
+	}
+	lock.RUnlock()
+
+	lock.Lock()
+	defer lock.Unlock()
+
+	if pdbLock, exists := locks[name]; exists {
+		return pdbLock
+	}
+
+	locks[name] = &sync.Mutex{}
+	return locks[name]
+}
+
 // A admissionReviewRequest holds the context of the request we are processing.
 type admissionReviewRequest struct {
-	log     *spanlogger.SpanLogger
-	req     v1.AdmissionReview
-	clients k8sClients
+	log    *spanlogger.SpanLogger
+	req    v1.AdmissionReview
+	client k8sClient
+}
+
+// canIgnorePDB returns true for pod conditions that allow the pod to be deleted without checking PDBs.
+// Adapted from https://github.com/kubernetes/kubernetes/blob/master/pkg/registry/core/pod/storage/eviction.go
+func canIgnorePDB(pod *corev1.Pod) bool {
+	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed ||
+		pod.Status.Phase == corev1.PodPending || !pod.DeletionTimestamp.IsZero() {
+		return true
+	}
+	return false
 }
 
 // validate ensures that the AdmissionRequest contains the information we require to process this request.
@@ -123,22 +173,44 @@ func (r *admissionReviewRequest) initLogger() {
 }
 
 // denyWithReason constructs a denied AdmissionResponse with the given reason included in the response warnings attribute.
-func (r *admissionReviewRequest) denyWithReason(reason string) *v1.AdmissionResponse {
-	rsp := v1.AdmissionResponse{Allowed: false}
-	rsp.Warnings = append(rsp.Warnings, reason)
+func (r *admissionReviewRequest) denyWithReason(reason string, httpStatusCode int32) *v1.AdmissionResponse {
+	rsp := v1.AdmissionResponse{
+		Allowed: false,
+		UID:     r.req.Request.UID,
+	}
+	rsp.Result = &metav1.Status{
+		Message: reason,
+		Code:    httpStatusCode,
+	}
 	return &rsp
 }
 
-// allowWithReason constructs an allowed AdmissionResponse with the given reason included in the response warnings attribute.
-func (r *admissionReviewRequest) allowWithReason(reason string) *v1.AdmissionResponse {
-	rsp := v1.AdmissionResponse{Allowed: true}
-	rsp.Warnings = append(rsp.Warnings, reason)
+// allowWithWarning constructs an allowed AdmissionResponse with the given warning included in the response warnings attribute.
+// Per kubernetes -
+// Don't include a "Warning:" prefix in the message
+// Use warning messages to describe problems the client making the API request should correct or be aware of
+// Limit warnings to 120 characters if possible
+func (r *admissionReviewRequest) allowWithWarning(warning string) *v1.AdmissionResponse {
+	rsp := v1.AdmissionResponse{
+		Allowed: true,
+		UID:     r.req.Request.UID,
+	}
+	rsp.Warnings = append(rsp.Warnings, warning)
+	return &rsp
+}
+
+// allow constructs an allowed AdmissionResponse
+func (r *admissionReviewRequest) allow() *v1.AdmissionResponse {
+	rsp := v1.AdmissionResponse{
+		Allowed: true,
+		UID:     r.req.Request.UID,
+	}
 	return &rsp
 }
 
 // PodEviction is the entry point / handler for the pod-eviction endpoint request.
 // Note - we do not perform anything different for dry-run requests (ar.Request.DryRun) as we do not modify any state in this webhook.
-func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeClient kubernetes.Interface, dynamicClient dynamic.Interface) *v1.AdmissionResponse {
+func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeClient kubernetes.Interface, pdbCache *zpdb.ZpdbCache, podEvictionCache *zpdb.PodEvictionCache) *v1.AdmissionResponse {
 	logger, ctx := spanlogger.New(ctx, l, "admission.PodEviction()", tenantResolver)
 	defer logger.Finish()
 
@@ -146,7 +218,7 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	var sts *appsv1.StatefulSet
 	var err error
 
-	request := admissionReviewRequest{req: ar, log: logger, clients: k8sClients{ctx: ctx, kubeClient: kubeClient, dynamicClient: dynamicClient}}
+	request := admissionReviewRequest{req: ar, log: logger, client: k8sClient{ctx: ctx, kubeClient: kubeClient}}
 
 	// set up key=value pairs we include on all logs within this context
 	request.initLogger()
@@ -154,57 +226,51 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	// validate that this is a valid pod eviction create request
 	if err = request.validate(); err != nil {
 		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - not a valid create pod eviction request", logAllow), "err", err)
-		return request.allowWithReason(err.Error())
+		return request.allowWithWarning(err.Error())
 	}
 
 	// get the pod which has been requested for eviction
-	if pod, err = request.clients.podByName(request.req.Request.Namespace, request.req.Request.Name); err != nil {
+	if pod, err = request.client.podByName(request.req.Request.Namespace, request.req.Request.Name); err != nil {
 		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to find pod by name", logAllow))
-		return request.allowWithReason(err.Error())
+		return request.allowWithWarning(err.Error())
 	}
 
-	// if the pod has not yet reached a running state or has already been disrupted then we don't deny this eviction request
-	// TODO - check on this
-	if !util.IsPodRunningAndReady(pod) {
+	// evicting a terminal pod should result in direct deletion of pod as it already caused disruption by the time we are evicting.
+	if canIgnorePDB(pod) {
 		level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - pod is not ready", logAllow))
-		return request.allowWithReason("pod is not ready")
+		return request.allowWithWarning("pod is not ready")
 	}
 
-	// rollout-group label is needed to find a matching custom resource which is used for configuration
-	if rolloutGroup, found := pod.Labels[config.RolloutGroupLabelKey]; !found || len(rolloutGroup) == 0 {
-		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to find required label on pod", logAllow), "label", config.RolloutGroupLabelKey)
-		return request.allowWithReason("unable to find label on pod")
+	pdbConfig, err := pdbCache.Find(pod)
+	if err != nil {
+		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %v", logDeny, err))
+		return request.denyWithReason(err.Error(), httpStatusInternalError)
 	}
-
-	// ie ingester
-	request.log.SetSpanAndLogTag(config.RolloutGroupLabelKey, pod.Labels[config.RolloutGroupLabelKey])
 
 	// get the StatefulSet who manages this pod
-	if sts, err = request.clients.owner(pod); err != nil {
+	if sts, err = request.client.owner(pod); err != nil {
 		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to find pod owner", logAllow), "err", err)
-		return request.allowWithReason(err.Error())
+		return request.allowWithWarning(err.Error())
 	}
 
 	// ie ingester-zone-a
 	request.log.SetSpanAndLogTag("owner", sts.Name)
 
-	// RolloutGroupLabelKey --> ingester
-	pdbConfig, err := config.GetCustomResourceConfig(request.clients.ctx, request.req.Request.Namespace, pod.Labels[config.RolloutGroupLabelKey], request.clients.dynamicClient, request.log)
-	if err != nil {
-		return request.allowWithReason(err.Error())
-	}
+	lock := findLock(pdbConfig.Name())
+	lock.Lock()
+	defer lock.Unlock()
 
 	// the number of allowed unavailable pods in other zones.
 	maxUnavailable := pdbConfig.MaxUnavailablePods(sts)
 	if maxUnavailable == 0 {
 		level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - max unavailable = 0", logDeny))
-		return request.denyWithReason("max unavailable = 0")
+		return request.denyWithReason("max unavailable = 0", httpStatusPdbDisabled)
 	}
 
 	// Find the other StatefulSets which span all zones.
 	// Assumption - each StatefulSet manages all the pods for a single zone. This list of StatefulSets covers all zones.
 	// During a migration it may be possible to break this assumption, but during a migration the maxUnavailable will be set to 0 and the eviction request will be denied.
-	otherStatefulSets, err := request.clients.findRelatedStatefulSets(sts, pdbConfig.StsSelector())
+	otherStatefulSets, err := request.client.findRelatedStatefulSets(sts, pdbConfig.StsSelector())
 	if err != nil || otherStatefulSets == nil || len(otherStatefulSets.Items) <= 1 {
 		level.Error(request.log).Log(logMsg, "unable to find related stateful sets - continuing with single zone")
 		otherStatefulSets = &appsv1.StatefulSetList{Items: []appsv1.StatefulSet{*sts}}
@@ -213,7 +279,7 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	// this is the partition of the pod being evicted - for classic zones the partition will be an empty string
 	partition, err := pdbConfig.PodPartition(pod)
 	if err != nil {
-		return request.denyWithReason(err.Error())
+		return request.denyWithReason(err.Error(), httpStatusMisconfiguration)
 	}
 
 	// include the partition we are considering
@@ -233,7 +299,7 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 		// partition mode - the pod tallies are applied to all pods in other zones which relate to this partition
 		pdb = makePdbValidatorPartition(sts, partition, len(otherStatefulSets.Items), pdbConfig, request.log)
 	} else {
-		// zone mode - each zone is individually evaluated against the pdb
+		// zone mode - each zone is individually evaluated against the zpdb
 		pdb = makePdbValidatorZones(sts, len(otherStatefulSets.Items))
 	}
 
@@ -244,10 +310,10 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 			continue
 		}
 
-		result, err := request.clients.podsNotRunningAndReady(&otherSts, pod, pdb.considerPod)
+		result, err := request.client.podsNotRunningAndReady(&otherSts, pod, pdb.considerPod, podEvictionCache)
 		if err != nil {
 			level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to determine pod status in related StatefulSet", logDeny), "sts", otherSts.Name)
-			return request.denyWithReason("unable to determine pod status in related StatefulSet")
+			return request.denyWithReason("unable to determine pod status in related StatefulSet", httpStatusInternalError)
 		}
 
 		accumulatedResult.tested += result.tested
@@ -256,11 +322,16 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	}
 
 	if err = pdb.validate(accumulatedResult, maxUnavailable); err != nil {
-		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - pdb exceeded", logDeny), "err", err)
-		return request.denyWithReason(err.Error())
+		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - zpdb exceeded", logDeny), "err", err)
+		return request.denyWithReason(err.Error(), httpStatusPdbExceeded)
 	}
 
-	return request.allowWithReason(pdb.successMessage())
+	// mark the pod as evicted
+	// this entry will self expire and will be removed when a pod state change is observed
+	podEvictionCache.Evict(pod)
+
+	level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logAllow, pdb.successMessage()))
+	return request.allow()
 }
 
 // makePdbValidatorSingleZone returns a pdbValidator which evaluates the PDB for a single zone / StatefulSet
@@ -278,7 +349,7 @@ func makePdbValidatorSingleZone(sts *appsv1.StatefulSet) *pdbValidator {
 			return nil
 		},
 		successMessage: func() string {
-			return fmt.Sprintf("pdb met in single zone %s", sts.Name)
+			return fmt.Sprintf("zpdb met in single zone %s", sts.Name)
 		},
 		considerPod: partitionMatcher{
 			same: func(pd *corev1.Pod) bool {
@@ -289,7 +360,7 @@ func makePdbValidatorSingleZone(sts *appsv1.StatefulSet) *pdbValidator {
 	return &pdb
 }
 
-func makePdbValidatorPartition(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config.PdbConfig, log *spanlogger.SpanLogger) *pdbValidator {
+func makePdbValidatorPartition(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *zpdb.ZpdbConfig, log *spanlogger.SpanLogger) *pdbValidator {
 
 	// partition mode - we apply the unavailable tally across all zones which relate to this partition
 	pdb := pdbValidator{
@@ -303,7 +374,7 @@ func makePdbValidatorPartition(sts *appsv1.StatefulSet, partition string, zones 
 			return nil
 		},
 		successMessage: func() string {
-			return fmt.Sprintf("pdb met for partition %s across %d zones", partition, zones)
+			return fmt.Sprintf("zpdb met for partition %s across %d zones", partition, zones)
 		},
 		considerPod: partitionMatcher{
 			same: func(pd *corev1.Pod) bool {
@@ -334,7 +405,7 @@ func makePdbValidatorZones(sts *appsv1.StatefulSet, zones int) *pdbValidator {
 			return nil
 		},
 		successMessage: func() string {
-			return fmt.Sprintf("pdb met across %d zones", zones)
+			return fmt.Sprintf("zpdb met across %d zones", zones)
 		},
 		considerPod: partitionMatcher{
 			same: func(pd *corev1.Pod) bool {

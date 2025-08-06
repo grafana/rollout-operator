@@ -14,18 +14,20 @@ kubectl --namespace=rollout-operator-development port-forward svc/rollout-operat
 ```
 * Port forward to the Jaeger UI: `kubectl --namespace=rollout-operator-development port-forward svc/jaeger 16686:16686`
 
-You'll then be able to access the rollout operator at `http://localhost:8080`, and the Jaeger tracing UI at `http://localhost:16686`.
+You'll then be able to access the rollout operator at `http://localhost:8080`, access the rollout operator webhooks at `http://localhost:8443` and the Jaeger tracing UI at `http://localhost:16686`.
 
 You can use the StatefulSets to exercise the operator across a multi-zone `test-app` environment.
 
-# ZoneAwarePodDisruptionBudget (PDZB)
+# ZoneAwarePodDisruptionBudget (ZPDZ)
 
 Included is a `ZoneAwarePodDisruptionBudget` which can be used to enforce a multi-zone `PDB`.
+
+By default this will be applied to the `test-app` Pods and StatefulSets.
 
 To disable this functionality from the `test-app`;
 
 ```text
-kubectl delete -f rollout-operator-pod-disruption-zone-budget.yaml
+kubectl delete -f rollout-operator-zone-aware-pod-disruption-budget.yaml
 ```
 
 # Minikube & Docker Desktop
@@ -48,7 +50,7 @@ make build-image
 
 # Useful commands
 
-The following are useful commands when running tests with the `rollout-operator` and the `PodDisruptionZoneBudget`
+The following are useful commands when running tests with the `rollout-operator` and the `ZoneAwarePodDisruptionBudget`
 
 List custom resource definitions;
 ```
@@ -81,7 +83,24 @@ Tail logs for the rollout-operator;
 kubectl logs -f `kubectl get pods -n rollout-operator-development | grep rollout-operator | awk '{print $1}'` -n rollout-operator-development
 ```
 
-Test a pod eviction;
+Test the pod eviction and ZPDB;
+```
+# watch the pod status
+while true; do kubectl get pods -n rollout-operator-development; sleep 1; clear; done
+```
+
+```
+# in another shell - issue a drain for all pods
+kubectl drain --pod-selector rollout-group=test-app minikube &; sleep 5; kubectl uncordon minikube
+```
+
+Apply an updated ZPDB
+```
+# make changes in rollout-operator-zone-aware-pod-disruption-budget.yaml
+kubectl apply -f rollout-operator-zone-aware-pod-disruption-budget.yaml
+```
+
+Test the pod eviction webhook manually;
 ```
 curl --insecure -X POST "https://127.0.0.1:8443/admission/pod-eviction" \
   -H "Content-Type: application/json" \
@@ -107,9 +126,3 @@ curl --insecure -X POST "https://127.0.0.1:8443/admission/pod-eviction" \
     }
   }'
 ```
-
-Test a denied pod eviction;
-```
-kubectl delete pod test-app-zone-b-0 -n rollout-operator-development; curl <...as above...>
-```
-

@@ -10,4 +10,4 @@ spec:
   selector:
     matchLabels:
       rollout-group: test-app
-  # podNamePartitionRegex: "[a-z\\-]+-zone-[a-z]-([0-9]+)"
+  # podNamePartitionRegex: "[a-z\\-]+-zone-[a-z]-([0-9]+),$1"
