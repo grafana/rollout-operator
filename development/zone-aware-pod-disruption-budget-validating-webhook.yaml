@@ -1,12 +1,12 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: zpdb-validation-rollout-operator
+  name: zpdb-validation-rollout-operator-development
   labels:
     grafana.com/inject-rollout-operator-ca: "true"
     grafana.com/namespace: rollout-operator-development
 webhooks:
-- name: zpdb-validation.rollout-operator.grafana.com
+- name: zpdb-validation-rollout-operator-development.grafana.com
   clientConfig:
     service:
       namespace: rollout-operator-development
@@ -14,10 +14,15 @@ webhooks:
       path: /admission/zpdb-validation
       port: 443
   rules:
-  - operations: ["CREATE", "UPDATE"]
-    apiGroups: ["rollout-operator.grafana.com"]
-    apiVersions: ["v1"]
-    resources: ["zoneawarepoddisruptionbudgets"] 
+  - operations:
+      - CREATE
+      - UPDATE
+    apiGroups:
+      - rollout-operator-development.grafana.com
+    apiVersions:
+      - v1
+    resources:
+      - zoneawarepoddisruptionbudgets
     scope: Namespaced
   admissionReviewVersions: ["v1"]
   namespaceSelector:
