@@ -53,7 +53,7 @@ func NewPdbObserver(kubeClient kubernetes.Interface, dynamic dynamic.Interface, 
 	podsInformer := podsFactory.Core().V1().Pods()
 
 	gvr := schema.GroupVersionResource{
-		Group:    config.ZoneAwarePodDisruptionBudgetsSpecGroup,
+		Group:    namespace + ".grafana.com",
 		Version:  config.ZoneAwarePodDisruptionBudgetsVersion,
 		Resource: config.ZoneAwarePodDisruptionBudgetsNamePlural,
 	}

@@ -1,4 +1,4 @@
-apiVersion: rollout-operator.grafana.com/v1
+apiVersion: rollout-operator-development.grafana.com/v1
 kind: ZoneAwarePodDisruptionBudget
 metadata:
   name: test-app-rollout
