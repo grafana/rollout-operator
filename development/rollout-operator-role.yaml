@@ -29,7 +29,7 @@ rules:
     verbs:
       - update
   - apiGroups:
-      - rollout-operator-development.grafana.com
+      - rollout-operator.grafana.com
     resources:
       - zoneawarepoddisruptionbudgets
     verbs:
