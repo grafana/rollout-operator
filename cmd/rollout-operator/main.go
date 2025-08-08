@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"flag"
 	"fmt"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"net/http"
 	_ "net/http/pprof" // anonymous import to get the pprof handler registered
 	"os"
@@ -276,23 +277,18 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 		if !cfg.serverSelfSignedCert {
 			fatal(errors.New("self-signed certificate should be enabled to update the CA bundle in the webhook configurations"))
 		}
-
-		// This operation will be repeated in the WebhookObserver when it starts up and finds existing webhooks.
-		// These operations are left here to fail the rollout-operator starting if these can not be applied at startup
-		check(tlscert.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
-		check(tlscert.PatchCABundleOnMutatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
+		
+		webHookListener := &tlscert.WebhookConfigurationListener{
+			OnValidatingWebhookConfiguration: func(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) error {
+				return tlscert.PatchCABundleOnValidatingWebhooks(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
+			},
+			OnMutatingWebhookConfiguration: func(webhook *admissionregistrationv1.MutatingWebhookConfiguration) error {
+				return tlscert.PatchCABundleOnMutatingWebhooks(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
+			},
+		}
 
 		// Start monitoring for validating webhook configurations and patch if required
-		check(vwo.Init(func() error {
-			logger.Log("msg", "attempting to patch CA bundles for validating webhook")
-			if err := tlscert.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA); err != nil {
-				return errors.Wrap(err, "failed to patch CA bundles for validating webhook")
-			}
-			if err := tlscert.PatchCABundleOnMutatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA); err != nil {
-				return errors.Wrap(err, "failed to patch CA bundles for mutating webhook")
-			}
-			return nil
-		}))
+		check(vwo.Init(webHookListener))
 	}
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
