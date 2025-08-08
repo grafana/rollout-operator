@@ -206,11 +206,15 @@ func main() {
 	dynamicClient, err := dynamic.NewForConfigAndClient(kubeConfig, httpClient)
 	check(errors.Wrap(err, "failed to init dynamicClient"))
 
+	// watches for ZoneAwarePodDisruptionBudget configurations being applied and also monitors changing pods
 	p := zpdb.NewPdbObserver(kubeClient, dynamicClient, cfg.kubeNamespace, logger)
 	check(errors.Wrap(p.Init(), "failed to init zpdb observer"))
 
+	// watches for validating webhooks being added - used in the TLS server init
+	v := tlscert.NewWebhookObserver(kubeClient, cfg.kubeNamespace, logger)
+
 	// Start TLS server if enabled.
-	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, p.PdbCache(), p.PodEvictionCache())
+	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, p.PdbCache(), p.PodEvictionCache(), v)
 
 	// Init the controller
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
@@ -221,6 +225,7 @@ func main() {
 		waitForSignalOrRestart(logger, restart)
 		c.Stop()
 		p.Stop()
+		v.Stop()
 	}()
 
 	// The operator is ready once the controller successfully initialised.
@@ -241,7 +246,7 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, pdbCache *zpdb.ZpdbCache, podEvictionCache *zpdb.PodEvictionCache) {
+func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, pdbCache *zpdb.ZpdbCache, podEvictionCache *zpdb.PodEvictionCache, vwo *tlscert.WebhookObserver) {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
 		return
@@ -272,9 +277,22 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 			fatal(errors.New("self-signed certificate should be enabled to update the CA bundle in the webhook configurations"))
 		}
 
-		// TODO watch webhook configurations instead of doing one-off.
+		// This operation will be repeated in the WebhookObserver when it starts up and finds existing webhooks.
+		// These operations are left here to fail the rollout-operator starting if these can not be applied at startup
 		check(tlscert.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
 		check(tlscert.PatchCABundleOnMutatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
+
+		// Start monitoring for validating webhook configurations and patch if required
+		check(vwo.Init(func() error {
+			logger.Log("msg", "attempting to patch CA bundles for validating webhook")
+			if err := tlscert.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA); err != nil {
+				return errors.Wrap(err, "failed to patch CA bundles for validating webhook")
+			}
+			if err := tlscert.PatchCABundleOnMutatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA); err != nil {
+				return errors.Wrap(err, "failed to patch CA bundles for mutating webhook")
+			}
+			return nil
+		}))
 	}
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
