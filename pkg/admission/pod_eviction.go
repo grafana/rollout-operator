@@ -241,10 +241,15 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 		return request.allowWithWarning("pod is not ready")
 	}
 
-	pdbConfig, err := pdbCache.Find(pod)
+	pdbConfig, deny, err := pdbCache.Find(pod)
 	if err != nil {
-		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %v", logDeny, err))
-		return request.denyWithReason(err.Error(), httpStatusInternalError)
+		if deny {
+			level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %v", logDeny, err))
+			return request.denyWithReason(err.Error(), httpStatusMisconfiguration)
+		} else {
+			level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - %v", logAllow, err))
+			return request.allowWithWarning(err.Error())
+		}
 	}
 
 	// get the StatefulSet who manages this pod
