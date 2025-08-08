@@ -189,7 +189,7 @@ func TestPodEviction_UnableToRetrievePdbConfig(t *testing.T) {
 	pod := newPod(testPodZoneA0, sts)
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil, pod, sts)
-	testCtx.assertDenyResponse(t, "no pod disruption budgets found for pod", 500)
+	testCtx.assertAllowResponseWithWarning(t, "no pod disruption budgets found for pod")
 }
 
 func TestPodEviction_MaxUnavailableEq0(t *testing.T) {

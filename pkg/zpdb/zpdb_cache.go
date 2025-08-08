@@ -61,20 +61,20 @@ func (c *ZpdbCache) Delete(generation int64, name string) bool {
 
 // Find returns a PdbConfig for a given pod, based on the config selector matching.
 // Note - to match the native Kubernetes eviction controller an error is generated if multiple selectors match a given pod
-func (c *ZpdbCache) Find(pod *corev1.Pod) (*ZpdbConfig, error) {
+func (c *ZpdbCache) Find(pod *corev1.Pod) (*ZpdbConfig, bool, error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	var pdbMatch *ZpdbConfig
 	for _, pdb := range c.cache {
 		if pdb.MatchesPod(pod) {
 			if pdbMatch != nil {
-				return nil, errors.New("multiple pod disruption budgets found for pod")
+				return nil, true, errors.New("multiple pod disruption budgets found for pod")
 			}
 			pdbMatch = pdb
 		}
 	}
 	if pdbMatch == nil {
-		return nil, errors.New("no pod disruption budgets found for pod")
+		return nil, false, errors.New("no pod disruption budgets found for pod")
 	}
-	return pdbMatch, nil
+	return pdbMatch, false, nil
 }
