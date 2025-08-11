@@ -430,7 +430,7 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 	require.Eventually(t, func() bool {
 		ar = buildAdmissionRequest(rolloutGroupIngester, ingesterZoneB)
 		return zt.prepareDownscale(context.Background(), logger, ar, api, f).Allowed
-	}, 5*time.Second, time.Millisecond)
+	}, 5*time.Second, 50*time.Millisecond)
 
 	// index-gateway-zone-a and ingester-zone-(a|b) should have been updated
 	require.NoError(t, zt.loadZones(context.Background(), nil))
