@@ -46,6 +46,7 @@ const (
 	// RolloutDelayedDownscalePrepareUrlAnnotationKey is a full URL to prepare-downscale endpoint. Hostname will be replaced with pod's fully qualified domain name.
 	RolloutDelayedDownscalePrepareUrlAnnotationKey = "grafana.com/rollout-prepare-delayed-downscale-url"
 
+	ZoneAwarePodDisruptionBudgetName        = "ZoneAwarePodDisruptionBudget"
 	ZoneAwarePodDisruptionBudgetsNamePlural = "zoneawarepoddisruptionbudgets"
 	ZoneAwarePodDisruptionBudgetsSpecGroup  = "rollout-operator.grafana.com"
 	ZoneAwarePodDisruptionBudgetsVersion    = "v1"

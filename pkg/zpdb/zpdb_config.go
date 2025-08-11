@@ -11,11 +11,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 const (
 	// strings needed to find the custom resource - keep as const as easier to change if we update the custom resource definition
-	pdbCustomResourceKind = "ZoneAwarePodDisruptionBudget"
+	pdbCustomResourceKind = config.ZoneAwarePodDisruptionBudgetName
 
 	// default values
 	defaultMaxUnavailable = 1

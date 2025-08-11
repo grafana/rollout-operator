@@ -38,8 +38,9 @@ func TestSelectorMatching(t *testing.T) {
 	require.Equal(t, pdbName, pdb.Name())
 
 	pod = newPodCacheTest(podName, "no-match")
-	_, err = cache.Find(pod)
-	require.ErrorContains(t, err, "no pod disruption budgets found for pod")
+	pdb, err = cache.Find(pod)
+	require.NoError(t, err)
+	require.Nil(t, pdb)
 }
 
 // TestMultipleSelectorMatches confirms that multiple matching ZpdbConfigs for a pod causes an error
@@ -54,7 +55,7 @@ func TestMultipleSelectorMatches(t *testing.T) {
 
 	pod := newPodCacheTest("test-1", rolloutGroup)
 	_, err = cache.Find(pod)
-	require.ErrorContains(t, err, "multiple pod disruption budgets found for pod")
+	require.ErrorContains(t, err, "multiple zoned pod disruption budgets found for pod")
 }
 
 // TestGenerationChecks confirms that stale objects are ignored

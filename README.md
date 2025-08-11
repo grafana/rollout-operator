@@ -132,6 +132,15 @@ Prometheus metrics endpoint.
 
 Offers a `ValidatingAdmissionWebhook` that rejects the requests that decrease the number of replicas in objects labeled as `grafana.com/no-downscale: true`. See [Webhooks](#webhooks) section below. 
 
+#### `/pods/eviction`
+
+Offers a `ValidatingAdmissionWebhook` which can apply a `ZoneAwarePodDisruptionBudget` to administer voluntary pod evictions. See [ZoneAwarePodDisruptionBudget](#zoneawarepoddisruptionbudget-zpdb) section below.
+
+#### `/admission/zpdb-validation`
+
+Offers a `ValidatingAdmissionWebhook` to validate `ZoneAwarePodDisruptionBudget` configuration files and will reject any misconfigured files.
+
+
 ### RBAC
 
 When running the `rollout-operator` as a pod, it needs a Role with at least the following privileges:
@@ -163,6 +172,14 @@ rules:
   - statefulsets/status
   verbs:
   - update
+- apiGroups:
+  - rollout-operator.grafana.com
+  resources:
+  - zoneawarepoddisruptionbudgets
+  verbs:
+  - get
+  - list
+  - watch
 ```
 
 (Please see [Webhooks](#webhooks) section below for extra roles required when using the HTTPS server for webhooks.)
@@ -411,6 +428,26 @@ subjects:
     namespace: default
 ```
 
+And:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rollout-operator-webhook-clusterrole
+rules:
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - validatingwebhookconfigurations
+      - mutatingwebhookconfigurations
+    verbs:
+      - list
+      - patch
+      - watch
+
+```
+
 #### Certificate expiration
 
 Whenever the certificate expires, the `rollout-operator` will detect it and will restart, which will trigger the self-signed certificate generation again if it's configured.
@@ -420,37 +457,37 @@ The default expiration for the self-signed certificate is 1 year and it can be c
 
 A custom `PodDisruptionBudget` is available for use with the `rollout-operator`. 
 
-This is for use with `StatefulSets` which span multiple logical zones and allows for a `maxUnavailable` PDB is to be evaluated against the pods in other zones.
+This is for use with `StatefulSets` which span multiple logical zones and allows for the budget to be evaluated against the pods in other zones.
 
-Unlike a regular `PodDisruptionBudget` which evaluates across all pods, the `ZoneAwarePodDisruptionBudget` evaluates against unavailable pod counts in other zones.
+Unlike a regular `PodDisruptionBudget` which evaluates across all pods, the `ZoneAwarePodDisruptionBudget` evaluates against unavailable pod counts within a zone, and only allows an eviction if no other zone is disrupted.
 
 This allows an operator to perform maintenance on a single zone whilst ensuring sufficient pod availability in other zones.
 
-Consider the following topology where the `PDZB` has `maxUnavailability=1`;
+Consider the following topology where the `PDZB` has `maxUnavailability` is set to 1:
 
 * StatefulSet `ingester-zone-a` manages pods `ingester-zone-a-0` and `ingester-zone-a-1`
 * StatefulSet `ingester-zone-b` manages pods `ingester-zone-b-0` and `ingester-zone-b-1`
 * StatefulSet `ingester-zone-c` manages pods `ingester-zone-c-0` and `ingester-zone-c-1`
 
-When a pod eviction request is received, the availability of the pods in the other zones are considered.
+When a pod eviction request is received, the availability of the pods in the other zones are considered, as well as the availability in the zone of the pod being evicted.
 
 If `ingester-zone-a-0` is to be evicted, it will be allowed if there are no disruptions in either zone `b` or zone `c`.
 
-If `ingester-zone-a-1` has failed and `ingester-zone-a-0` is to be evicted, it will be allowed if there are no disruptions in either zone `b` or zone `c`.
+If `ingester-zone-a-1` has failed and `ingester-zone-a-0` is to be evicted, this will not be allowed since `maxUnavailability` of 1 is only allowed within this zone.
 
-*The already disrupted zone can be further disrupted as long as the other zones meet the unavailability criteria.*
+If the `maxUnavailability` is 2, `ingester-zone-a-0` eviction would be granted since `zone-a` can have 2 unavailable nodes, and there are no disruptions in zone `b` or zone `c`.
 
-If `ingester-zone-a-0` is to be evicted, and `ingester-zone-b-0` has failed, the eviction request will be denied.
+If `ingester-zone-a-0` is to be evicted, and `ingester-zone-b-0` has failed, the eviction request will be denied regardless of whether `maxUnavailability` is set to 1 or higher due to another zone already in disruption. 
 
-*A pod eviction is only allowed if the number of unavailable pods across the other zones is less than the maxUnavailability value.*
+*A pod eviction is only allowed if the number of unavailable pods is within the maximum unavailability threshold for the zone and no other zone has a disruption.*
 
 ## Partition awareness
 
-The `ZPDB` can be configured for partition awareness. This is intended for multi-zone `ingesters` running with `ingest_storage_enabled=true`.
+The `ZPDB` can be configured for partition awareness. This is intended for workloads like Mimir's ingesters running with ingest storage, where we can tolerate some unavailability in different zones, provided each partition has sufficient availability.
 
-In this configuration, the `PDB` determines the `partition` for a pod being evicted, and considers this eviction against the unavailable counts for ALL pods which serve this partition. 
+In this configuration, the `ZPDB` determines the partition for a pod being evicted, and considers this eviction against the unavailable counts for ALL pods which serve this partition.
 
-*A pod eviction is only allowed if the number of unavailable pods serving a specific partition is less than the maxUnavailability value.*
+*A pod eviction is only allowed if the number of unavailable pods serving a specific partition is less than the `maxUnavailable` value.*
 
 Using the same topology as the previous section where the `ZPDB` has `maxUnavailability=1`;
 
@@ -462,30 +499,15 @@ If `ingester-zone-b-0` has failed and `ingester-zone-a-0` is to be evicted, it w
 
 ### Setup
 
-The `ZoneAwarePodDisruptionBudget` is provided via a `ValidatingWebhookConfiguration` served from the `rollout-operator`. 
+The `ZoneAwarePodDisruptionBudget` is provided as a custom resource.
 
-A pod eviction webhook is registered for approving voluntary pod eviction requests.
-
-The pod eviction web hook is exposed via the `/pods/eviction` endpoint.
+A pod eviction webhook is registered for approving voluntary pod eviction requests, and a validating webhook is registered for validating `ZPDB` objects.
 
 The following is required to enable the `ZoneAwarePodDisruptionBudget`;
 
 * a custom resource definition for the `ZoneAwarePodDisruptionBudget` kind - a sample is provided in [development](./development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml)
 * a `ValidatingWebhookConfiguration` for registering the `rollout-operator` for pod evictions - a sample is provided in [development](./development/eviction-webhook.yaml)
-* an update to the `rollout-operator-webhook-role` role - see below
 * a `ZoneAwarePodDisruptionBudget` kind for each set of `StatefulSets` - see below
-
-Update to `rollout-operator-webhook-role`;
-```text
-- apiGroups:
-      - rollout-operator.grafana.com
-    resources:
-      - zoneawarepoddisruptionbudgets
-    verbs:
-      - get
-      - list
-      - watch
-```
 
 Example `ZoneAwarePodDisruptionBudget`;
 
@@ -516,8 +538,8 @@ Functionality includes the ability to;
 * set the selector to match the applicable Pods and StatefulSets
 * set the regular expression to determine a partition name from a pod name (if using partition awareness)
 
-Note - the max unavailable can be set to 0. In this case no voluntary evictions in any zone will be allowed.
+Note - `maxUnavailable` can be set to 0. In this case no voluntary evictions in any zone will be allowed.
 
 Note - if the partition regular expression requires a grouping directive this can be set as a suffix to the regex. For instance `ingester(-foo)?-zone-[a-z]-([0-9]+),$2`
 
-Note - a validating webhook configuration is provided in [development](./development/zone-aware-pod-disruption-budget-validating-webhook.yaml) which allows the `rollout-operator` to verify a `ZoneAwarePodDisruptionBudget` configuration being created or updated. This will ensure that no in-valid configuration can be applied.
+Note - a validating webhook configuration is provided in [development](./development/zone-aware-pod-disruption-budget-validating-webhook.yaml) which allows the `rollout-operator` to verify a `ZoneAwarePodDisruptionBudget` configuration being created or updated. This will ensure that no invalid configuration can be applied

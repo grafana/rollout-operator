@@ -1,6 +1,7 @@
 package zpdb
 
 import (
+	"reflect"
 	"time"
 
 	"github.com/go-kit/log"
@@ -61,7 +62,7 @@ func NewPdbObserver(kubeClient kubernetes.Interface, dynamic dynamic.Interface, 
 		dynamic,
 		informerSyncInterval,
 		namespace,
-		nil, // tweakListOptionsFunc
+		nil,
 	)
 	pdbInformer := pdbFactory.ForResource(gvr)
 
@@ -124,9 +125,11 @@ func (c *ZpdbObserver) Init() error {
 
 func (c *ZpdbObserver) invalidatePodEvictionCache(obj interface{}) {
 	pod, isPod := obj.(*corev1.Pod)
-	if isPod {
-		(*c.podEvictCache).Delete(pod)
+	if !isPod {
+		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
+		return
 	}
+	(*c.podEvictCache).Delete(pod)
 }
 
 func (c *ZpdbObserver) onPodAdded(obj interface{}) {
@@ -143,15 +146,18 @@ func (c *ZpdbObserver) onPodDeleted(obj interface{}) {
 
 func (c *ZpdbObserver) onPdbAdded(obj interface{}) {
 	unstructuredObj, isUnstructured := obj.(*unstructured.Unstructured)
-	if isUnstructured {
-		updated, err := c.pdbCache.AddOrUpdateRaw(unstructuredObj)
-		if err != nil {
-			level.Error(c.logger).Log("msg", "error parsing zpdb configuration", "name", unstructuredObj.GetName(), "err", err)
-		} else if updated {
-			level.Info(c.logger).Log("msg", "zpdb configuration updated", "name", unstructuredObj.GetName())
-		} else {
-			level.Info(c.logger).Log("msg", "zpdb configuration update ignored", "name", unstructuredObj.GetName())
-		}
+	if !isUnstructured {
+		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
+		return
+	}
+
+	updated, err := c.pdbCache.AddOrUpdateRaw(unstructuredObj)
+	if err != nil {
+		level.Error(c.logger).Log("msg", "error parsing zpdb configuration", "name", unstructuredObj.GetName(), "err", err)
+	} else if updated {
+		level.Info(c.logger).Log("msg", "zpdb configuration updated", "name", unstructuredObj.GetName())
+	} else {
+		level.Info(c.logger).Log("msg", "zpdb configuration update ignored", "name", unstructuredObj.GetName())
 	}
 }
 
@@ -159,7 +165,12 @@ func (c *ZpdbObserver) onPdbUpdated(old, new interface{}) {
 	oldCfg, oldIsUnstructured := old.(*unstructured.Unstructured)
 	newCfg, newIsUnstructured := new.(*unstructured.Unstructured)
 
-	if oldIsUnstructured && newIsUnstructured && oldCfg.GetGeneration() != newCfg.GetGeneration() {
+	if !oldIsUnstructured || !newIsUnstructured {
+		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "old_type", reflect.TypeOf(old), "new_type", reflect.TypeOf(new))
+		return
+	}
+
+	if oldCfg.GetGeneration() != newCfg.GetGeneration() {
 		updated, err := c.pdbCache.AddOrUpdateRaw(newCfg)
 		if err != nil {
 			level.Error(c.logger).Log("msg", "zpdb configuration error", "name", newCfg.GetName(), "err", err)
@@ -173,13 +184,15 @@ func (c *ZpdbObserver) onPdbUpdated(old, new interface{}) {
 
 func (c *ZpdbObserver) onPdbDeleted(obj interface{}) {
 	oldCfg, oldIsUnstructured := obj.(*unstructured.Unstructured)
-	if oldIsUnstructured {
-		success := c.pdbCache.Delete(oldCfg.GetGeneration(), oldCfg.GetName())
-		if success {
-			level.Info(c.logger).Log("msg", "zpdb configuration deleted", "old", oldCfg.GetName())
-		} else {
-			level.Info(c.logger).Log("msg", "zpdb configuration delete ignored", "old", oldCfg.GetName())
-		}
+	if !oldIsUnstructured {
+		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
+		return
+	}
+	success := c.pdbCache.Delete(oldCfg.GetGeneration(), oldCfg.GetName())
+	if success {
+		level.Info(c.logger).Log("msg", "zpdb configuration deleted", "old", oldCfg.GetName())
+	} else {
+		level.Info(c.logger).Log("msg", "zpdb configuration delete ignored", "old", oldCfg.GetName())
 	}
 }
 

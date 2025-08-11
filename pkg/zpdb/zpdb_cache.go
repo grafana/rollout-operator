@@ -16,13 +16,16 @@ type ZpdbCache struct {
 
 func NewZpdbCache() *ZpdbCache {
 	return &ZpdbCache{
-		cache: make(map[string]*ZpdbConfig, 5),
+		// no initial size given as we are not expecting many entries
+		cache: map[string]*ZpdbConfig{},
 		lock:  sync.RWMutex{},
 	}
 }
 
-// AddOrUpdateRaw attempts to parse the given unstructured object into a ZpdbConfig and stores it in this cache
-// An error is returned if the given object can not be parsed into a valid config
+// AddOrUpdateRaw attempts to parse the given unstructured object into a ZpdbConfig and stores it in this cache.
+// An error is returned if the given object can not be parsed into a valid config.
+// The bool response indicates if the config was accepted into the cache.
+// It will be false if this given object is an older version of what is already in the cache.
 func (c *ZpdbCache) AddOrUpdateRaw(obj *unstructured.Unstructured) (bool, error) {
 	if pdbConfig, err := ParseAndValidate(obj); err != nil {
 		return false, err
@@ -60,21 +63,19 @@ func (c *ZpdbCache) Delete(generation int64, name string) bool {
 }
 
 // Find returns a PdbConfig for a given pod, based on the config selector matching.
-// Note - to match the native Kubernetes eviction controller an error is generated if multiple selectors match a given pod
-func (c *ZpdbCache) Find(pod *corev1.Pod) (*ZpdbConfig, bool, error) {
+// Note - to match the native Kubernetes eviction controller an error is generated if multiple selectors match a given pod.
+// Note - the returned ZpdbConfig may be nil if no matches were found.
+func (c *ZpdbCache) Find(pod *corev1.Pod) (*ZpdbConfig, error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	var pdbMatch *ZpdbConfig
 	for _, pdb := range c.cache {
 		if pdb.MatchesPod(pod) {
 			if pdbMatch != nil {
-				return nil, true, errors.New("multiple pod disruption budgets found for pod")
+				return nil, errors.New("multiple zoned pod disruption budgets found for pod")
 			}
 			pdbMatch = pdb
 		}
 	}
-	if pdbMatch == nil {
-		return nil, false, errors.New("no pod disruption budgets found for pod")
-	}
-	return pdbMatch, false, nil
+	return pdbMatch, nil
 }

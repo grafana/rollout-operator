@@ -28,9 +28,9 @@ func NewPodEvictionCache() *PodEvictionCache {
 	}
 }
 
-// Evict mark a pod as having been evicted.
+// RecordEviction mark a pod as having been evicted.
 // The entry will remain valid for either the expiry period or until the pod entry is deleted.
-func (c *PodEvictionCache) Evict(pod *corev1.Pod) {
+func (c *PodEvictionCache) RecordEviction(pod *corev1.Pod) {
 	// note that no additional concurrency checks are needed.
 	// multiple Evict() calls for the same pod are unlikely, and if the expiresAt does not need to be precise.
 	// the pod is expected to be deleted shortly after being stored here.
@@ -39,8 +39,8 @@ func (c *PodEvictionCache) Evict(pod *corev1.Pod) {
 	c.expiry.Store(pod.Name, expiresAt)
 }
 
-// Evicted returns true if this pod is in the eviction zpdb
-func (c *PodEvictionCache) Evicted(pod *corev1.Pod) bool {
+// HasPendingEviction returns true if this pod is in the eviction zpdb
+func (c *PodEvictionCache) HasPendingEviction(pod *corev1.Pod) bool {
 	// note that we do not clean up expired entries, as the assumption is the entry will be deleted shortly after being stored here
 	expiresAt, exists := c.expiry.Load(pod.Name)
 	return exists && time.Now().Before(expiresAt.(time.Time))
