@@ -426,9 +426,11 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 
 	// finishing the in progress downscaling request for rollout group ingester should let new requests to go through
 	close(ingesterZoneAPrepDownscaleDone)
-	ar = buildAdmissionRequest(rolloutGroupIngester, ingesterZoneB)
-	admissionResponse = zt.prepareDownscale(context.Background(), logger, ar, api, f)
-	require.True(t, admissionResponse.Allowed)
+
+	require.Eventually(t, func() bool {
+		ar = buildAdmissionRequest(rolloutGroupIngester, ingesterZoneB)
+		return zt.prepareDownscale(context.Background(), logger, ar, api, f).Allowed
+	}, 5*time.Second, time.Millisecond)
 
 	// index-gateway-zone-a and ingester-zone-(a|b) should have been updated
 	require.NoError(t, zt.loadZones(context.Background(), nil))
