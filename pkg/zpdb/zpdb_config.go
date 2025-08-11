@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"regexp"
-	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +25,7 @@ const (
 	fieldMaxUnavailable           = "maxUnavailable"
 	fieldMaxUnavailablePercentage = "maxUnavailablePercentage"
 	fieldPodNamePartitionRegex    = "podNamePartitionRegex"
+	fieldPodNameRegexGroup        = "podNameRegexGroup"
 )
 
 // A ZpdbConfig holds the configuration of a ZoneAwarePodDisruptionBudget custom resource.
@@ -112,41 +112,47 @@ func (c *ZpdbConfig) PodPartition(pod *corev1.Pod) (string, error) {
 // The given string can have a subexpression grouping for the regular expression. This is defined by a ",$<group>" suffix.
 // An error is returned if the compile fails or the subexpression groupings are not valid.
 // A nil is returned for the Regexp if there is no string in the map.
-func valueAsRegex(config map[string]interface{}, field string) (*regexp.Regexp, int, error) {
-	if val, found := config[field]; found && len(val.(string)) > 0 {
-		groupingIndex := 1
-		grpRgx := regexp.MustCompile(`^.+(,\$([0-9]+))$`)
-		grpMatch := grpRgx.FindStringSubmatch(val.(string))
-		grpSet := false
-		if len(grpMatch) == 3 {
-			groupingIndex, _ = strconv.Atoi(grpMatch[2])
-			val = val.(string)[0 : len(val.(string))-len(grpMatch[1])]
-			grpSet = true
-		}
+func valueAsRegex(config map[string]interface{}, regexField string, groupField string) (*regexp.Regexp, int, error) {
+	var regexString string
+	var groupValue int
+	var groupValueSet = false
+	var re *regexp.Regexp
+	var err error
 
-		var re *regexp.Regexp
-		var err error
-		if re, err = regexp.Compile("^" + val.(string) + "$"); err != nil {
-			return nil, 0, err
-		}
-
-		numSubexp := re.NumSubexp()
-
-		if numSubexp == 0 {
-			// regex has no ()
-			return nil, 0, errors.New("regular expression requires at least one subexpression")
-		} else if numSubexp > 1 && !grpSet {
-			// regex has multiple () but the index has not been set
-			return nil, 0, errors.New("regular expression has multiple subexpressions and requires an ,$index suffix")
-		} else if numSubexp < groupingIndex {
-			// the index exceeds the number of groups
-			return nil, 0, errors.New("regular expression subexpression index out of range")
-		} else if groupingIndex == 0 {
-			return nil, 0, errors.New("regular expression subexpression index must be greater than 0")
-		} else {
-			return re, groupingIndex, nil
-		}
+	if val, found := config[regexField]; !found || len(val.(string)) == 0 {
+		// no regex - this is ok
+		return nil, 0, nil
+	} else {
+		regexString = val.(string)
 	}
+
+	if val, found := config[groupField]; !found {
+		groupValue = 1
+	} else {
+		// note that the CRD constrains this to be >= 1
+		groupValue = int(val.(int64))
+		groupValueSet = true
+	}
+
+	if re, err = regexp.Compile("^" + regexString + "$"); err != nil {
+		return nil, 0, err
+	}
+
+	numSubexp := re.NumSubexp()
+
+	if numSubexp == 0 {
+		// regex has no subexpressions ()
+		return nil, 0, errors.New("regular expression requires at least one subexpression")
+	} else if numSubexp > 1 && !groupValueSet {
+		// regex has multiple () but the index has not been set
+		return nil, 0, errors.New("regular expression has multiple subexpressions and requires an ,$index suffix")
+	} else if numSubexp < groupValue {
+		// the index exceeds the number of groups
+		return nil, 0, errors.New("regular expression subexpression index out of range")
+	} else {
+		return re, groupValue, nil
+	}
+
 	// no regex - this is ok
 	return nil, 0, nil
 }
@@ -189,7 +195,7 @@ func ParseAndValidate(obj *unstructured.Unstructured) (*ZpdbConfig, error) {
 		}
 	}
 
-	if cfg.podNamePartition, cfg.podNamePartitionRegexGroup, err = valueAsRegex(mapSpec, fieldPodNamePartitionRegex); err != nil {
+	if cfg.podNamePartition, cfg.podNamePartitionRegexGroup, err = valueAsRegex(mapSpec, fieldPodNamePartitionRegex, fieldPodNameRegexGroup); err != nil {
 		return nil, fmt.Errorf("invalid value - regex is not valid: %v", err)
 	}
 

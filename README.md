@@ -524,7 +524,8 @@ spec:
   selector:
     matchLabels:
       rollout-group: ingester
-  # podNamePartitionRegex: "[a-z\\-]+-zone-[a-z]-([0-9]+),$1"
+  # podNamePartitionRegex: "[a-z\\-]+-zone-[a-z]-([0-9]+)"
+  # podNameRegexGroup: 1
 ```
 
 ### Configuration options
@@ -539,7 +540,5 @@ Functionality includes the ability to;
 * set the regular expression to determine a partition name from a pod name (if using partition awareness)
 
 Note - `maxUnavailable` can be set to 0. In this case no voluntary evictions in any zone will be allowed.
-
-Note - if the partition regular expression requires a grouping directive this can be set as a suffix to the regex. For instance `ingester(-foo)?-zone-[a-z]-([0-9]+),$2`
 
 Note - a validating webhook configuration is provided in [development](./development/zone-aware-pod-disruption-budget-validating-webhook.yaml) which allows the `rollout-operator` to verify a `ZoneAwarePodDisruptionBudget` configuration being created or updated. This will ensure that no invalid configuration can be applied

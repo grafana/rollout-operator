@@ -329,22 +329,22 @@ func TestPodEviction_PartitionZones(t *testing.T) {
 	// ingester-zone-a-0 --> 0
 	podPartitionZoneRegex := "[a-z\\-]+-zone-[a-z]-([0-9]+)"
 
-	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
+	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertAllowResponse(t)
 
 	// mark a pod in the same zone as failed - we will allow this eviction
 	objs[4].(*corev1.Pod).Status.Phase = corev1.PodFailed
-	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
+	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertAllowResponse(t)
 
 	// mark a pod in the another zone + partition as failed - we will allow this eviction
 	objs[11].(*corev1.Pod).Status.Phase = corev1.PodFailed
-	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
+	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertAllowResponse(t)
 
 	// mark a pod in the another zone + same partition as failed - we will deny this eviction
 	objs[6].(*corev1.Pod).Status.Phase = corev1.PodFailed
-	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
+	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertDenyResponse(t, "1 pod not ready under partition 0", 429)
 
 	// reset so all the pods are reporting running
@@ -354,10 +354,10 @@ func TestPodEviction_PartitionZones(t *testing.T) {
 
 	// but zone b sts has more replicas than we will see pods for
 	objs[1].(*appsv1.StatefulSet).Status.Replicas = 4
-	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
+	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertDenyResponse(t, "1 pod unknown under partition 0", 429)
 
-	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, "ingester(-foo)?-zone-[a-z]-([0-9]+),$2"), objs...)
+	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, "ingester(-foo)?-zone-[a-z]-([0-9]+)", int64(2)), objs...)
 	testCtx.assertDenyResponse(t, "1 pod unknown under partition 0", 429)
 }
 
@@ -387,15 +387,15 @@ func TestPodEviction_PartitionZonesMaxUnavailable2(t *testing.T) {
 
 	// mark 1 pod in the another zone + same partition as failed
 	objs[6].(*corev1.Pod).Status.Phase = corev1.PodFailed
-	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex), objs...)
+	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertDenyResponse(t, "1 pod not ready under partition 0", 429)
 
-	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(2, rolloutGroupValue, podPartitionZoneRegex), objs...)
+	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(2, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertAllowResponse(t)
 
 	// mark another pod in the another zone + same partition as failed
 	objs[9].(*corev1.Pod).Status.Phase = corev1.PodFailed
-	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(2, rolloutGroupValue, podPartitionZoneRegex), objs...)
+	testCtx = newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(2, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertDenyResponse(t, "2 pods not ready under partition 0", 429)
 }
 
@@ -553,7 +553,7 @@ func newPDBMaxUnavailablePercent(maxUnavailablePercentage int, rolloutGroup stri
 
 // newPDBMaxUnavailableWithRegex returns a raw custom resource configuration which can be used with the ZpdbConfig
 // This configuration has maxUnavailable=X, has a name of the given rollout-group and sets the podNamePartitionRegex
-func newPDBMaxUnavailableWithRegex(maxUnavailable int, rolloutGroup string, podNamePartitionRegex string) *unstructured.Unstructured {
+func newPDBMaxUnavailableWithRegex(maxUnavailable int, rolloutGroup string, podNamePartitionRegex string, podNameRegexGroup int64) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "rollout-operator.grafana.com/v1",
@@ -570,6 +570,7 @@ func newPDBMaxUnavailableWithRegex(maxUnavailable int, rolloutGroup string, podN
 					},
 				},
 				"podNamePartitionRegex": podNamePartitionRegex,
+				"podNameRegexGroup":     podNameRegexGroup,
 			},
 		},
 	}
