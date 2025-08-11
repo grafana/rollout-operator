@@ -475,17 +475,10 @@ func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInf
 	diff := (*oldInfo.replicas - *newInfo.replicas)
 	eps := make([]endpoint, diff)
 
-	// The DNS entry for a pod of a stateful set is
-	// ingester-zone-a-0.$(servicename).$(namespace).svc.cluster.local
-	// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
-
 	for i := range int(diff) {
 		index := int(*oldInfo.replicas) - i - 1 // nr in statefulset
-		eps[i].url = fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local:%s/%s",
-			ar.Request.Name, // pod name
-			index,
-			serviceName,
-			ar.Request.Namespace,
+		eps[i].url = fmt.Sprintf("%s:%s/%s",
+			util.StatefulSetPodFQDN(ar.Request.Namespace, ar.Request.Name, index, serviceName),
 			port,
 			path,
 		)

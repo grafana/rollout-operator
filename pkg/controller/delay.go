@@ -18,6 +18,7 @@ import (
 	v1 "k8s.io/api/apps/v1"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, replicas int32) {
@@ -31,7 +32,7 @@ func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, 
 		return
 	}
 
-	endpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), 0, int(replicas), prepareURL)
+	endpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, 0, int(replicas), prepareURL)
 
 	callCancelDelayedDownscale(ctx, logger, httpClient, endpoints)
 }
@@ -54,19 +55,19 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	}
 
 	if desiredReplicas >= currentReplicas {
-		callCancelDelayedDownscale(ctx, logger, httpClient, createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), 0, int(currentReplicas), prepareURL))
+		callCancelDelayedDownscale(ctx, logger, httpClient, createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, 0, int(currentReplicas), prepareURL))
 		// Proceed even if calling cancel of delayed downscale fails. We call cancellation repeatedly, so it will happen during next reconcile.
 		return desiredReplicas, nil
 	}
 
 	{
 		// Replicas in [0, desired) interval should cancel any delayed downscale, if they have any.
-		cancelEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), 0, int(desiredReplicas), prepareURL)
+		cancelEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, 0, int(desiredReplicas), prepareURL)
 		callCancelDelayedDownscale(ctx, logger, httpClient, cancelEndpoints)
 	}
 
 	// Replicas in [desired, current) interval are going to be stopped.
-	downscaleEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), int(desiredReplicas), int(currentReplicas), prepareURL)
+	downscaleEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, int(desiredReplicas), int(currentReplicas), prepareURL)
 	elapsedTimeSinceDownscaleInitiated, err := callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx, logger, httpClient, downscaleEndpoints)
 	if err != nil {
 		return currentReplicas, fmt.Errorf("failed prepare pods for delayed downscale: %v", err)
@@ -131,23 +132,18 @@ type endpoint struct {
 }
 
 // Create prepare-downscale endpoints for pods with index in [from, to) range. URL is fully reused except for host, which is replaced with pod's FQDN.
-func createPrepareDownscaleEndpoints(namespace, serviceName string, from, to int, url *url.URL) []endpoint {
+func createPrepareDownscaleEndpoints(namespace, statefulSetName, serviceName string, from, to int, url *url.URL) []endpoint {
 	eps := make([]endpoint, 0, to-from)
-
-	// The DNS entry for a pod of a stateful set is
-	// ingester-zone-a-0.$(servicename).$(namespace).svc.cluster.local.
-	// The service in this case is ingester-zone-a as well.
-	// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
 
 	for index := from; index < to; index++ {
 		ep := endpoint{
 			namespace: namespace,
-			podName:   fmt.Sprintf("%v-%v", serviceName, index),
+			podName:   fmt.Sprintf("%v-%v", statefulSetName, index),
 			replica:   index,
 		}
 
 		ep.url = *url
-		newHost := fmt.Sprintf("%s.%v.%v.svc.cluster.local.", ep.podName, serviceName, ep.namespace)
+		newHost := util.StatefulSetPodFQDN(namespace, statefulSetName, index, serviceName)
 		if url.Port() != "" {
 			newHost = fmt.Sprintf("%s:%s", newHost, url.Port())
 		}

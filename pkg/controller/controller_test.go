@@ -1097,7 +1097,8 @@ func mockStatefulSet(name string, overrides ...func(sts *v1.StatefulSet)) *v1.St
 			},
 		},
 		Spec: v1.StatefulSetSpec{
-			Replicas: &replicas,
+			ServiceName: name,
+			Replicas:    &replicas,
 			UpdateStrategy: v1.StatefulSetUpdateStrategy{
 				Type: v1.OnDeleteStatefulSetStrategyType,
 			},

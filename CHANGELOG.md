@@ -15,6 +15,7 @@
   * `k8s.io/apimachinery` from `v0.33.1` to `v0.33.3`
   * `k8s.io/client-go` from `v0.33.1` to `v0.33.3`
 * [BUGFIX] Always configure HTTP client with a timeout. #240
+* [BUGFIX] Use a StatefulSet's `.spec.serviceName` when constructing the delayed downscale endpoint for a pod. #258
 
 ## v0.28.0
 
