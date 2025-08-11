@@ -94,9 +94,9 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 			continue
 		}
 
-		// if a pod has recently been evicted then we assume it is not ready
-		// this is avoiding a possible race condition of concurrent eviction requests are occurring and an eviction has not yet caused a pod state change
-		if pod.UID != pd.UID && (evictionCache.Evicted(&pd) || !util.IsPodRunningAndReady(&pd)) {
+		if pod.UID != pd.UID && (evictionCache.HasPendingEviction(&pd) || !util.IsPodRunningAndReady(&pd)) {
+			// if a pod has recently been evicted then we assume it is not ready
+			// this is avoiding a possible race condition of concurrent eviction requests are occurring and an eviction has not yet caused a pod state change
 			result.notReady++
 		}
 

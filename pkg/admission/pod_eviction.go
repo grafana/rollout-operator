@@ -32,6 +32,12 @@ const (
 	logAllow = "pod eviction allowed"
 	logDeny  = "pod eviction denied"
 
+	errUnableToFindPodByName      = "unable to find pod by name"
+	errPodNotReady                = "pod is not ready"
+	errNoPdbForPod                = "no zone pod disruption budgets found for pod"
+	errMaxUnavailableIs0          = "max unavailable = 0"
+	errUnableToDetermineStsStatus = "unable to determine pod status in related StatefulSet"
+
 	// the AdmissionResponse HTTP status codes sent in deny responses
 	// PDB has been reached
 	httpStatusPdbExceeded = 429
@@ -57,8 +63,11 @@ type pdbValidator struct {
 	// considerPod returns a matcher which is used to test if a pod should be considered in the PDB tallies
 	considerPod partitionMatcher
 
-	// validate validates that the PDB will not be breached across all zones
-	validate func(result *podStatusResult, maxUnavailable int) error
+	// accumulateResult is called for each StatefulSet which is tested
+	accumulateResult func(sts *appsv1.StatefulSet, result *podStatusResult) error
+
+	// validate is called after all the StatefulSets have been tested - this function validates that the PDB will not be breached
+	validate func(maxUnavailable int) error
 
 	// successMessage returns a success message we return in the eviction response
 	successMessage func() string
@@ -211,7 +220,7 @@ func (r *admissionReviewRequest) allow() *v1.AdmissionResponse {
 // PodEviction is the entry point / handler for the pod-eviction endpoint request.
 // Note - we do not perform anything different for dry-run requests (ar.Request.DryRun) as we do not modify any state in this webhook.
 func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeClient kubernetes.Interface, pdbCache *zpdb.ZpdbCache, podEvictionCache *zpdb.PodEvictionCache) *v1.AdmissionResponse {
-	logger, ctx := spanlogger.New(ctx, l, "admission.PodEviction()", tenantResolver)
+	logger, _ := spanlogger.New(ctx, l, "admission.PodEviction()", tenantResolver)
 	defer logger.Finish()
 
 	var pod *corev1.Pod
@@ -223,6 +232,8 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	// set up key=value pairs we include on all logs within this context
 	request.initLogger()
 
+	level.Info(logger).Log("msg", "considering pod eviction")
+
 	// validate that this is a valid pod eviction create request
 	if err = request.validate(); err != nil {
 		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - not a valid create pod eviction request", logAllow), "err", err)
@@ -231,25 +242,26 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 
 	// get the pod which has been requested for eviction
 	if pod, err = request.client.podByName(request.req.Request.Namespace, request.req.Request.Name); err != nil {
-		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to find pod by name", logAllow))
+		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logAllow, errUnableToFindPodByName))
 		return request.allowWithWarning(err.Error())
+	} else if pod == nil {
+		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logAllow, errUnableToFindPodByName))
+		return request.allowWithWarning(errUnableToFindPodByName)
 	}
 
 	// evicting a terminal pod should result in direct deletion of pod as it already caused disruption by the time we are evicting.
 	if canIgnorePDB(pod) {
-		level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - pod is not ready", logAllow))
-		return request.allowWithWarning("pod is not ready")
+		level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logAllow, errPodNotReady))
+		return request.allowWithWarning(errPodNotReady)
 	}
 
-	pdbConfig, deny, err := pdbCache.Find(pod)
+	pdbConfig, err := pdbCache.Find(pod)
 	if err != nil {
-		if deny {
-			level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %v", logDeny, err))
-			return request.denyWithReason(err.Error(), httpStatusMisconfiguration)
-		} else {
-			level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - %v", logAllow, err))
-			return request.allowWithWarning(err.Error())
-		}
+		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %v", logDeny, err))
+		return request.denyWithReason(err.Error(), httpStatusMisconfiguration)
+	} else if pdbConfig == nil {
+		level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logAllow, errNoPdbForPod))
+		return request.allowWithWarning(errNoPdbForPod)
 	}
 
 	// get the StatefulSet who manages this pod
@@ -268,8 +280,8 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	// the number of allowed unavailable pods in other zones.
 	maxUnavailable := pdbConfig.MaxUnavailablePods(sts)
 	if maxUnavailable == 0 {
-		level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - max unavailable = 0", logDeny))
-		return request.denyWithReason("max unavailable = 0", httpStatusPdbDisabled)
+		level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logDeny, errMaxUnavailableIs0))
+		return request.denyWithReason(errMaxUnavailableIs0, httpStatusPdbDisabled)
 	}
 
 	// Find the other StatefulSets which span all zones.
@@ -304,36 +316,38 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 		// partition mode - the pod tallies are applied to all pods in other zones which relate to this partition
 		pdb = makePdbValidatorPartition(sts, partition, len(otherStatefulSets.Items), pdbConfig, request.log)
 	} else {
-		// zone mode - each zone is individually evaluated against the zpdb
+		// zone mode - we allow the eviction if no other zone is disrupted and the max unavailable within the eviction zone is not exceeded
 		pdb = makePdbValidatorZones(sts, len(otherStatefulSets.Items))
 	}
 
-	accumulatedResult := &podStatusResult{}
 	for _, otherSts := range otherStatefulSets.Items {
-		// test on whether we exclude the eviction pod's StatefulSet from the tally
+		// test on whether we exclude the eviction pod's StatefulSet from the assessment
 		if !pdb.considerSts(&otherSts) {
 			continue
 		}
 
 		result, err := request.client.podsNotRunningAndReady(&otherSts, pod, pdb.considerPod, podEvictionCache)
 		if err != nil {
-			level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - unable to determine pod status in related StatefulSet", logDeny), "sts", otherSts.Name)
-			return request.denyWithReason("unable to determine pod status in related StatefulSet", httpStatusInternalError)
+			level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logDeny, errUnableToDetermineStsStatus), "sts", otherSts.Name)
+			return request.denyWithReason(errUnableToDetermineStsStatus, httpStatusInternalError)
 		}
 
-		accumulatedResult.tested += result.tested
-		accumulatedResult.notReady += result.notReady
-		accumulatedResult.unknown += result.unknown
+		if err = pdb.accumulateResult(&otherSts, result); err != nil {
+			// opportunity to fail fast
+			level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %v", logDeny, err), "sts", otherSts.Name)
+			return request.denyWithReason(err.Error(), httpStatusPdbExceeded)
+		}
+
 	}
 
-	if err = pdb.validate(accumulatedResult, maxUnavailable); err != nil {
+	if err = pdb.validate(maxUnavailable); err != nil {
 		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - zpdb exceeded", logDeny), "err", err)
 		return request.denyWithReason(err.Error(), httpStatusPdbExceeded)
 	}
 
 	// mark the pod as evicted
 	// this entry will self expire and will be removed when a pod state change is observed
-	podEvictionCache.Evict(pod)
+	podEvictionCache.RecordEviction(pod)
 
 	level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logAllow, pdb.successMessage()))
 	return request.allow()
@@ -342,11 +356,17 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 // makePdbValidatorSingleZone returns a pdbValidator which evaluates the PDB for a single zone / StatefulSet
 func makePdbValidatorSingleZone(sts *appsv1.StatefulSet) *pdbValidator {
 
+	var result *podStatusResult
+
 	pdb := pdbValidator{
 		considerSts: func(sts *appsv1.StatefulSet) bool {
 			return true
 		},
-		validate: func(result *podStatusResult, maxUnavailable int) error {
+		accumulateResult: func(sts *appsv1.StatefulSet, r *podStatusResult) error {
+			result = r
+			return nil
+		},
+		validate: func(maxUnavailable int) error {
 			// add 1 to reflect the pod which is being requested for eviction
 			if result.notReady+result.unknown+1 > maxUnavailable {
 				return errors.New(pdbMessage(result, sts.Name))
@@ -367,12 +387,20 @@ func makePdbValidatorSingleZone(sts *appsv1.StatefulSet) *pdbValidator {
 
 func makePdbValidatorPartition(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *zpdb.ZpdbConfig, log *spanlogger.SpanLogger) *pdbValidator {
 
+	result := &podStatusResult{}
+
 	// partition mode - we apply the unavailable tally across all zones which relate to this partition
 	pdb := pdbValidator{
 		considerSts: func(otherSts *appsv1.StatefulSet) bool {
 			return otherSts.UID != sts.UID
 		},
-		validate: func(result *podStatusResult, maxUnavailable int) error {
+		accumulateResult: func(otherSts *appsv1.StatefulSet, r *podStatusResult) error {
+			result.tested += r.tested
+			result.notReady += r.notReady
+			result.unknown += r.unknown
+			return nil
+		},
+		validate: func(maxUnavailable int) error {
 			if result.notReady+result.unknown >= maxUnavailable {
 				return errors.New(pdbMessage(result, "partition "+partition))
 			}
@@ -399,13 +427,27 @@ func makePdbValidatorPartition(sts *appsv1.StatefulSet, partition string, zones 
 }
 
 func makePdbValidatorZones(sts *appsv1.StatefulSet, zones int) *pdbValidator {
+
+	var result *podStatusResult
+
 	pdb := pdbValidator{
 		considerSts: func(otherSts *appsv1.StatefulSet) bool {
-			return otherSts.UID != sts.UID
+			return true
 		},
-		validate: func(result *podStatusResult, maxUnavailable int) error {
-			if result.notReady+result.unknown >= maxUnavailable {
-				return errors.New(pdbMessage(result, ""))
+		accumulateResult: func(otherSts *appsv1.StatefulSet, r *podStatusResult) error {
+			if otherSts.UID == sts.UID {
+				result = r
+			} else {
+				// fail fast
+				if r.notReady+r.unknown > 0 {
+					return errors.New(pdbMessage(r, otherSts.Name))
+				}
+			}
+			return nil
+		},
+		validate: func(maxUnavailable int) error {
+			if result.notReady+result.unknown+1 > maxUnavailable {
+				return errors.New(pdbMessage(result, sts.Name))
 			}
 			return nil
 		},

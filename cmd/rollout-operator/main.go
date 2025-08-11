@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"flag"
 	"fmt"
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"net/http"
 	_ "net/http/pprof" // anonymous import to get the pprof handler registered
 	"os"
@@ -25,6 +24,7 @@ import (
 	"github.com/prometheus/common/model"
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/admission/v1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // Required to get the GCP auth provider working.
@@ -277,7 +277,7 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 		if !cfg.serverSelfSignedCert {
 			fatal(errors.New("self-signed certificate should be enabled to update the CA bundle in the webhook configurations"))
 		}
-		
+
 		webHookListener := &tlscert.WebhookConfigurationListener{
 			OnValidatingWebhookConfiguration: func(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) error {
 				return tlscert.PatchCABundleOnValidatingWebhooks(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)

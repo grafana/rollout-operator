@@ -22,7 +22,7 @@ You can use the StatefulSets to exercise the operator across a multi-zone `test-
 
 Included is a `ZoneAwarePodDisruptionBudget` which can be used to enforce a multi-zone `PDB`.
 
-By default this will be applied to the `test-app` Pods and StatefulSets.
+By default, this will be applied to the `test-app` Pods and StatefulSets.
 
 To disable this functionality from the `test-app`;
 
