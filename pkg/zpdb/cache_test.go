@@ -20,9 +20,9 @@ const (
 	podName      = "test-1"
 )
 
-// TestSelectorMatching confirms that a ZpdbConfig can be found for a given pod
+// TestSelectorMatching confirms that a Config can be found for a given pod
 func TestSelectorMatching(t *testing.T) {
-	cache := NewZpdbCache()
+	cache := NewCache()
 	success, err := cache.AddOrUpdateRaw(rawConfigCacheTest(pdbName, rolloutGroup, 1))
 	require.NoError(t, err)
 	require.True(t, success)
@@ -43,9 +43,9 @@ func TestSelectorMatching(t *testing.T) {
 	require.Nil(t, pdb)
 }
 
-// TestMultipleSelectorMatches confirms that multiple matching ZpdbConfigs for a pod causes an error
+// TestMultipleSelectorMatches confirms that multiple matching configs for a pod causes an error
 func TestMultipleSelectorMatches(t *testing.T) {
-	cache := NewZpdbCache()
+	cache := NewCache()
 	success, err := cache.AddOrUpdateRaw(rawConfigCacheTest("zpdb-1", rolloutGroup, 1))
 	require.NoError(t, err)
 	require.True(t, success)
@@ -60,7 +60,7 @@ func TestMultipleSelectorMatches(t *testing.T) {
 
 // TestGenerationChecks confirms that stale objects are ignored
 func TestGenerationChecks(t *testing.T) {
-	cache := NewZpdbCache()
+	cache := NewCache()
 	raw := rawConfigCacheTest(pdbName, rolloutGroup, 2)
 	success, err := cache.AddOrUpdateRaw(raw)
 	require.NoError(t, err)
@@ -82,7 +82,7 @@ func TestGenerationChecks(t *testing.T) {
 
 // TestValidationFails confirms that an invalid raw config triggers an error
 func TestValidationFails(t *testing.T) {
-	cache := NewZpdbCache()
+	cache := NewCache()
 	raw := rawConfigCacheTest(pdbName, rolloutGroup, 2)
 	raw.Object["spec"] = map[string]interface{}{}
 	_, err := cache.AddOrUpdateRaw(raw)

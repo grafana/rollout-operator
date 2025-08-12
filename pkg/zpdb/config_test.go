@@ -18,7 +18,7 @@ import (
 func TestMaxUnavailable(t *testing.T) {
 	sts := newSts("test-sts")
 
-	pdbCfg := ZpdbConfig{}
+	pdbCfg := Config{}
 	require.Equal(t, 0, pdbCfg.MaxUnavailablePods(sts))
 
 	pdbCfg.maxUnavailable = 1
@@ -37,7 +37,7 @@ func TestMaxUnavailable(t *testing.T) {
 
 // TestPodPartitionZoneMatch validates the regular expression parsing of a Pod name to return a logical partition name
 func TestPodPartitionZoneMatch(t *testing.T) {
-	pdbCfg := ZpdbConfig{
+	pdbCfg := Config{
 		podNamePartition:           regexp.MustCompile(`^[a-z\-]+-(zone-[a-z]-[0-9]+)$`),
 		podNamePartitionRegexGroup: 1,
 	}
@@ -60,7 +60,7 @@ func TestPodPartitionZoneMatch(t *testing.T) {
 
 // TestPodPartitionZoneMatch validates the regular expression parsing of a Pod name to return a logical partition name
 func TestPodPartitionZoneMatchWithGrouping(t *testing.T) {
-	pdbCfg := ZpdbConfig{
+	pdbCfg := Config{
 		podNamePartition:           regexp.MustCompile(`^ingester(-foo)?-zone-[a-z]-([0-9]+)$`),
 		podNamePartitionRegexGroup: 2,
 	}
@@ -116,7 +116,7 @@ func TestRegexGrouping(t *testing.T) {
 	require.Equal(t, 2, group)
 	require.Nil(t, err)
 
-	cfg := &ZpdbConfig{
+	cfg := &Config{
 		podNamePartitionRegexGroup: group,
 		podNamePartition:           regex,
 	}

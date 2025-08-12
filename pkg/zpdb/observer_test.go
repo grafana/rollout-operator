@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+
+	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 // mockLogger implements log.Logger interface for testing
@@ -25,15 +26,15 @@ func (m mockLogger) Log(keyvals ...interface{}) error {
 	return nil
 }
 
-type zpdbObserverTestCase struct {
+type observerTestCase struct {
 	kubeClient    *k8sfake.Clientset
 	dynamicClient *fake.FakeDynamicClient
 	logger        mockLogger
-	observer      *ZpdbObserver
+	observer      *Observer
 }
 
-func newZpdbObserverTestCase() *zpdbObserverTestCase {
-	test := zpdbObserverTestCase{
+func newObserverTestCase() *observerTestCase {
+	test := observerTestCase{
 		logger:     mockLogger{},
 		kubeClient: k8sfake.NewClientset(),
 		dynamicClient: fake.NewSimpleDynamicClientWithCustomListKinds(
@@ -48,7 +49,7 @@ func newZpdbObserverTestCase() *zpdbObserverTestCase {
 			// No objects passed - will return empty list on query
 		),
 	}
-	test.observer = NewPdbObserver(test.kubeClient, test.dynamicClient, testNamespace, test.logger)
+	test.observer = NewObserver(test.kubeClient, test.dynamicClient, testNamespace, test.logger)
 	return &test
 }
 
@@ -88,9 +89,9 @@ func createTestPod(name, namespace string) *corev1.Pod {
 	}
 }
 
-// TestZpdbObserver_NewPdbObserver- basic constructor and life cycle test
-func TestZpdbObserver_NewPdbObserver(t *testing.T) {
-	test := newZpdbObserverTestCase()
+// TestObserver_NewPdbObserver- basic constructor and life cycle test
+func TestObserver_NewPdbObserver(t *testing.T) {
+	test := newObserverTestCase()
 
 	require.NotNil(t, test.observer)
 	require.NotNil(t, test.observer.pdbCache)
@@ -119,10 +120,10 @@ func TestZpdbObserver_NewPdbObserver(t *testing.T) {
 	}
 }
 
-// TestZpdbObserver_PodEvents validates the pod eviction cache is invalidated on pod changes
-func TestZpdbObserver_PodEvents(t *testing.T) {
-	test := newZpdbObserverTestCase()
-	test.observer.Init()
+// TestObserver_PodEvents validates the pod eviction cache is invalidated on pod changes
+func TestObserver_PodEvents(t *testing.T) {
+	test := newObserverTestCase()
+	require.NoError(t, test.observer.Init())
 	defer test.observer.Stop()
 
 	pod := createTestPod("test-pod", testNamespace)
@@ -133,7 +134,6 @@ func TestZpdbObserver_PodEvents(t *testing.T) {
 	_, err := test.kubeClient.CoreV1().Pods(testNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
 	require.NoError(t, err)
 	awaitEviction(t, pod, test)
-	require.False(t, test.observer.podEvictCache.HasPendingEviction(pod))
 
 	// Update pod to fake client - this should trigger the informer and invalidate the cache
 	test.observer.podEvictCache.RecordEviction(pod)
@@ -141,7 +141,6 @@ func TestZpdbObserver_PodEvents(t *testing.T) {
 	_, err = test.kubeClient.CoreV1().Pods(testNamespace).Update(context.Background(), pod, metav1.UpdateOptions{})
 	require.NoError(t, err)
 	awaitEviction(t, pod, test)
-	require.False(t, test.observer.podEvictCache.HasPendingEviction(pod))
 
 	// Delete pod to fake client - this should trigger the informer and invalidate the cache
 	test.observer.podEvictCache.RecordEviction(pod)
@@ -149,13 +148,12 @@ func TestZpdbObserver_PodEvents(t *testing.T) {
 	err = test.kubeClient.CoreV1().Pods(testNamespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
 	require.NoError(t, err)
 	awaitEviction(t, pod, test)
-	require.False(t, test.observer.podEvictCache.HasPendingEviction(pod))
 }
 
-// TestZpdbObserver_InvalidObject - tests that no panics occur if an invalid object is passed from the informers
-func TestZpdbObserver_InvalidObject(t *testing.T) {
-	test := newZpdbObserverTestCase()
-	test.observer.Init()
+// TestObserver_InvalidObject - tests that no panics occur if an invalid object is passed from the informers
+func TestObserver_InvalidObject(t *testing.T) {
+	test := newObserverTestCase()
+	require.NoError(t, test.observer.Init())
 	defer test.observer.Stop()
 
 	invalidObj := "not-a-pod-of-config"
@@ -170,10 +168,10 @@ func TestZpdbObserver_InvalidObject(t *testing.T) {
 	test.observer.onPdbDeleted(invalidObj)
 }
 
-// TestZpdbObserver_ZPDBEvents_AddValidZPDB - tests the zpdb cache being updated on observed config changes
-func TestZpdbObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
-	test := newZpdbObserverTestCase()
-	test.observer.Init()
+// TestObserver_ZPDBEvents_AddValidZPDB - tests the zpdb cache being updated on observed config changes
+func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
+	test := newObserverTestCase()
+	require.NoError(t, test.observer.Init())
 	defer test.observer.Stop()
 
 	require.Equal(t, test.observer.pdbCache.Size(), 0)
@@ -191,8 +189,7 @@ func TestZpdbObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	task := func() bool {
 		return test.observer.pdbCache.Size() > 0
 	}
-	await(t, task, "zpdb config cache has not been initialized")
-
+	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "zpdb config cache has not been initialized")
 	require.Equal(t, 1, test.observer.pdbCache.Size())
 	require.Contains(t, test.observer.pdbCache.cache, "test-zpdb")
 	require.Equal(t, int64(1), test.observer.pdbCache.cache["test-zpdb"].Generation())
@@ -207,7 +204,7 @@ func TestZpdbObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	task = func() bool {
 		return test.observer.pdbCache.cache["test-zpdb"].Generation() == int64(3)
 	}
-	await(t, task, "zpdb config cache has not been updated")
+	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "zpdb config cache has not been updated")
 	require.Equal(t, 1, test.observer.pdbCache.Size())
 	require.Equal(t, int64(3), test.observer.pdbCache.cache["test-zpdb"].Generation())
 
@@ -234,20 +231,9 @@ func TestZpdbObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 }
 
 // awaitEviction awaits a pod to be evicted from the cache - sleeping for a short period and testing the cache a number of times.
-func awaitEviction(t *testing.T, pod *corev1.Pod, test *zpdbObserverTestCase) {
+func awaitEviction(t *testing.T, pod *corev1.Pod, test *observerTestCase) {
 	task := func() bool {
 		return !test.observer.podEvictCache.HasPendingEviction(pod)
 	}
-	await(t, task, "Pod eviction cache has not been invalidated")
-}
-
-// await - sleep for a short period and invoke the given task. return if the task returns true. repeat for a fixed number of iterations
-func await(t *testing.T, task func() bool, message string) {
-	for i := 0; i < 10; i++ {
-		time.Sleep(10 * time.Millisecond)
-		if task() {
-			return
-		}
-	}
-	require.Fail(t, message)
+	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "Awaiting pod eviction")
 }

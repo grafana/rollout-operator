@@ -28,8 +28,8 @@ const (
 	fieldPodNameRegexGroup        = "podNameRegexGroup"
 )
 
-// A ZpdbConfig holds the configuration of a ZoneAwarePodDisruptionBudget custom resource.
-type ZpdbConfig struct {
+// A Config holds the configuration of a ZoneAwarePodDisruptionBudget custom resource.
+type Config struct {
 	name string
 
 	generation int64
@@ -50,29 +50,29 @@ type ZpdbConfig struct {
 	podNamePartitionRegexGroup int
 }
 
-func (c *ZpdbConfig) Name() string {
+func (c *Config) Name() string {
 	return c.name
 }
 
-func (c *ZpdbConfig) Generation() int64 {
+func (c *Config) Generation() int64 {
 	return c.generation
 }
 
 // MatchesPod returns true if this PdbConfig label selector matches this pod
-func (c *ZpdbConfig) MatchesPod(pod *corev1.Pod) bool {
+func (c *Config) MatchesPod(pod *corev1.Pod) bool {
 	selector := *c.stsSelector
 	return selector.Matches(labels.Set(pod.Labels))
 }
 
 // MatchesSts returns true if this PdbConfig label selector matches this pod
-func (c *ZpdbConfig) MatchesSts(sts *appsv1.StatefulSet) bool {
+func (c *Config) MatchesSts(sts *appsv1.StatefulSet) bool {
 	selector := *c.stsSelector
 	return selector.Matches(labels.Set(sts.Labels))
 }
 
 // MaxUnavailablePods returns the number of allowed unavailable pods.
 // When the max unavailable configuration is a percentage, the returned value is calculated off the StatefulSet's Spec.Replica count.
-func (c *ZpdbConfig) MaxUnavailablePods(sts *appsv1.StatefulSet) int {
+func (c *Config) MaxUnavailablePods(sts *appsv1.StatefulSet) int {
 	if c.maxUnavailable > 0 {
 		return c.maxUnavailable
 	}
@@ -90,13 +90,13 @@ func (c *ZpdbConfig) MaxUnavailablePods(sts *appsv1.StatefulSet) int {
 
 // StsSelector returns the Selector which can be used to find the other StatefulSets which span all zones.
 // Note that this can be nil
-func (c *ZpdbConfig) StsSelector() *labels.Selector {
+func (c *Config) StsSelector() *labels.Selector {
 	return c.stsSelector
 }
 
 // PodPartition returns the partition name that a Pod covers.
 // Note that if no podNamePartitionRegex has been set then an empty string will be returned.
-func (c *ZpdbConfig) PodPartition(pod *corev1.Pod) (string, error) {
+func (c *Config) PodPartition(pod *corev1.Pod) (string, error) {
 	if c.podNamePartition == nil {
 		return "", nil
 	}
@@ -152,14 +152,11 @@ func valueAsRegex(config map[string]interface{}, regexField string, groupField s
 	} else {
 		return re, groupValue, nil
 	}
-
-	// no regex - this is ok
-	return nil, 0, nil
 }
 
-// ParseAndValidate attempts to parse the given Unstructured to a ZpdbConfig.
+// ParseAndValidate attempts to parse the given Unstructured to a Config.
 // An error is returned if any configuration errors are found.
-func ParseAndValidate(obj *unstructured.Unstructured) (*ZpdbConfig, error) {
+func ParseAndValidate(obj *unstructured.Unstructured) (*Config, error) {
 	var mapSpec map[string]interface{}
 	var err error
 	if spec, found, err := unstructured.NestedMap(obj.Object, "spec"); err != nil {
@@ -172,7 +169,7 @@ func ParseAndValidate(obj *unstructured.Unstructured) (*ZpdbConfig, error) {
 		mapSpec = spec
 	}
 
-	cfg := &ZpdbConfig{
+	cfg := &Config{
 		maxUnavailable: defaultMaxUnavailable,
 		name:           obj.GetName(),
 		generation:     obj.GetGeneration(),

@@ -1,12 +1,12 @@
 package zpdb
 
 import (
+	"fmt"
 	"reflect"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -25,10 +25,10 @@ const (
 	informerSyncInterval = 5 * time.Minute
 )
 
-// A ZpdbObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the ZpdbCache.
+// An Observer facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the Cache.
 // It also listens for pod changes, invalidating a PodEvictionCache on any pod state change.
-// The ZpdbCache and PodEvictionCache are used by the pod eviction web hook handler.
-type ZpdbObserver struct {
+// The Cache and PodEvictionCache are used by the pod eviction web hook handler.
+type Observer struct {
 	namespace    string
 	podsFactory  informers.SharedInformerFactory
 	podLister    corelisters.PodLister
@@ -36,7 +36,7 @@ type ZpdbObserver struct {
 
 	pdbFactory    dynamicinformer.DynamicSharedInformerFactory
 	pdbInformer   cache.SharedIndexInformer
-	pdbCache      *ZpdbCache
+	pdbCache      *Cache
 	podEvictCache *PodEvictionCache
 
 	dynamicClient dynamic.Interface
@@ -46,7 +46,7 @@ type ZpdbObserver struct {
 	stopCh chan struct{}
 }
 
-func NewPdbObserver(kubeClient kubernetes.Interface, dynamic dynamic.Interface, namespace string, logger log.Logger) *ZpdbObserver {
+func NewObserver(kubeClient kubernetes.Interface, dynamic dynamic.Interface, namespace string, logger log.Logger) *Observer {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// initialize the ZoneAwarePodDisruptionBudget custom resource watching
@@ -66,14 +66,14 @@ func NewPdbObserver(kubeClient kubernetes.Interface, dynamic dynamic.Interface, 
 	)
 	pdbInformer := pdbFactory.ForResource(gvr)
 
-	c := &ZpdbObserver{
+	c := &Observer{
 		namespace:     namespace,
 		podsFactory:   podsFactory,
 		podLister:     podsInformer.Lister(),
 		podsInformer:  podsInformer.Informer(),
 		pdbFactory:    pdbFactory,
 		pdbInformer:   pdbInformer.Informer(),
-		pdbCache:      NewZpdbCache(),
+		pdbCache:      NewCache(),
 		podEvictCache: NewPodEvictionCache(),
 		dynamicClient: dynamic,
 		logger:        logger,
@@ -83,15 +83,15 @@ func NewPdbObserver(kubeClient kubernetes.Interface, dynamic dynamic.Interface, 
 	return c
 }
 
-func (c *ZpdbObserver) PdbCache() *ZpdbCache {
+func (c *Observer) PdbCache() *Cache {
 	return c.pdbCache
 }
 
-func (c *ZpdbObserver) PodEvictionCache() *PodEvictionCache {
+func (c *Observer) PodEvictionCache() *PodEvictionCache {
 	return c.podEvictCache
 }
 
-func (c *ZpdbObserver) Init() error {
+func (c *Observer) Init() error {
 	_, err := c.pdbInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onPdbAdded,
 		UpdateFunc: c.onPdbUpdated,
@@ -116,14 +116,14 @@ func (c *ZpdbObserver) Init() error {
 	// Wait until all informer caches have been synced.
 	level.Info(c.logger).Log("msg", "zpdb informer caches are syncing")
 	if ok := cache.WaitForCacheSync(c.stopCh, c.podsInformer.HasSynced, c.pdbInformer.HasSynced); !ok {
-		return errors.New("zpdb informer caches failed to sync")
+		return fmt.Errorf("zpdb informer caches failed to sync. pods informer synced=%t, zpdb informer synced=%t", c.podsInformer.HasSynced(), c.pdbInformer.HasSynced())
 	}
 	level.Info(c.logger).Log("msg", "zpdb informer caches have synced")
 
 	return nil
 }
 
-func (c *ZpdbObserver) invalidatePodEvictionCache(obj interface{}) {
+func (c *Observer) invalidatePodEvictionCache(obj interface{}) {
 	pod, isPod := obj.(*corev1.Pod)
 	if !isPod {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
@@ -132,19 +132,19 @@ func (c *ZpdbObserver) invalidatePodEvictionCache(obj interface{}) {
 	(*c.podEvictCache).Delete(pod)
 }
 
-func (c *ZpdbObserver) onPodAdded(obj interface{}) {
+func (c *Observer) onPodAdded(obj interface{}) {
 	c.invalidatePodEvictionCache(obj)
 }
 
-func (c *ZpdbObserver) onPodUpdated(_, new interface{}) {
+func (c *Observer) onPodUpdated(_, new interface{}) {
 	c.invalidatePodEvictionCache(new)
 }
 
-func (c *ZpdbObserver) onPodDeleted(obj interface{}) {
+func (c *Observer) onPodDeleted(obj interface{}) {
 	c.invalidatePodEvictionCache(obj)
 }
 
-func (c *ZpdbObserver) onPdbAdded(obj interface{}) {
+func (c *Observer) onPdbAdded(obj interface{}) {
 	unstructuredObj, isUnstructured := obj.(*unstructured.Unstructured)
 	if !isUnstructured {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
@@ -161,7 +161,7 @@ func (c *ZpdbObserver) onPdbAdded(obj interface{}) {
 	}
 }
 
-func (c *ZpdbObserver) onPdbUpdated(old, new interface{}) {
+func (c *Observer) onPdbUpdated(old, new interface{}) {
 	oldCfg, oldIsUnstructured := old.(*unstructured.Unstructured)
 	newCfg, newIsUnstructured := new.(*unstructured.Unstructured)
 
@@ -182,7 +182,7 @@ func (c *ZpdbObserver) onPdbUpdated(old, new interface{}) {
 	}
 }
 
-func (c *ZpdbObserver) onPdbDeleted(obj interface{}) {
+func (c *Observer) onPdbDeleted(obj interface{}) {
 	oldCfg, oldIsUnstructured := obj.(*unstructured.Unstructured)
 	if !oldIsUnstructured {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
@@ -196,6 +196,6 @@ func (c *ZpdbObserver) onPdbDeleted(obj interface{}) {
 	}
 }
 
-func (c *ZpdbObserver) Stop() {
+func (c *Observer) Stop() {
 	close(c.stopCh)
 }

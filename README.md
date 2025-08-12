@@ -428,26 +428,6 @@ subjects:
     namespace: default
 ```
 
-And:
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: rollout-operator-webhook-clusterrole
-rules:
-  - apiGroups:
-      - admissionregistration.k8s.io
-    resources:
-      - validatingwebhookconfigurations
-      - mutatingwebhookconfigurations
-    verbs:
-      - list
-      - patch
-      - watch
-
-```
-
 #### Certificate expiration
 
 Whenever the certificate expires, the `rollout-operator` will detect it and will restart, which will trigger the self-signed certificate generation again if it's configured.
@@ -463,7 +443,7 @@ Unlike a regular `PodDisruptionBudget` which evaluates across all pods, the `Zon
 
 This allows an operator to perform maintenance on a single zone whilst ensuring sufficient pod availability in other zones.
 
-Consider the following topology where the `PDZB` has `maxUnavailability` is set to 1:
+Consider the following topology where the `PDZB` has `maxUnavailability` set to 1:
 
 * StatefulSet `ingester-zone-a` manages pods `ingester-zone-a-0` and `ingester-zone-a-1`
 * StatefulSet `ingester-zone-b` manages pods `ingester-zone-b-0` and `ingester-zone-b-1`
@@ -473,7 +453,7 @@ When a pod eviction request is received, the availability of the pods in the oth
 
 If `ingester-zone-a-0` is to be evicted, it will be allowed if there are no disruptions in either zone `b` or zone `c`.
 
-If `ingester-zone-a-1` has failed and `ingester-zone-a-0` is to be evicted, this will not be allowed since `maxUnavailability` of 1 is only allowed within this zone.
+If `ingester-zone-a-1` has failed and `ingester-zone-a-0` is to be evicted, this will not be allowed since `maxUnavailable` of 1 is only allowed within this zone.
 
 If the `maxUnavailability` is 2, `ingester-zone-a-0` eviction would be granted since `zone-a` can have 2 unavailable nodes, and there are no disruptions in zone `b` or zone `c`.
 
