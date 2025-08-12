@@ -59,18 +59,12 @@ kubectl get crds -n rollout-operator-development
 
 List custom resources;
 ```
-kubectl get zoneawarepoddisruptionbudgets.rollout-operator.grafana.com -n rollout-operator-development
 kubectl get zoneawarepoddisruptionbudgets -n rollout-operator-development
 ```
 
 List the custom resource configuration by name;
 ```
-get zoneawarepoddisruptionbudget test-app -n rollout-operator-development -o yaml 
-```
-
-List all resources in namespace;
-```
-get all -n rollout-operator-development
+kubectl get zoneawarepoddisruptionbudget test-app -n rollout-operator-development -o yaml 
 ```
 
 Port forward to the rollout-operator;
@@ -93,6 +87,10 @@ while true; do kubectl get pods -n rollout-operator-development; sleep 1; clear;
 # in another shell - issue a drain for all pods
 kubectl drain --pod-selector rollout-group=test-app minikube &; sleep 5; kubectl uncordon minikube
 ```
+
+Note - in the above example the `uncordon` is important as without this the drained pods in the first zone will not be re-deployed. Until these pods are running again the next zone's pods will not be evicted.
+
+This is a limitation of running multiple zones within a single kubernetes node. In a usual deployment each zone would have its pods distributed across different nodes.
 
 Apply an updated ZPDB
 ```

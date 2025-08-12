@@ -443,7 +443,7 @@ Unlike a regular `PodDisruptionBudget` which evaluates across all pods, the `Zon
 
 This allows an operator to perform maintenance on a single zone whilst ensuring sufficient pod availability in other zones.
 
-Consider the following topology where the `PDZB` has `maxUnavailability` set to 1:
+Consider the following topology where the `PDZB` has `maxUnavailable` set to 1:
 
 * StatefulSet `ingester-zone-a` manages pods `ingester-zone-a-0` and `ingester-zone-a-1`
 * StatefulSet `ingester-zone-b` manages pods `ingester-zone-b-0` and `ingester-zone-b-1`
@@ -455,9 +455,9 @@ If `ingester-zone-a-0` is to be evicted, it will be allowed if there are no disr
 
 If `ingester-zone-a-1` has failed and `ingester-zone-a-0` is to be evicted, this will not be allowed since `maxUnavailable` of 1 is only allowed within this zone.
 
-If the `maxUnavailability` is 2, `ingester-zone-a-0` eviction would be granted since `zone-a` can have 2 unavailable nodes, and there are no disruptions in zone `b` or zone `c`.
+If `maxUnavailable` is 2, `ingester-zone-a-0` eviction would be granted since zone `a` can have 2 unavailable nodes, and there are no disruptions in zone `b` or zone `c`.
 
-If `ingester-zone-a-0` is to be evicted, and `ingester-zone-b-0` has failed, the eviction request will be denied regardless of whether `maxUnavailability` is set to 1 or higher due to another zone already in disruption. 
+If `ingester-zone-a-0` is to be evicted, and `ingester-zone-b-0` has failed, the eviction request will be denied regardless of the value of `maxUnavailable` because another zone is already disrupted.
 
 *A pod eviction is only allowed if the number of unavailable pods is within the maximum unavailability threshold for the zone and no other zone has a disruption.*
 
@@ -469,7 +469,7 @@ In this configuration, the `ZPDB` determines the partition for a pod being evict
 
 *A pod eviction is only allowed if the number of unavailable pods serving a specific partition is less than the `maxUnavailable` value.*
 
-Using the same topology as the previous section where the `ZPDB` has `maxUnavailability=1`;
+Using the same topology as the previous section where the `ZPDB` has `maxUnavailable=1`;
 
 If `ingester-zone-b-0` has failed and `ingester-zone-a-1` is to be evicted, it will be allowed as there are no disruptions in either zone `b` or zone `c` for partition `1`.
 
@@ -514,8 +514,8 @@ The exact resource attributes should be referenced via the provided custom resou
 
 Functionality includes the ability to;
 
-* set a fixed max unavailable threshold
-* set a percentage of unavailable StatefulSet members as the threshold - this is evaluated against the StatefulSet's `spec.Replicas`
+* set a fixed max unavailable pod threshold
+* set the unavailable pod threshold as a percentage. This can only be used in classic zones and can not be used with partition awareness. The percentage is calculated against the StatefulSet's `spec.Replica` count. 
 * set the selector to match the applicable Pods and StatefulSets
 * set the regular expression to determine a partition name from a pod name (if using partition awareness)
 

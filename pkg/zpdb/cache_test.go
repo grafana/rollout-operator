@@ -23,11 +23,11 @@ const (
 // TestSelectorMatching confirms that a Config can be found for a given pod
 func TestSelectorMatching(t *testing.T) {
 	cache := NewCache()
-	success, err := cache.AddOrUpdateRaw(rawConfigCacheTest(pdbName, rolloutGroup, 1))
+	success, _, err := cache.AddOrUpdateRaw(rawConfigCacheTest(pdbName, rolloutGroup, 1))
 	require.NoError(t, err)
 	require.True(t, success)
 
-	success, err = cache.AddOrUpdateRaw(rawConfigCacheTest("test-zpdb-1", "another-rollout-group", 1))
+	success, _, err = cache.AddOrUpdateRaw(rawConfigCacheTest("test-zpdb-1", "another-rollout-group", 1))
 	require.NoError(t, err)
 	require.True(t, success)
 
@@ -35,7 +35,7 @@ func TestSelectorMatching(t *testing.T) {
 	pdb, err := cache.Find(pod)
 	require.NoError(t, err)
 	require.NotNil(t, pdb)
-	require.Equal(t, pdbName, pdb.Name())
+	require.Equal(t, pdbName, pdb.Name)
 
 	pod = newPodCacheTest(podName, "no-match")
 	pdb, err = cache.Find(pod)
@@ -46,10 +46,10 @@ func TestSelectorMatching(t *testing.T) {
 // TestMultipleSelectorMatches confirms that multiple matching configs for a pod causes an error
 func TestMultipleSelectorMatches(t *testing.T) {
 	cache := NewCache()
-	success, err := cache.AddOrUpdateRaw(rawConfigCacheTest("zpdb-1", rolloutGroup, 1))
+	success, _, err := cache.AddOrUpdateRaw(rawConfigCacheTest("zpdb-1", rolloutGroup, 1))
 	require.NoError(t, err)
 	require.True(t, success)
-	success, err = cache.AddOrUpdateRaw(rawConfigCacheTest("zpdb-2", rolloutGroup, 1))
+	success, _, err = cache.AddOrUpdateRaw(rawConfigCacheTest("zpdb-2", rolloutGroup, 1))
 	require.NoError(t, err)
 	require.True(t, success)
 
@@ -62,22 +62,43 @@ func TestMultipleSelectorMatches(t *testing.T) {
 func TestGenerationChecks(t *testing.T) {
 	cache := NewCache()
 	raw := rawConfigCacheTest(pdbName, rolloutGroup, 2)
-	success, err := cache.AddOrUpdateRaw(raw)
+	success, generation, err := cache.AddOrUpdateRaw(raw)
 	require.NoError(t, err)
+	require.Equal(t, int64(2), generation)
 	require.True(t, success)
 
 	raw = rawConfigCacheTest(pdbName, rolloutGroup, 1)
-	success, err = cache.AddOrUpdateRaw(raw)
+	success, generation, err = cache.AddOrUpdateRaw(raw)
 	require.NoError(t, err)
+	require.Equal(t, int64(2), generation)
 	require.False(t, success)
 
 	raw = rawConfigCacheTest(pdbName, rolloutGroup, 5)
-	success, err = cache.AddOrUpdateRaw(raw)
+	success, generation, err = cache.AddOrUpdateRaw(raw)
+	require.NoError(t, err)
+	require.Equal(t, int64(5), generation)
+	require.True(t, success)
+
+	success, generation = cache.Delete(1, pdbName)
+	require.False(t, success)
+	require.Equal(t, int64(5), generation)
+
+	success, generation = cache.Delete(5, pdbName)
+	require.True(t, success)
+	require.Equal(t, int64(5), generation)
+}
+
+func TestLaterGenerationDelete(t *testing.T) {
+	cache := NewCache()
+	raw := rawConfigCacheTest(pdbName, rolloutGroup, 2)
+	success, generation, err := cache.AddOrUpdateRaw(raw)
+	require.Equal(t, int64(2), generation)
 	require.NoError(t, err)
 	require.True(t, success)
 
-	require.False(t, cache.Delete(1, pdbName))
-	require.True(t, cache.Delete(5, pdbName))
+	success, generation = cache.Delete(10, pdbName)
+	require.Equal(t, int64(2), generation)
+	require.True(t, success)
 }
 
 // TestValidationFails confirms that an invalid raw config triggers an error
@@ -85,8 +106,8 @@ func TestValidationFails(t *testing.T) {
 	cache := NewCache()
 	raw := rawConfigCacheTest(pdbName, rolloutGroup, 2)
 	raw.Object["spec"] = map[string]interface{}{}
-	_, err := cache.AddOrUpdateRaw(raw)
-	require.ErrorContains(t, err, "invalid value - selector is not found")
+	_, _, err := cache.AddOrUpdateRaw(raw)
+	require.ErrorContains(t, err, "invalid value: selector is not found")
 }
 
 func newPodCacheTest(name string, rolloutGroup string) *corev1.Pod {

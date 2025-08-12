@@ -207,14 +207,18 @@ func main() {
 	dynamicClient, err := dynamic.NewForConfigAndClient(kubeConfig, httpClient)
 	check(errors.Wrap(err, "failed to init dynamicClient"))
 
-	// watches for ZoneAwarePodDisruptionBudget configurations being applied and also monitors changing pods
-	zpdbObserver := zpdb.NewObserver(kubeClient, dynamicClient, cfg.kubeNamespace, logger)
-	check(errors.Wrap(zpdbObserver.Init(), "failed to init zpdb observer"))
+	// watches for ZoneAwarePodDisruptionBudget configurations being applied
+	zpdbConfigObserver := zpdb.NewConfigObserver(dynamicClient, cfg.kubeNamespace, logger)
+	check(errors.Wrap(zpdbConfigObserver.Start(), "failed to init zpdb config observer"))
+
+	// watches for Pod changes
+	podObserver := zpdb.NewPodObserver(kubeClient, cfg.kubeNamespace, logger)
+	check(errors.Wrap(podObserver.Start(), "failed to init zpdb pod observer"))
 
 	// watches for validating webhooks being added - used in the TLS server init
 	webhookObserver := tlscert.NewWebhookObserver(kubeClient, cfg.kubeNamespace, logger)
 
-	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, zpdbObserver.PdbCache(), zpdbObserver.PodEvictionCache(), webhookObserver)
+	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, zpdbConfigObserver.PdbCache, podObserver.PodEvictCache, webhookObserver)
 
 	// Init the controller
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
@@ -224,7 +228,8 @@ func main() {
 	go func() {
 		waitForSignalOrRestart(logger, restart)
 		c.Stop()
-		zpdbObserver.Stop()
+		zpdbConfigObserver.Stop()
+		podObserver.Stop()
 		webhookObserver.Stop()
 	}()
 

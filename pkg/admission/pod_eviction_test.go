@@ -111,7 +111,7 @@ func newTestContext(request admissionv1.AdmissionReview, pdbRawConfig *unstructu
 	testCtx.pdbCache = zpdb.NewCache()
 
 	if pdbRawConfig != nil {
-		_, _ = testCtx.pdbCache.AddOrUpdateRaw(pdbRawConfig)
+		_, _, _ = testCtx.pdbCache.AddOrUpdateRaw(pdbRawConfig)
 	}
 	testCtx.request = request
 	testCtx.logs = newDummyLogger()

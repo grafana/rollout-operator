@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -29,7 +30,6 @@ func (v *zpdbValidatingHandler) initLogger() {
 	v.logger.SetSpanAndLogTag("object.name", v.request.Request.Name)
 	v.logger.SetSpanAndLogTag("object.resource", v.request.Request.Resource.Resource)
 	v.logger.SetSpanAndLogTag("object.namespace", v.request.Request.Namespace)
-	// note that this is the UID of the request, not of the pod
 	v.logger.SetSpanAndLogTag("request.uid", v.request.Request.UID)
 
 	if v.request.Request.DryRun != nil {
@@ -43,13 +43,13 @@ func (v *zpdbValidatingHandler) parse() (int32, error) {
 	var obj unstructured.Unstructured
 	if err := json.Unmarshal(v.request.Request.Object.Raw, &obj); err != nil {
 		level.Info(v.logger).Log(logMsg, errors.New("failed to unmarshal object"), "err", err)
-		return int32(404), err
+		return int32(http.StatusBadRequest), err
 	}
 
 	_, err := zpdb.ParseAndValidate(&obj)
 	if err != nil {
 		level.Info(v.logger).Log(logMsg, errors.New("parsing failed"), "err", err)
-		return int32(400), err
+		return int32(http.StatusBadRequest), err
 	}
 
 	return int32(0), nil
@@ -78,7 +78,7 @@ func (v *zpdbValidatingHandler) deny(reason string, httpStatusCode int32) *v1.Ad
 // ZoneAwarePdbValidatorHandler is a handler for a validating webhook configuration.
 // If attempts to parse and validate the given object as a ZoneAwarePodDisruptionBudget configuration.
 func ZoneAwarePdbValidatorHandler(ctx context.Context, l log.Logger, ar v1.AdmissionReview) *v1.AdmissionResponse {
-	logger, ctx := spanlogger.New(ctx, l, "admission.PdbValidator()", tenantResolver)
+	logger, ctx := spanlogger.New(ctx, l, "admission.ZoneAwarePdbValidatorHandler()", tenantResolver)
 	defer logger.Finish()
 
 	validator := &zpdbValidatingHandler{

@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,13 +26,13 @@ func TestZoneAwarePdbValidatorHandlerSuccess(t *testing.T) {
 // See other test files for in-depth config validation
 func TestZoneAwarePdbValidatorHandlerBadConfig(t *testing.T) {
 	test := newZoneAwarePdbTestContext(createValidatingWebHookAdmissionReviewInvalid())
-	test.assertDenyResponse(t, "invalid value - max unavailable must be 0 <= val - -1", 400)
+	test.assertDenyResponse(t, "invalid value: max unavailable must be 0 <= val, got -1", http.StatusBadRequest)
 }
 
 // TestZoneAwarePdbValidatorHandlerParseError tests with a structural error in parsing the request object
 func TestZoneAwarePdbValidatorHandlerParseError(t *testing.T) {
 	test := newZoneAwarePdbTestContext(createValidatingWebHookAdmissionReviewNoObject())
-	test.assertDenyResponse(t, "unexpected end of JSON input", 404)
+	test.assertDenyResponse(t, "unexpected end of JSON input", http.StatusBadRequest)
 }
 
 func newZoneAwarePdbTestContext(request admissionv1.AdmissionReview) *zoneAwarePdbTestContext {
