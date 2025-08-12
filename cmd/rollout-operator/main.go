@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/common/model"
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/admission/v1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // Required to get the GCP auth provider working.
@@ -205,8 +206,10 @@ func main() {
 	dynamicClient, err := dynamic.NewForConfigAndClient(kubeConfig, httpClient)
 	check(errors.Wrap(err, "failed to init dynamicClient"))
 
+	webhookObserver := tlscert.NewWebhookObserver(kubeClient, cfg.kubeNamespace, logger)
+
 	// Start TLS server if enabled.
-	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics)
+	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, webhookObserver)
 
 	// Init the controller.
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
@@ -216,6 +219,7 @@ func main() {
 	go func() {
 		waitForSignalOrRestart(logger, restart)
 		c.Stop()
+		webhookObserver.Stop()
 	}()
 
 	// The operator is ready once the controller successfully initialised.
@@ -236,7 +240,7 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics) {
+func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, vwo *tlscert.WebhookObserver) {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
 		return
@@ -267,9 +271,18 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 			fatal(errors.New("self-signed certificate should be enabled to update the CA bundle in the webhook configurations"))
 		}
 
-		// TODO watch webhook configurations instead of doing one-off.
-		check(tlscert.PatchCABundleOnValidatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
-		check(tlscert.PatchCABundleOnMutatingWebhooks(context.Background(), logger, kubeClient, cfg.kubeNamespace, cert.CA))
+		webHookListener := &tlscert.WebhookConfigurationListener{
+			OnValidatingWebhookConfiguration: func(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) error {
+				return tlscert.PatchCABundleOnValidatingWebhook(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
+			},
+			OnMutatingWebhookConfiguration: func(webhook *admissionregistrationv1.MutatingWebhookConfiguration) error {
+				return tlscert.PatchCABundleOnMutatingWebhook(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
+			},
+		}
+
+		// Start monitoring for validating webhook configurations and patch if required
+		check(vwo.Init(webHookListener))
+
 	}
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {

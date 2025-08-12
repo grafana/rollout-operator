@@ -395,7 +395,7 @@ metadata:
 rules:
 - apiGroups: [admissionregistration.k8s.io]
   resources: [validatingwebhookconfigurations]
-  verbs: [list, patch]
+  verbs: [list, patch, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
