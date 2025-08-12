@@ -181,6 +181,11 @@ func rolloutOperatorRole() *rbacv1.Role {
 				Resources: []string{"statefulsets/status"},
 				Verbs:     []string{"update"},
 			},
+			{
+				APIGroups: []string{"rollout-operator.grafana.com"},
+				Resources: []string{"zoneawarepoddisruptionbudgets"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
 		},
 	}
 }
