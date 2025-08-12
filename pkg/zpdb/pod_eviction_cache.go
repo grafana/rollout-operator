@@ -50,3 +50,7 @@ func (c *PodEvictionCache) HasPendingEviction(pod *corev1.Pod) bool {
 func (c *PodEvictionCache) Delete(pod *corev1.Pod) {
 	c.expiry.Delete(pod.Name)
 }
+
+func (c *PodEvictionCache) Size() int {
+	return c.Size()
+}
