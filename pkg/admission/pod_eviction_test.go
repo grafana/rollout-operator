@@ -1,11 +1,13 @@
 package admission
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/go-logfmt/logfmt"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -37,7 +39,6 @@ const (
 	testPodZoneC2     = "ingester-zone-c-2"
 	testNamespace     = "test-dev-0"
 	rolloutGroupValue = "ingester"
-	rolloutGroupLabel = config.RolloutGroupLabelKey
 	nameLabel         = "name"
 )
 
@@ -46,7 +47,7 @@ type testContext struct {
 	logs     *dummyLogger
 	client   *fake.Clientset
 	request  admissionv1.AdmissionReview
-	pdbCache *zpdb.ZpdbCache
+	pdbCache *zpdb.Cache
 	podCache *zpdb.PodEvictionCache
 }
 
@@ -56,11 +57,16 @@ type dummyLogger struct {
 }
 
 func newDummyLogger() *dummyLogger {
-	return &dummyLogger{}
+	return &dummyLogger{
+		logs: make([]string, 0),
+	}
 }
 
 func (d *dummyLogger) Log(keyVals ...interface{}) error {
-	var parts []string
+
+	var buf bytes.Buffer
+	enc := logfmt.NewEncoder(&buf)
+
 	for i := 0; i < len(keyVals); i += 2 {
 		key := fmt.Sprint(keyVals[i])
 		var val string
@@ -69,10 +75,11 @@ func (d *dummyLogger) Log(keyVals ...interface{}) error {
 		} else {
 			val = "<missing>"
 		}
-		parts = append(parts, fmt.Sprintf("%s=%s", key, val))
+		_ = enc.EncodeKeyval(key, val)
 	}
+	_ = enc.EndRecord()
 
-	d.logs = append(d.logs, strings.Join(parts, " "))
+	d.logs = append(d.logs, buf.String())
 	return nil
 }
 
@@ -81,7 +88,6 @@ func (d *dummyLogger) Log(keyVals ...interface{}) error {
 func (d *dummyLogger) assertHasLog(t *testing.T, elements []string) {
 
 	for _, line := range d.logs {
-		fmt.Printf("%s\n", line)
 		found := true
 		for _, element := range elements {
 			if !strings.Contains(line, element) {
@@ -102,7 +108,7 @@ func newTestContext(request admissionv1.AdmissionReview, pdbRawConfig *unstructu
 	testCtx.ctx = context.Background()
 	testCtx.client = fake.NewClientset(objects...)
 	testCtx.podCache = zpdb.NewPodEvictionCache()
-	testCtx.pdbCache = zpdb.NewZpdbCache()
+	testCtx.pdbCache = zpdb.NewCache()
 
 	if pdbRawConfig != nil {
 		_, _ = testCtx.pdbCache.AddOrUpdateRaw(pdbRawConfig)
@@ -146,7 +152,7 @@ func TestPodEviction_NotCreateEvent(t *testing.T) {
 		"object.namespace=" + testNamespace,
 		"object.resource=evictions",
 		"request.uid=test-request-uid",
-		"msg=pod eviction allowed - not a valid create pod eviction request",
+		"msg=\"pod eviction allowed - not a valid create pod eviction request\"",
 	}
 	testCtx.logs.assertHasLog(t, expectedLogEntries)
 }
@@ -198,7 +204,7 @@ func TestPodEviction_MaxUnavailableEq0(t *testing.T) {
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(0, rolloutGroupValue), pod, sts)
 	testCtx.assertDenyResponse(t, "max unavailable = 0", 403)
-	testCtx.logs.assertHasLog(t, []string{"msg=pod eviction denied - max unavailable = 0"})
+	testCtx.logs.assertHasLog(t, []string{"msg=\"pod eviction denied - max unavailable = 0\""})
 }
 
 func TestPodEviction_MaxUnavailablePercentageEq0(t *testing.T) {
@@ -207,7 +213,7 @@ func TestPodEviction_MaxUnavailablePercentageEq0(t *testing.T) {
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailablePercent(0, rolloutGroupValue), pod, sts)
 	testCtx.assertDenyResponse(t, "max unavailable = 0", 403)
-	testCtx.logs.assertHasLog(t, []string{"msg=pod eviction denied - max unavailable = 0"})
+	testCtx.logs.assertHasLog(t, []string{"msg=\"pod eviction denied - max unavailable = 0\""})
 }
 
 // TestPodEviction_SingleZoneSinglePod - a single zone with a single pod becoming unavailable
@@ -443,7 +449,7 @@ func newPodNoOwner(name string) *corev1.Pod {
 			UID:       types.UID(uuid.New().String()),
 			Name:      name,
 			Namespace: testNamespace,
-			Labels:    map[string]string{rolloutGroupLabel: rolloutGroupValue},
+			Labels:    map[string]string{config.RolloutGroupLabelKey: rolloutGroupValue},
 		},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
@@ -459,7 +465,7 @@ func newPod(name string, sts *appsv1.StatefulSet) *corev1.Pod {
 			UID:       types.UID(uuid.New().String()),
 			Name:      name,
 			Namespace: testNamespace,
-			Labels:    map[string]string{nameLabel: sts.Name, rolloutGroupLabel: rolloutGroupValue},
+			Labels:    map[string]string{nameLabel: sts.Name, config.RolloutGroupLabelKey: rolloutGroupValue},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: "apps/v1",
@@ -485,17 +491,17 @@ func newSts(name string) *appsv1.StatefulSet {
 			Name:      name,
 			Namespace: testNamespace,
 			UID:       types.UID(uuid.New().String()),
-			Labels:    map[string]string{rolloutGroupLabel: rolloutGroupValue},
+			Labels:    map[string]string{config.RolloutGroupLabelKey: rolloutGroupValue},
 		},
 		Spec: appsv1.StatefulSetSpec{
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{nameLabel: name, rolloutGroupLabel: rolloutGroupValue},
+				MatchLabels: map[string]string{nameLabel: name, config.RolloutGroupLabelKey: rolloutGroupValue},
 			},
 			Replicas: &replicas,
 
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{nameLabel: name, rolloutGroupLabel: rolloutGroupValue},
+					Labels: map[string]string{nameLabel: name, config.RolloutGroupLabelKey: rolloutGroupValue},
 				},
 			},
 		},
@@ -505,7 +511,7 @@ func newSts(name string) *appsv1.StatefulSet {
 	}
 }
 
-// newPDBMaxUnavailable returns a raw custom resource configuration which can be used with the ZpdbConfig
+// newPDBMaxUnavailable returns a raw custom resource configuration which can be used with the Config
 // This configuration has maxUnavailable=X and has a name of the given rollout-group
 func newPDBMaxUnavailable(maxUnavailable int, rolloutGroup string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
@@ -520,7 +526,7 @@ func newPDBMaxUnavailable(maxUnavailable int, rolloutGroup string) *unstructured
 				"maxUnavailable": int64(maxUnavailable),
 				"selector": map[string]interface{}{
 					"matchLabels": map[string]interface{}{
-						rolloutGroupLabel: rolloutGroup,
+						config.RolloutGroupLabelKey: rolloutGroup,
 					},
 				},
 			},
@@ -528,7 +534,7 @@ func newPDBMaxUnavailable(maxUnavailable int, rolloutGroup string) *unstructured
 	}
 }
 
-// newPDBMaxUnavailablePercent returns a raw custom resource configuration which can be used with the ZpdbConfig
+// newPDBMaxUnavailablePercent returns a raw custom resource configuration which can be used with the Config
 // This configuration has maxUnavailablePercentage=X and has a name of the given rollout-group
 func newPDBMaxUnavailablePercent(maxUnavailablePercentage int, rolloutGroup string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
@@ -543,7 +549,7 @@ func newPDBMaxUnavailablePercent(maxUnavailablePercentage int, rolloutGroup stri
 				"maxUnavailablePercentage": int64(maxUnavailablePercentage),
 				"selector": map[string]interface{}{
 					"matchLabels": map[string]interface{}{
-						rolloutGroupLabel: rolloutGroup,
+						config.RolloutGroupLabelKey: rolloutGroup,
 					},
 				},
 			},
@@ -551,7 +557,7 @@ func newPDBMaxUnavailablePercent(maxUnavailablePercentage int, rolloutGroup stri
 	}
 }
 
-// newPDBMaxUnavailableWithRegex returns a raw custom resource configuration which can be used with the ZpdbConfig
+// newPDBMaxUnavailableWithRegex returns a raw custom resource configuration which can be used with the Config
 // This configuration has maxUnavailable=X, has a name of the given rollout-group and sets the podNamePartitionRegex
 func newPDBMaxUnavailableWithRegex(maxUnavailable int, rolloutGroup string, podNamePartitionRegex string, podNameRegexGroup int64) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
@@ -566,7 +572,7 @@ func newPDBMaxUnavailableWithRegex(maxUnavailable int, rolloutGroup string, podN
 				"maxUnavailable": int64(maxUnavailable),
 				"selector": map[string]interface{}{
 					"matchLabels": map[string]interface{}{
-						rolloutGroupLabel: rolloutGroup,
+						config.RolloutGroupLabelKey: rolloutGroup,
 					},
 				},
 				"podNamePartitionRegex": podNamePartitionRegex,

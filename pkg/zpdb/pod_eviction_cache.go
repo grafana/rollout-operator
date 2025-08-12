@@ -39,7 +39,7 @@ func (c *PodEvictionCache) RecordEviction(pod *corev1.Pod) {
 	c.expiry.Store(pod.Name, expiresAt)
 }
 
-// HasPendingEviction returns true if this pod is in the eviction zpdb
+// HasPendingEviction returns true if this pod is in the eviction cache
 func (c *PodEvictionCache) HasPendingEviction(pod *corev1.Pod) bool {
 	// note that we do not clean up expired entries, as the assumption is the entry will be deleted shortly after being stored here
 	expiresAt, exists := c.expiry.Load(pod.Name)
@@ -49,8 +49,4 @@ func (c *PodEvictionCache) HasPendingEviction(pod *corev1.Pod) bool {
 // Delete removes this pod from the eviction cache
 func (c *PodEvictionCache) Delete(pod *corev1.Pod) {
 	c.expiry.Delete(pod.Name)
-}
-
-func (c *PodEvictionCache) Size() int {
-	return c.Size()
 }

@@ -49,65 +49,10 @@ const (
 	httpStatusMisconfiguration = 400
 )
 
-// A partitionMatcher is a utility to assist in matching pods to a partition.
-type partitionMatcher struct {
-	same func(pod *corev1.Pod) bool
-}
-
-// A pdbValidator abstracts the different ZPDB implementations
-type pdbValidator struct {
-
-	// considerSts returns true if this StatefulSet should be considered in the PDB tallies
-	considerSts func(sts *appsv1.StatefulSet) bool
-
-	// considerPod returns a matcher which is used to test if a pod should be considered in the PDB tallies
-	considerPod partitionMatcher
-
-	// accumulateResult is called for each StatefulSet which is tested
-	accumulateResult func(sts *appsv1.StatefulSet, result *podStatusResult) error
-
-	// validate is called after all the StatefulSets have been tested - this function validates that the PDB will not be breached
-	validate func(maxUnavailable int) error
-
-	// successMessage returns a success message we return in the eviction response
-	successMessage func() string
-}
-
-// plural appends an 's' to the given string if the value is > 1.
-func plural(s string, value int) string {
-	if value > 1 {
-		return fmt.Sprintf("%ss", s)
-	}
-	return s
-}
-
-// pdbMessage creates a message which includes the number of not ready and unknown pods within the given span
-func pdbMessage(result *podStatusResult, span string) string {
-	msg := ""
-	if result.notReady > 0 {
-		// 1 pod not ready
-		msg += fmt.Sprintf("%d %s not ready", result.notReady, plural("pod", result.notReady))
-		if result.unknown > 0 {
-			msg += ", "
-		}
-	}
-	if result.unknown > 0 {
-		// 2 pods unknown
-		msg += fmt.Sprintf("%d %s unknown", result.unknown, plural("pod", result.unknown))
-	}
-
-	// under ingester-zone-a partition 0
-	// under ingester-zone-a
-	if len(span) > 0 {
-		msg += fmt.Sprintf(" under %s", span)
-	}
-	return msg
-}
-
 // a lock used to control finding a specific PDB lock
 var lock = sync.RWMutex{}
 
-// a map of ZPDB name to lock
+// a map of zpdb config name to a lock
 var locks = make(map[string]*sync.Mutex, 5)
 
 // findLock returns a Mutex for each unique name, creating the Mutex if required.
@@ -219,7 +164,7 @@ func (r *admissionReviewRequest) allow() *v1.AdmissionResponse {
 
 // PodEviction is the entry point / handler for the pod-eviction endpoint request.
 // Note - we do not perform anything different for dry-run requests (ar.Request.DryRun) as we do not modify any state in this webhook.
-func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeClient kubernetes.Interface, pdbCache *zpdb.ZpdbCache, podEvictionCache *zpdb.PodEvictionCache) *v1.AdmissionResponse {
+func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeClient kubernetes.Interface, pdbCache *zpdb.Cache, podEvictionCache *zpdb.PodEvictionCache) *v1.AdmissionResponse {
 	logger, _ := spanlogger.New(ctx, l, "admission.PodEviction()", tenantResolver)
 	defer logger.Finish()
 
@@ -307,32 +252,32 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	// include the number of zones we will be considering
 	request.log.SetSpanAndLogTag("zones", len(otherStatefulSets.Items))
 
-	var pdb *pdbValidator
+	var pdb zpdb.Validator
 
 	if len(otherStatefulSets.Items) == 1 {
 		// single zone mode - we include the pod being evicted into the calculation and the maxAvailable is applied to the single zone / StatefulSet
-		pdb = makePdbValidatorSingleZone(&otherStatefulSets.Items[0])
+		pdb = zpdb.NewValidatorSingleZone(&otherStatefulSets.Items[0])
 	} else if len(partition) > 0 {
 		// partition mode - the pod tallies are applied to all pods in other zones which relate to this partition
-		pdb = makePdbValidatorPartition(sts, partition, len(otherStatefulSets.Items), pdbConfig, request.log)
+		pdb = zpdb.NewValidatorPartitionAware(sts, partition, len(otherStatefulSets.Items), pdbConfig, request.log)
 	} else {
 		// zone mode - we allow the eviction if no other zone is disrupted and the max unavailable within the eviction zone is not exceeded
-		pdb = makePdbValidatorZones(sts, len(otherStatefulSets.Items))
+		pdb = zpdb.NewValidatorZoneAware(sts, len(otherStatefulSets.Items))
 	}
 
 	for _, otherSts := range otherStatefulSets.Items {
 		// test on whether we exclude the eviction pod's StatefulSet from the assessment
-		if !pdb.considerSts(&otherSts) {
+		if !pdb.ConsiderSts(&otherSts) {
 			continue
 		}
 
-		result, err := request.client.podsNotRunningAndReady(&otherSts, pod, pdb.considerPod, podEvictionCache)
+		result, err := request.client.podsNotRunningAndReady(&otherSts, pod, pdb.ConsiderPod(), podEvictionCache)
 		if err != nil {
 			level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logDeny, errUnableToDetermineStsStatus), "sts", otherSts.Name)
 			return request.denyWithReason(errUnableToDetermineStsStatus, httpStatusInternalError)
 		}
 
-		if err = pdb.accumulateResult(&otherSts, result); err != nil {
+		if err = pdb.AccumulateResult(&otherSts, result); err != nil {
 			// opportunity to fail fast
 			level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - %v", logDeny, err), "sts", otherSts.Name)
 			return request.denyWithReason(err.Error(), httpStatusPdbExceeded)
@@ -340,7 +285,7 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 
 	}
 
-	if err = pdb.validate(maxUnavailable); err != nil {
+	if err = pdb.Validate(maxUnavailable); err != nil {
 		level.Error(request.log).Log(logMsg, fmt.Sprintf("%s - zpdb exceeded", logDeny), "err", err)
 		return request.denyWithReason(err.Error(), httpStatusPdbExceeded)
 	}
@@ -349,116 +294,6 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	// this entry will self expire and will be removed when a pod state change is observed
 	podEvictionCache.RecordEviction(pod)
 
-	level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logAllow, pdb.successMessage()))
+	level.Info(request.log).Log(logMsg, fmt.Sprintf("%s - %s", logAllow, pdb.SuccessMessage()))
 	return request.allow()
-}
-
-// makePdbValidatorSingleZone returns a pdbValidator which evaluates the PDB for a single zone / StatefulSet
-func makePdbValidatorSingleZone(sts *appsv1.StatefulSet) *pdbValidator {
-
-	var result *podStatusResult
-
-	pdb := pdbValidator{
-		considerSts: func(sts *appsv1.StatefulSet) bool {
-			return true
-		},
-		accumulateResult: func(sts *appsv1.StatefulSet, r *podStatusResult) error {
-			result = r
-			return nil
-		},
-		validate: func(maxUnavailable int) error {
-			// add 1 to reflect the pod which is being requested for eviction
-			if result.notReady+result.unknown+1 > maxUnavailable {
-				return errors.New(pdbMessage(result, sts.Name))
-			}
-			return nil
-		},
-		successMessage: func() string {
-			return fmt.Sprintf("zpdb met in single zone %s", sts.Name)
-		},
-		considerPod: partitionMatcher{
-			same: func(pd *corev1.Pod) bool {
-				return true
-			},
-		},
-	}
-	return &pdb
-}
-
-func makePdbValidatorPartition(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *zpdb.ZpdbConfig, log *spanlogger.SpanLogger) *pdbValidator {
-
-	result := &podStatusResult{}
-
-	// partition mode - we apply the unavailable tally across all zones which relate to this partition
-	pdb := pdbValidator{
-		considerSts: func(otherSts *appsv1.StatefulSet) bool {
-			return otherSts.UID != sts.UID
-		},
-		accumulateResult: func(otherSts *appsv1.StatefulSet, r *podStatusResult) error {
-			result.tested += r.tested
-			result.notReady += r.notReady
-			result.unknown += r.unknown
-			return nil
-		},
-		validate: func(maxUnavailable int) error {
-			if result.notReady+result.unknown >= maxUnavailable {
-				return errors.New(pdbMessage(result, "partition "+partition))
-			}
-			return nil
-		},
-		successMessage: func() string {
-			return fmt.Sprintf("zpdb met for partition %s across %d zones", partition, zones)
-		},
-		considerPod: partitionMatcher{
-			same: func(pd *corev1.Pod) bool {
-				thisPartition, err := pdbConfig.PodPartition(pd)
-				if err != nil {
-					// the partition name was successfully extracted from the pod being evicted
-					// so if this regex has failed then the assumption is that it is not the same partition, as would have a different naming convention
-					// or the regex is too tightly defined
-					level.Error(log).Log(logMsg, "Unable to extract partition from pod name - check the pod partition name regex", "name", pd.Name)
-				}
-				return thisPartition == partition
-			},
-		},
-	}
-
-	return &pdb
-}
-
-func makePdbValidatorZones(sts *appsv1.StatefulSet, zones int) *pdbValidator {
-
-	var result *podStatusResult
-
-	pdb := pdbValidator{
-		considerSts: func(otherSts *appsv1.StatefulSet) bool {
-			return true
-		},
-		accumulateResult: func(otherSts *appsv1.StatefulSet, r *podStatusResult) error {
-			if otherSts.UID == sts.UID {
-				result = r
-			} else {
-				// fail fast
-				if r.notReady+r.unknown > 0 {
-					return errors.New(pdbMessage(r, otherSts.Name))
-				}
-			}
-			return nil
-		},
-		validate: func(maxUnavailable int) error {
-			if result.notReady+result.unknown+1 > maxUnavailable {
-				return errors.New(pdbMessage(result, sts.Name))
-			}
-			return nil
-		},
-		successMessage: func() string {
-			return fmt.Sprintf("zpdb met across %d zones", zones)
-		},
-		considerPod: partitionMatcher{
-			same: func(pd *corev1.Pod) bool {
-				return true
-			},
-		},
-	}
-	return &pdb
 }
