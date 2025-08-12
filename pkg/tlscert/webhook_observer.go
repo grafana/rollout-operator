@@ -81,7 +81,7 @@ func (c *WebhookObserver) Init(onEvent *WebhookConfigurationListener) error {
 	// Wait until all informer caches have been synced.
 	level.Info(c.log).Log("msg", "waiting for webhook informer caches to sync")
 	if ok := cache.WaitForCacheSync(c.stopCh, c.informerValidatingWebhooks.HasSynced, c.informerMutatingWebhooks.HasSynced); !ok {
-		return errors.New("validating webhook informer caches failed to sync")
+		return fmt.Errorf("validating webhook informer caches failed to sync. validating webhook informer sync=%t, mutating webhook informer sync=%t", c.informerValidatingWebhooks.HasSynced(), c.informerMutatingWebhooks.HasSynced())
 	}
 	level.Info(c.log).Log("msg", "webhook informer caches sync completed")
 
