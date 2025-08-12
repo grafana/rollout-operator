@@ -79,3 +79,10 @@ func (c *ZpdbCache) Find(pod *corev1.Pod) (*ZpdbConfig, error) {
 	}
 	return pdbMatch, nil
 }
+
+// Size returns the number of elements in the cache
+func (c *ZpdbCache) Size() int {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return len(c.cache)
+}
