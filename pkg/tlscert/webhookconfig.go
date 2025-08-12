@@ -15,11 +15,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// PatchCABundleOnValidatingWebhooks patches the CA bundle of all validating webhook configurations that have the specified labels in the cluster.
+// PatchCABundleOnValidatingWebhook patches the CA bundle of all validating webhook configurations that have the specified labels in the cluster.
 // Webhook configurations should have the following labels:
 // "grafana.com/inject-rollout-operator-ca": "true",
 // "grafana.com/namespace":                  <specified namespace>,
-func PatchCABundleOnValidatingWebhooks(logger log.Logger, kubeClient kubernetes.Interface, namespace string, caPEM []byte, wh *v1.ValidatingWebhookConfiguration) error {
+func PatchCABundleOnValidatingWebhook(logger log.Logger, kubeClient kubernetes.Interface, namespace string, caPEM []byte, wh *v1.ValidatingWebhookConfiguration) error {
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{
 		"grafana.com/inject-rollout-operator-ca": "true",
 		"grafana.com/namespace":                  namespace,
@@ -57,11 +57,11 @@ func PatchCABundleOnValidatingWebhooks(logger log.Logger, kubeClient kubernetes.
 	return nil
 }
 
-// PatchCABundleOnMutatingWebhooks patches the CA bundle of all mutating webhook configurations that have the specified labels in the cluster.
+// PatchCABundleOnMutatingWebhook patches the CA bundle of all mutating webhook configurations that have the specified labels in the cluster.
 // Webhook configurations should have the following labels:
 // "grafana.com/inject-rollout-operator-ca": "true",
 // "grafana.com/namespace":                  <specified namespace>,
-func PatchCABundleOnMutatingWebhooks(logger log.Logger, kubeClient kubernetes.Interface, namespace string, caPEM []byte, wh *v1.MutatingWebhookConfiguration) error {
+func PatchCABundleOnMutatingWebhook(logger log.Logger, kubeClient kubernetes.Interface, namespace string, caPEM []byte, wh *v1.MutatingWebhookConfiguration) error {
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{
 		"grafana.com/inject-rollout-operator-ca": "true",
 		"grafana.com/namespace":                  namespace,

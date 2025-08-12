@@ -1,6 +1,7 @@
 package tlscert
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/go-kit/log"
@@ -26,7 +27,6 @@ type WebhookConfigurationListener struct {
 // When observed, a call back function is invoked with the given configuration.
 // The call back function is set as part of the Init() function.
 type WebhookObserver struct {
-	namespace                  string
 	factory                    informers.SharedInformerFactory
 	informerValidatingWebhooks cache.SharedIndexInformer
 	informerMutatingWebhooks   cache.SharedIndexInformer
@@ -40,7 +40,6 @@ func NewWebhookObserver(kubeClient kubernetes.Interface, namespace string, logge
 	factory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt)
 
 	c := &WebhookObserver{
-		namespace:                  namespace,
 		factory:                    factory,
 		informerValidatingWebhooks: factory.Admissionregistration().V1().ValidatingWebhookConfigurations().Informer(),
 		informerMutatingWebhooks:   factory.Admissionregistration().V1().MutatingWebhookConfigurations().Informer(),
@@ -60,14 +59,13 @@ func (c *WebhookObserver) Init(onEvent *WebhookConfigurationListener) error {
 		if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				var err error
-				validatingWebHook, isObj := obj.(*admissionregistrationv1.ValidatingWebhookConfiguration)
-				if isObj {
-					err = onEvent.OnValidatingWebhookConfiguration(validatingWebHook)
-				} else {
-					mutatingWebHook, isObj := obj.(*admissionregistrationv1.MutatingWebhookConfiguration)
-					if isObj {
-						err = onEvent.OnMutatingWebhookConfiguration(mutatingWebHook)
-					}
+				switch obj := obj.(type) {
+				case *admissionregistrationv1.ValidatingWebhookConfiguration:
+					err = onEvent.OnValidatingWebhookConfiguration(obj)
+				case *admissionregistrationv1.MutatingWebhookConfiguration:
+					err = onEvent.OnMutatingWebhookConfiguration(obj)
+				default:
+					level.Error(c.log).Log("msg", "Unknown object", "type", fmt.Sprintf("%T", obj))
 				}
 				if err != nil {
 					level.Error(c.log).Log("msg", "Unable to call webhook configuration listener", "err", err)

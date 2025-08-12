@@ -66,8 +66,8 @@ func TestWebhookObserver_ListenerInvoked(t *testing.T) {
 	require.NoError(t, observer.Init(listener))
 	defer observer.Stop()
 
-	require.Equal(t, 0, len(observedValidatingWebhooks))
-	require.Equal(t, 0, len(observedMutatingWebhooks))
+	require.Empty(t, observedValidatingWebhooks)
+	require.Empty(t, observedMutatingWebhooks)
 
 	_, err := client.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(context.Background(), validatingWebhookConfiguration("validating-webhook"), metav1.CreateOptions{})
 	require.NoError(t, err)
@@ -76,10 +76,9 @@ func TestWebhookObserver_ListenerInvoked(t *testing.T) {
 	task := func() bool {
 		return len(observedValidatingWebhooks) == 1
 	}
-	await(t, task, "ValidatingWebhookConfiguration should have 1 ValidatingWebhookConfiguration")
-	require.Equal(t, 1, len(observedValidatingWebhooks))
+	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "ValidatingWebhookConfiguration should have 1 ValidatingWebhookConfiguration")
 	require.Equal(t, "validating-webhook", observedValidatingWebhooks[0].Name)
-	require.Equal(t, 0, len(observedMutatingWebhooks))
+	require.Empty(t, observedMutatingWebhooks)
 
 	_, err = client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(context.Background(), mutatingWebhookConfiguration("mutating-webhook"), metav1.CreateOptions{})
 	require.NoError(t, err)
@@ -88,8 +87,7 @@ func TestWebhookObserver_ListenerInvoked(t *testing.T) {
 	task = func() bool {
 		return len(observedMutatingWebhooks) == 1
 	}
-	await(t, task, "MutatingWebhookConfiguration should have 1 MutatingWebhookConfiguration")
-	require.Equal(t, 1, len(observedMutatingWebhooks))
+	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "MutatingWebhookConfiguration should have 1 MutatingWebhookConfiguration")
 	require.Equal(t, "mutating-webhook", observedMutatingWebhooks[0].Name)
 }
 
@@ -109,15 +107,4 @@ func mutatingWebhookConfiguration(name string) *admissionregistrationv1.Mutating
 			Name: name,
 		},
 	}
-}
-
-// await - sleep for a short period and invoke the given task. return if the task returns true. repeat for a fixed number of iterations
-func await(t *testing.T, task func() bool, message string) {
-	for i := 0; i < 10; i++ {
-		time.Sleep(10 * time.Millisecond)
-		if task() {
-			return
-		}
-	}
-	require.Fail(t, message)
 }
