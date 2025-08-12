@@ -11,3 +11,4 @@ rules:
     verbs:
       - list
       - patch
+      - watch
