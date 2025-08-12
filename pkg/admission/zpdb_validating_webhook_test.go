@@ -44,7 +44,7 @@ func newZoneAwarePdbTestContext(request admissionv1.AdmissionReview) *zoneAwareP
 }
 
 func (c *zoneAwarePdbTestContext) assertDenyResponse(t *testing.T, reason string, statusCode int) {
-	response := ZoneAwarePdbValidatorHandler(context.Background(), c.logs, c.request)
+	response := ZoneAwarePdbValidatingWebhookHandler(context.Background(), c.logs, c.request)
 	require.NotNil(t, response.UID)
 	require.False(t, response.Allowed)
 	require.Equal(t, reason, response.Result.Message)
@@ -52,7 +52,7 @@ func (c *zoneAwarePdbTestContext) assertDenyResponse(t *testing.T, reason string
 }
 
 func (c *zoneAwarePdbTestContext) assertAllowResponse(t *testing.T) {
-	response := ZoneAwarePdbValidatorHandler(context.Background(), c.logs, c.request)
+	response := ZoneAwarePdbValidatingWebhookHandler(context.Background(), c.logs, c.request)
 	require.NotNil(t, response.UID)
 	require.True(t, response.Allowed)
 }

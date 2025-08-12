@@ -305,7 +305,7 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 	}
 
 	zpdbValidationFunc := func(ctx context.Context, l log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {
-		return admission.ZoneAwarePdbValidatorHandler(ctx, l, ar)
+		return admission.ZoneAwarePdbValidatingWebhookHandler(ctx, l, ar)
 	}
 
 	tlsSrv, err := newTLSServer(cfg, logger, cert, metrics)
