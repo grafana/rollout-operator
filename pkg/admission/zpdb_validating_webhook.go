@@ -20,13 +20,13 @@ const (
 	ZpdbValidatorWebhookPath = "/admission/zpdb-validation"
 )
 
-type zpdbValidatingHandler struct {
+type zpdbValidatingWebhook struct {
 	ctx     context.Context
 	logger  *spanlogger.SpanLogger
 	request v1.AdmissionReview
 }
 
-func (v *zpdbValidatingHandler) initLogger() {
+func (v *zpdbValidatingWebhook) initLogger() {
 	v.logger.SetSpanAndLogTag("object.name", v.request.Request.Name)
 	v.logger.SetSpanAndLogTag("object.resource", v.request.Request.Resource.Resource)
 	v.logger.SetSpanAndLogTag("object.namespace", v.request.Request.Namespace)
@@ -39,7 +39,7 @@ func (v *zpdbValidatingHandler) initLogger() {
 
 // parse attempts to parse the raw object to a ZpdbConfig (ZoneAwarePodDisruptionBudget).
 // returns an error and http status code if the parse or validation fails
-func (v *zpdbValidatingHandler) parse() (int32, error) {
+func (v *zpdbValidatingWebhook) parse() (int32, error) {
 	var obj unstructured.Unstructured
 	if err := json.Unmarshal(v.request.Request.Object.Raw, &obj); err != nil {
 		level.Info(v.logger).Log(logMsg, errors.New("failed to unmarshal object"), "err", err)
@@ -55,7 +55,7 @@ func (v *zpdbValidatingHandler) parse() (int32, error) {
 	return int32(0), nil
 }
 
-func (v *zpdbValidatingHandler) allow() *v1.AdmissionResponse {
+func (v *zpdbValidatingWebhook) allow() *v1.AdmissionResponse {
 	rsp := v1.AdmissionResponse{
 		Allowed: true,
 		UID:     v.request.Request.UID,
@@ -63,7 +63,7 @@ func (v *zpdbValidatingHandler) allow() *v1.AdmissionResponse {
 	return &rsp
 }
 
-func (v *zpdbValidatingHandler) deny(reason string, httpStatusCode int32) *v1.AdmissionResponse {
+func (v *zpdbValidatingWebhook) deny(reason string, httpStatusCode int32) *v1.AdmissionResponse {
 	rsp := v1.AdmissionResponse{
 		Allowed: false,
 		UID:     v.request.Request.UID,
@@ -75,13 +75,13 @@ func (v *zpdbValidatingHandler) deny(reason string, httpStatusCode int32) *v1.Ad
 	return &rsp
 }
 
-// ZoneAwarePdbValidatorHandler is a handler for a validating webhook configuration.
+// ZoneAwarePdbValidatingWebhookHandler is a handler for a validating webhook configuration.
 // If attempts to parse and validate the given object as a ZoneAwarePodDisruptionBudget configuration.
-func ZoneAwarePdbValidatorHandler(ctx context.Context, l log.Logger, ar v1.AdmissionReview) *v1.AdmissionResponse {
+func ZoneAwarePdbValidatingWebhookHandler(ctx context.Context, l log.Logger, ar v1.AdmissionReview) *v1.AdmissionResponse {
 	logger, ctx := spanlogger.New(ctx, l, "admission.ZoneAwarePdbValidatorHandler()", tenantResolver)
 	defer logger.Finish()
 
-	validator := &zpdbValidatingHandler{
+	validator := &zpdbValidatingWebhook{
 		ctx:     ctx,
 		logger:  logger,
 		request: ar,
