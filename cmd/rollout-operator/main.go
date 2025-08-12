@@ -206,10 +206,10 @@ func main() {
 	dynamicClient, err := dynamic.NewForConfigAndClient(kubeConfig, httpClient)
 	check(errors.Wrap(err, "failed to init dynamicClient"))
 
-	vwo := tlscert.NewWebhookObserver(kubeClient, cfg.kubeNamespace, logger)
+	webhookObserver := tlscert.NewWebhookObserver(kubeClient, cfg.kubeNamespace, logger)
 
 	// Start TLS server if enabled.
-	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, vwo)
+	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, webhookObserver)
 
 	// Init the controller.
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
@@ -219,7 +219,7 @@ func main() {
 	go func() {
 		waitForSignalOrRestart(logger, restart)
 		c.Stop()
-		vwo.Stop()
+		webhookObserver.Stop()
 	}()
 
 	// The operator is ready once the controller successfully initialised.
@@ -273,10 +273,10 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 
 		webHookListener := &tlscert.WebhookConfigurationListener{
 			OnValidatingWebhookConfiguration: func(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) error {
-				return tlscert.PatchCABundleOnValidatingWebhooks(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
+				return tlscert.PatchCABundleOnValidatingWebhook(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
 			},
 			OnMutatingWebhookConfiguration: func(webhook *admissionregistrationv1.MutatingWebhookConfiguration) error {
-				return tlscert.PatchCABundleOnMutatingWebhooks(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
+				return tlscert.PatchCABundleOnMutatingWebhook(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
 			},
 		}
 
