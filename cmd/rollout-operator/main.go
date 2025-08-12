@@ -219,6 +219,7 @@ func main() {
 	go func() {
 		waitForSignalOrRestart(logger, restart)
 		c.Stop()
+		vwo.Stop()
 	}()
 
 	// The operator is ready once the controller successfully initialised.
