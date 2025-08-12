@@ -38,9 +38,9 @@ func (a *k8sClient) owner(pod *corev1.Pod) (*appsv1.StatefulSet, error) {
 	}
 
 	if sts, err := a.kubeClient.AppsV1().StatefulSets(pod.Namespace).Get(a.ctx, owner.Name, metav1.GetOptions{}); err != nil {
-		return nil, fmt.Errorf("unable to find StatefulSet by name - %s - %v", owner.Name, err)
+		return nil, fmt.Errorf("unable to find StatefulSet %s by name: %w", owner.Name, err)
 	} else if sts == nil {
-		return nil, fmt.Errorf("unable to find StatefulSet by name - %s", owner.Name)
+		return nil, fmt.Errorf("unable to find StatefulSet %s by name", owner.Name)
 	} else {
 		return sts, nil
 	}
@@ -96,7 +96,7 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 	// we consider the pod as not ready if there should be a given replica count but it is not yet being found in the pods query
 	// note that the effect here is that we do not know which partition these other pods will be in, so we have to attribute them to this partition to be safe
 	if len(list.Items) < replicas {
-		result.Unknown += replicas - len(list.Items)
+		result.Unknown = replicas - len(list.Items)
 	}
 
 	return result, nil

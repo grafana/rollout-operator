@@ -10,16 +10,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
-
-	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 const (
-	// strings needed to find the custom resource - keep as const as easier to change if we update the custom resource definition
-	pdbCustomResourceKind = config.ZoneAwarePodDisruptionBudgetName
-
-	// default values
-	defaultMaxUnavailable = 1
+	ZoneAwarePodDisruptionBudgetName        = "ZoneAwarePodDisruptionBudget"
+	ZoneAwarePodDisruptionBudgetsNamePlural = "zoneawarepoddisruptionbudgets"
+	ZoneAwarePodDisruptionBudgetsSpecGroup  = "rollout-operator.grafana.com"
+	ZoneAwarePodDisruptionBudgetsVersion    = "v1"
 
 	// fields we read from the config map - keep as const as easier to change if we update the custom resource definition
 	fieldMaxUnavailable           = "maxUnavailable"
@@ -30,9 +27,9 @@ const (
 
 // A Config holds the configuration of a ZoneAwarePodDisruptionBudget custom resource.
 type Config struct {
-	name string
+	Name string
 
-	generation int64
+	Generation int64
 
 	// the max unavailable pods in another zone before we deny an eviction
 	maxUnavailable int
@@ -41,7 +38,7 @@ type Config struct {
 	maxUnavailablePercentage int
 
 	// a selector for finding the StatefulSet for each zone - ie match on rollout-group label test-app-zone-a
-	stsSelector *labels.Selector
+	Selector *labels.Selector
 
 	// a regex for how we find the partition from the pod name test-app-zone-a-0 --> 0
 	podNamePartition *regexp.Regexp
@@ -50,23 +47,15 @@ type Config struct {
 	podNamePartitionRegexGroup int
 }
 
-func (c *Config) Name() string {
-	return c.name
-}
-
-func (c *Config) Generation() int64 {
-	return c.generation
-}
-
-// MatchesPod returns true if this PdbConfig label selector matches this pod
+// MatchesPod returns true if this PdbConfig label Selector matches this pod
 func (c *Config) MatchesPod(pod *corev1.Pod) bool {
-	selector := *c.stsSelector
+	selector := *c.Selector
 	return selector.Matches(labels.Set(pod.Labels))
 }
 
-// MatchesSts returns true if this PdbConfig label selector matches this pod
+// MatchesSts returns true if this PdbConfig label Selector matches this pod
 func (c *Config) MatchesSts(sts *appsv1.StatefulSet) bool {
-	selector := *c.stsSelector
+	selector := *c.Selector
 	return selector.Matches(labels.Set(sts.Labels))
 }
 
@@ -80,7 +69,7 @@ func (c *Config) MaxUnavailablePods(sts *appsv1.StatefulSet) int {
 	if c.maxUnavailablePercentage > 0 && sts.Spec.Replicas != nil && *sts.Spec.Replicas > 0 {
 		result := int(math.Floor(float64(c.maxUnavailablePercentage*int(*sts.Spec.Replicas)) / 100))
 		if result < 1 {
-			result = defaultMaxUnavailable
+			result = 1
 		}
 		return result
 	}
@@ -88,13 +77,7 @@ func (c *Config) MaxUnavailablePods(sts *appsv1.StatefulSet) int {
 	return 0
 }
 
-// StsSelector returns the Selector which can be used to find the other StatefulSets which span all zones.
-// Note that this can be nil
-func (c *Config) StsSelector() *labels.Selector {
-	return c.stsSelector
-}
-
-// PodPartition returns the partition name that a Pod covers.
+// PodPartition returns the partition Name that a Pod covers.
 // Note that if no podNamePartitionRegex has been set then an empty string will be returned.
 func (c *Config) PodPartition(pod *corev1.Pod) (string, error) {
 	if c.podNamePartition == nil {
@@ -105,7 +88,7 @@ func (c *Config) PodPartition(pod *corev1.Pod) (string, error) {
 	if len(zone) > c.podNamePartitionRegexGroup && len(zone[c.podNamePartitionRegexGroup]) > 0 {
 		return zone[c.podNamePartitionRegexGroup], nil
 	}
-	return "", errors.New("failed to extract partition from pod name regular expression")
+	return "", errors.New("failed to extract partition from pod Name regular expression")
 }
 
 // valueAsRegex attempts to find a string in the given map and compile it to a Regexp.
@@ -157,52 +140,58 @@ func valueAsRegex(config map[string]interface{}, regexField string, groupField s
 // ParseAndValidate attempts to parse the given Unstructured to a Config.
 // An error is returned if any configuration errors are found.
 func ParseAndValidate(obj *unstructured.Unstructured) (*Config, error) {
-	var mapSpec map[string]interface{}
-	var err error
-	if spec, found, err := unstructured.NestedMap(obj.Object, "spec"); err != nil {
+	mapSpec, found, err := unstructured.NestedMap(obj.Object, "spec")
+	if err != nil {
 		return nil, err
 	} else if !found {
 		return nil, errors.New("no spec found in unstructured object")
-	} else if obj.GetKind() != pdbCustomResourceKind {
-		return nil, fmt.Errorf("unexpected object kind - expecting %s", pdbCustomResourceKind)
-	} else {
-		mapSpec = spec
+	} else if obj.GetKind() != ZoneAwarePodDisruptionBudgetName {
+		return nil, fmt.Errorf("unexpected object kind - expecting %s", ZoneAwarePodDisruptionBudgetName)
 	}
 
 	cfg := &Config{
-		maxUnavailable: defaultMaxUnavailable,
-		name:           obj.GetName(),
-		generation:     obj.GetGeneration(),
+		maxUnavailable: 1,
+		Name:           obj.GetName(),
+		Generation:     obj.GetGeneration(),
 	}
 
-	// We favour the maxUnavailable value, taking the first value > 0
-	// maxUnavailable == maxUnavailablePercentage == 0 has the same effect
-	if val, found := mapSpec[fieldMaxUnavailable]; found && val != nil {
-		cfg.maxUnavailable = int(val.(int64))
+	maxUnavailable, maxUnavailableFound := mapSpec[fieldMaxUnavailable]
+	maxUnavailableP, maxUnavailableFoundP := mapSpec[fieldMaxUnavailablePercentage]
+
+	if maxUnavailableFound && maxUnavailableFoundP {
+		return nil, errors.New("invalid value: only one of maxUnavailable or maxUnavailablePercentage may be set")
+	}
+
+	if maxUnavailableFound {
+		cfg.maxUnavailable = int(maxUnavailable.(int64))
 		if cfg.maxUnavailable < 0 {
 			// fatal
-			return nil, fmt.Errorf("invalid value - max unavailable must be 0 <= val - %d", cfg.maxUnavailable)
+			return nil, fmt.Errorf("invalid value: max unavailable must be 0 <= val, got %d", cfg.maxUnavailable)
 		}
-	} else if val, found := mapSpec[fieldMaxUnavailablePercentage]; found && val != nil {
-		cfg.maxUnavailablePercentage = int(val.(int64))
+	} else if maxUnavailableFoundP {
+		cfg.maxUnavailablePercentage = int(maxUnavailableP.(int64))
 		cfg.maxUnavailable = 0
 		if cfg.maxUnavailablePercentage < 0 || cfg.maxUnavailablePercentage > 100 {
 			// fatal
-			return nil, fmt.Errorf("invalid value - max unavailable percentage must be 0 <= val <= 100 - %d", cfg.maxUnavailablePercentage)
+			return nil, fmt.Errorf("invalid value: max unavailable percentage must be 0 <= val <= 100, got %d", cfg.maxUnavailablePercentage)
 		}
 	}
 
 	if cfg.podNamePartition, cfg.podNamePartitionRegexGroup, err = valueAsRegex(mapSpec, fieldPodNamePartitionRegex, fieldPodNameRegexGroup); err != nil {
-		return nil, fmt.Errorf("invalid value - regex is not valid: %v", err)
+		return nil, fmt.Errorf("invalid value: regex is not valid, got %v", err)
 	}
 
 	if mlMap, found, err := unstructured.NestedStringMap(obj.Object, "spec", "selector", "matchLabels"); err != nil {
-		return nil, fmt.Errorf("invalid value - selector is not valid: %v", err)
+		return nil, fmt.Errorf("invalid value: selector is not valid, got %v", err)
 	} else if !found {
-		return nil, fmt.Errorf("invalid value - selector is not found")
+		return nil, fmt.Errorf("invalid value: selector is not found")
 	} else {
 		selector := labels.SelectorFromSet(mlMap)
-		cfg.stsSelector = &selector
+		cfg.Selector = &selector
+	}
+
+	if cfg.maxUnavailablePercentage > 0 && cfg.podNamePartition != nil {
+		return nil, errors.New("invalid value: max unavailable percentage can not be used with partition awareness")
 	}
 
 	return cfg, nil

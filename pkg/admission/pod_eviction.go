@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 
 	"github.com/go-kit/log"
@@ -40,13 +41,13 @@ const (
 
 	// the AdmissionResponse HTTP status codes sent in deny responses
 	// PDB has been reached
-	httpStatusPdbExceeded = 429
+	httpStatusPdbExceeded = http.StatusTooManyRequests
 	// maxUnavailable=0
-	httpStatusPdbDisabled = 403
+	httpStatusPdbDisabled = http.StatusForbidden
 	// unable to determine status of pods/statefulsets
-	httpStatusInternalError = 500
+	httpStatusInternalError = http.StatusInternalServerError
 	// configuration error
-	httpStatusMisconfiguration = 400
+	httpStatusMisconfiguration = http.StatusBadRequest
 )
 
 // a lock used to control finding a specific PDB lock
@@ -118,7 +119,7 @@ func (r *admissionReviewRequest) initLogger() {
 	r.log.SetSpanAndLogTag("object.name", r.req.Request.Name)
 	r.log.SetSpanAndLogTag("object.resource", r.req.Request.Resource.Resource)
 	r.log.SetSpanAndLogTag("object.namespace", r.req.Request.Namespace)
-	// note that this is the UID of the request, not of the pod
+	// note that this is the UID of the request, it is not the UID of the pod
 	r.log.SetSpanAndLogTag("request.uid", r.req.Request.UID)
 
 	if r.req.Request.DryRun != nil {
@@ -218,7 +219,7 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	// ie ingester-zone-a
 	request.log.SetSpanAndLogTag("owner", sts.Name)
 
-	lock := findLock(pdbConfig.Name())
+	lock := findLock(pdbConfig.Name)
 	lock.Lock()
 	defer lock.Unlock()
 
@@ -232,7 +233,7 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	// Find the other StatefulSets which span all zones.
 	// Assumption - each StatefulSet manages all the pods for a single zone. This list of StatefulSets covers all zones.
 	// During a migration it may be possible to break this assumption, but during a migration the maxUnavailable will be set to 0 and the eviction request will be denied.
-	otherStatefulSets, err := request.client.findRelatedStatefulSets(sts, pdbConfig.StsSelector())
+	otherStatefulSets, err := request.client.findRelatedStatefulSets(sts, pdbConfig.Selector)
 	if err != nil || otherStatefulSets == nil || len(otherStatefulSets.Items) <= 1 {
 		level.Error(request.log).Log(logMsg, "unable to find related stateful sets - continuing with single zone")
 		otherStatefulSets = &appsv1.StatefulSetList{Items: []appsv1.StatefulSet{*sts}}

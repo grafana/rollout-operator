@@ -140,16 +140,22 @@ func TestParseAndValidate(t *testing.T) {
 	require.ErrorContains(t, err, "unexpected object kind - expecting ZoneAwarePodDisruptionBudget")
 
 	_, err = ParseAndValidate(rawConfig(name, rolloutGroup, int64(1), int64(-1), ""))
-	require.ErrorContains(t, err, "invalid value - max unavailable must be 0 <= val")
+	require.ErrorContains(t, err, "invalid value: max unavailable must be 0 <= val")
 
 	_, err = ParseAndValidate(rawConfigMaxUnavailablePercentage(name, rolloutGroup, int64(1), int64(-1), ""))
-	require.ErrorContains(t, err, "invalid value - max unavailable percentage must be 0 <= val <= 100")
+	require.ErrorContains(t, err, "invalid value: max unavailable percentage must be 0 <= val <= 100")
 
 	_, err = ParseAndValidate(rawConfigMaxUnavailablePercentage(name, rolloutGroup, int64(1), int64(101), ""))
-	require.ErrorContains(t, err, "invalid value - max unavailable percentage must be 0 <= val <= 100")
+	require.ErrorContains(t, err, "invalid value: max unavailable percentage must be 0 <= val <= 100")
+
+	_, err = ParseAndValidate(rawConfigMaxUnavailablePercentage(name, rolloutGroup, int64(1), int64(50), "[a-z]+\\-([0-9]+)"))
+	require.ErrorContains(t, err, "invalid value: max unavailable percentage can not be used with partition awareness")
+
+	_, err = ParseAndValidate(rawConfigMultipleUnavailable(name, rolloutGroup, int64(1), int64(50), int64(1)))
+	require.ErrorContains(t, err, "invalid value: only one of maxUnavailable or maxUnavailablePercentage may be set")
 
 	_, err = ParseAndValidate(rawConfig(name, rolloutGroup, int64(1), int64(1), "([bad_regex"))
-	require.ErrorContains(t, err, "invalid value - regex is not valid")
+	require.ErrorContains(t, err, "invalid value: regex is not valid")
 
 	cfg, err := ParseAndValidate(rawConfig(name, rolloutGroup, int64(1), int64(0), ""))
 	require.NoError(t, err)
@@ -237,6 +243,29 @@ func rawConfigMaxUnavailablePercentage(name string, rolloutGroup string, generat
 					},
 				},
 				"podNamePartitionRegex": podNamePartitionRegex,
+			},
+		},
+	}
+}
+
+func rawConfigMultipleUnavailable(name string, rolloutGroup string, generation int64, maxUnavailablePercentage int64, maxUnavailable int64) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rollout-operator.grafana.com/v1",
+			"kind":       "ZoneAwarePodDisruptionBudget",
+			"metadata": map[string]interface{}{
+				"name":       name,
+				"namespace":  "testnamespace",
+				"generation": generation,
+			},
+			"spec": map[string]interface{}{
+				"maxUnavailable":           maxUnavailable,
+				"maxUnavailablePercentage": maxUnavailablePercentage,
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						config.RolloutGroupLabelKey: rolloutGroup,
+					},
+				},
 			},
 		},
 	}

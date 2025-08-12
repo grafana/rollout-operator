@@ -9,7 +9,7 @@ import (
 
 const (
 	// ms the eviction is cached for. This only needs to be long enough for an eviction webhook response to have triggered a pod state change.
-	cacheExpiryMs = 5000
+	cacheExpiry = 5000 * time.Millisecond
 )
 
 type PodEvictionCache struct {
@@ -35,7 +35,7 @@ func (c *PodEvictionCache) RecordEviction(pod *corev1.Pod) {
 	// multiple Evict() calls for the same pod are unlikely, and if the expiresAt does not need to be precise.
 	// the pod is expected to be deleted shortly after being stored here.
 	// note also that the pod.Name is used as the key rather than pod.UID, as the UID will change if the pod is deleted or recreated
-	expiresAt := time.Now().Add(time.Millisecond * cacheExpiryMs)
+	expiresAt := time.Now().Add(cacheExpiry)
 	c.expiry.Store(pod.Name, expiresAt)
 }
 
