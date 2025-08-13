@@ -263,14 +263,14 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 
 		if err = pdb.AccumulateResult(&otherSts, result); err != nil {
 			// opportunity to fail fast
-			level.Error(request.log).Log("msg", request.denyMessage(err.Error()), "sts", otherSts.Name)
+			level.Warn(request.log).Log("msg", request.denyMessage(err.Error()), "sts", otherSts.Name)
 			return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
 		}
 
 	}
 
 	if err = pdb.Validate(maxUnavailable); err != nil {
-		level.Error(request.log).Log("msg", request.denyMessage("zpdb exceeded"), "err", err)
+		level.Warn(request.log).Log("msg", request.denyMessage("zpdb exceeded"), "err", err)
 		return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
 	}
 
