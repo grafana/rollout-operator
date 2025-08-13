@@ -25,7 +25,13 @@ type k8sClient struct {
 
 // podByName searches and returns a Pod for the given namespace and name
 func (a *k8sClient) podByName(namespace string, name string) (*corev1.Pod, error) {
-	return a.kubeClient.CoreV1().Pods(namespace).Get(a.ctx, name, metav1.GetOptions{})
+	if pod, err := a.kubeClient.CoreV1().Pods(namespace).Get(a.ctx, name, metav1.GetOptions{}); err != nil {
+		return nil, err
+	} else if pod == nil {
+		return nil, errors.New("pod not found")
+	} else {
+		return pod, nil
+	}
 }
 
 // owner returns the StatefulSet which manages a pod or an error if the owner can not be found or is not a StatefulSet
@@ -47,8 +53,8 @@ func (a *k8sClient) owner(pod *corev1.Pod) (*appsv1.StatefulSet, error) {
 }
 
 // findRelatedStatefulSets returns all StatefulSets which match the given Selector.
-func (a *k8sClient) findRelatedStatefulSets(sts *appsv1.StatefulSet, selector *labels.Selector) (*appsv1.StatefulSetList, error) {
-	return a.kubeClient.AppsV1().StatefulSets(sts.Namespace).List(a.ctx, metav1.ListOptions{LabelSelector: (*selector).String()})
+func (a *k8sClient) findRelatedStatefulSets(namespace string, selector *labels.Selector) (*appsv1.StatefulSetList, error) {
+	return a.kubeClient.AppsV1().StatefulSets(namespace).List(a.ctx, metav1.ListOptions{LabelSelector: (*selector).String()})
 }
 
 // podsNotRunningAndReady finds the pods managed by a given StatefulSet. Each pod is inspected to see if it is ready and running. A tally of the total number of pods and the number not ready/running is returned.

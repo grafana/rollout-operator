@@ -144,7 +144,7 @@ func TestPodEviction_NotCreateEvent(t *testing.T) {
 	ar := createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace)
 	ar.Request.Operation = admissionv1.Delete
 	testCtx := newTestContext(ar, nil)
-	testCtx.assertAllowResponseWithWarning(t, "request operation is not create")
+	testCtx.assertAllowResponseWithWarning(t, "request operation is not create, got: DELETE")
 
 	expectedLogEntries := []string{
 		"method=admission.PodEviction()",
@@ -161,12 +161,12 @@ func TestPodEviction_NotEvictionSubResource(t *testing.T) {
 	ar := createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace)
 	ar.Request.SubResource = "foo"
 	testCtx := newTestContext(ar, nil)
-	testCtx.assertAllowResponseWithWarning(t, "request SubResource is not eviction")
+	testCtx.assertAllowResponseWithWarning(t, "request SubResource is not eviction, got: foo")
 }
 
 func TestPodEviction_EmptyName(t *testing.T) {
 	testCtx := newTestContext(createBasicEvictionAdmissionReview("", testNamespace), nil)
-	testCtx.assertAllowResponseWithWarning(t, "namespace or name are not found")
+	testCtx.assertAllowResponseWithWarning(t, "request did not include both a namespace and a name")
 }
 
 func TestPodEviction_PodNotFound(t *testing.T) {
@@ -195,7 +195,7 @@ func TestPodEviction_UnableToRetrievePdbConfig(t *testing.T) {
 	pod := newPod(testPodZoneA0, sts)
 
 	testCtx := newTestContext(createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil, pod, sts)
-	testCtx.assertAllowResponseWithWarning(t, "no zone pod disruption budgets found for pod")
+	testCtx.assertAllowResponse(t)
 }
 
 func TestPodEviction_MaxUnavailableEq0(t *testing.T) {
