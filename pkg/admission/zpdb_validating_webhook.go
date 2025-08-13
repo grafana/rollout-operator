@@ -42,13 +42,13 @@ func (v *zpdbValidatingWebhook) initLogger() {
 func (v *zpdbValidatingWebhook) parse() (int32, error) {
 	var obj unstructured.Unstructured
 	if err := json.Unmarshal(v.request.Request.Object.Raw, &obj); err != nil {
-		level.Info(v.logger).Log(logMsg, errors.New("failed to unmarshal object"), "err", err)
+		level.Info(v.logger).Log("msg", errors.New("failed to unmarshal object"), "err", err)
 		return int32(http.StatusBadRequest), err
 	}
 
 	_, err := zpdb.ParseAndValidate(&obj)
 	if err != nil {
-		level.Info(v.logger).Log(logMsg, errors.New("parsing failed"), "err", err)
+		level.Info(v.logger).Log("msg", errors.New("parsing failed"), "err", err)
 		return int32(http.StatusBadRequest), err
 	}
 

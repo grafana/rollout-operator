@@ -11,6 +11,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 // An PodObserver listens for pod changes, invalidating a PodEvictionCache on any pod state change.
@@ -73,6 +75,22 @@ func (c *PodObserver) invalidatePodEvictionCache(obj interface{}) {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
 		return
 	}
+
+	// reduce logging noise as this code path will be run on any pod update
+	// this is cheaper than finding the zpdb config for a pod
+	// and worst case if we miss an eviction cache removal it self expires
+	if !(*c.PodEvictCache).HasPendingEviction(pod) {
+		return
+	}
+
+	// after an eviction request is allowed, the informer observes a pod update which can show it still ready/running
+	// if another pod eviction request comes in before the first eviction takes effect this can incorrectly allow this later eviction request to proceed
+	if util.IsPodRunningAndReady(pod) {
+		level.Info(c.logger).Log("msg", "ignorning pod informer update - pod is still reporting as ready and running", "name", pod.GetName(), "reason", pod.Status.Reason, "phase", pod.Status.Phase, "ready", util.IsPodRunningAndReady(pod))
+		return
+	}
+
+	level.Info(c.logger).Log("msg", "accepting pod informer update - invaliding pod eviction cache", "name", pod.GetName(), "reason", pod.Status.Reason, "phase", pod.Status.Phase, "ready", util.IsPodRunningAndReady(pod))
 	(*c.PodEvictCache).Delete(pod)
 }
 
