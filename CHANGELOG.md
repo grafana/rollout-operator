@@ -3,6 +3,7 @@
 ## main / unreleased
 
 * [CHANGE] Rename flag `server.cluster-validation.http.exclude-paths` to `server.cluster-validation.http.excluded-paths` to align with `dskit`. #247
+* [ENHANCEMENT] Update Go to `1.25` #263
 * [ENHANCEMENT] Updated dependencies, including: #236 #238 #242 #247 #257
   * `github.com/prometheus/client_golang` from `v1.22.0` to `v1.23.0`
   * `github.com/prometheus/common` from `v0.64.0` to `v0.65.0`
