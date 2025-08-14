@@ -443,7 +443,7 @@ Unlike a regular `PodDisruptionBudget` which evaluates across all pods, the `Zon
 
 This allows an operator to perform maintenance on a single zone whilst ensuring sufficient pod availability in other zones.
 
-Consider the following topology where the `PDZB` has `maxUnavailable` set to 1:
+Consider the following topology where the `ZPDB` has `maxUnavailable` set to 1:
 
 * StatefulSet `ingester-zone-a` manages pods `ingester-zone-a-0` and `ingester-zone-a-1`
 * StatefulSet `ingester-zone-b` manages pods `ingester-zone-b-0` and `ingester-zone-b-1`
@@ -521,4 +521,6 @@ Functionality includes the ability to;
 
 Note - `maxUnavailable` can be set to 0. In this case no voluntary evictions in any zone will be allowed.
 
-Note - a validating webhook configuration is provided in [development](./development/zone-aware-pod-disruption-budget-validating-webhook.yaml) which allows the `rollout-operator` to verify a `ZoneAwarePodDisruptionBudget` configuration being created or updated. This will ensure that no invalid configuration can be applied
+Note - a validating webhook configuration is provided in [development](./development/zone-aware-pod-disruption-budget-validating-webhook.yaml) which allows the `rollout-operator` to verify a `ZoneAwarePodDisruptionBudget` configuration being created or updated. This will ensure that no invalid configuration can be applied.
+
+Note - the `podNameRegexGroup` allows for the capture group index to be set. This is required if the partition regex has more than one set of groupings () in the expression. 1-based indexing is used, such that 1 will match the first parenthesized capture group.

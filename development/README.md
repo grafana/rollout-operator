@@ -18,9 +18,9 @@ You'll then be able to access the rollout operator at `http://localhost:8080`, a
 
 You can use the StatefulSets to exercise the operator across a multi-zone `test-app` environment.
 
-# ZoneAwarePodDisruptionBudget (ZPDZ)
+# ZoneAwarePodDisruptionBudget (ZPDB)
 
-Included is a `ZoneAwarePodDisruptionBudget` which can be used to enforce a multi-zone `PDB`.
+Included is a `ZoneAwarePodDisruptionBudget` which can be used to enforce a multi-zone pod disruption budget.
 
 By default, this will be applied to the `test-app` Pods and StatefulSets.
 
@@ -77,7 +77,7 @@ Tail logs for the rollout-operator;
 kubectl logs -f `kubectl get pods -n rollout-operator-development | grep rollout-operator | awk '{print $1}'` -n rollout-operator-development
 ```
 
-Test the pod eviction and ZPDB;
+Test the pod eviction and `ZPDB`;
 ```
 # watch the pod status
 while true; do kubectl get pods -n rollout-operator-development; sleep 1; clear; done
@@ -92,7 +92,7 @@ Note - in the above example the `uncordon` is important as without this the drai
 
 This is a limitation of running multiple zones within a single kubernetes node. In a usual deployment each zone would have its pods distributed across different nodes.
 
-Apply an updated ZPDB
+Apply an updated `ZPDB`
 ```
 # make changes in rollout-operator-zone-aware-pod-disruption-budget.yaml
 kubectl apply -f rollout-operator-zone-aware-pod-disruption-budget.yaml

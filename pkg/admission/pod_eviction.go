@@ -109,10 +109,10 @@ func (r *admissionReviewRequest) denyWithReason(reason string, httpStatusCode in
 	rsp := v1.AdmissionResponse{
 		Allowed: false,
 		UID:     r.req.Request.UID,
-	}
-	rsp.Result = &metav1.Status{
-		Message: reason,
-		Code:    httpStatusCode,
+		Result: &metav1.Status{
+			Message: reason,
+			Code:    httpStatusCode,
+		},
 	}
 	return &rsp
 }
@@ -163,8 +163,8 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 
 	// validate that this is a valid pod eviction create request
 	if err := request.validate(); err != nil {
-		level.Warn(request.log).Log("msg", request.allowMessage("not a valid create pod eviction request"), "err", err)
-		return request.allowWithWarning(err.Error())
+		level.Warn(request.log).Log("msg", request.denyMessage("not a valid create pod eviction request"), "err", err)
+		return request.denyWithReason(err.Error(), http.StatusBadRequest)
 	}
 
 	// get the pod which has been requested for eviction
@@ -195,8 +195,8 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 	// get the StatefulSet who manages this pod - allow the request if this fails
 	var sts *appsv1.StatefulSet
 	if sts, err = request.client.owner(pod); err != nil {
-		level.Error(request.log).Log("msg", request.allowMessage("unable to find pod owner"), "err", err)
-		return request.allowWithWarning(err.Error())
+		level.Error(request.log).Log("msg", request.denyMessage("unable to find pod owner"), "err", err)
+		return request.denyWithReason(err.Error(), http.StatusInternalServerError)
 	}
 
 	// ie ingester-zone-a
@@ -263,14 +263,14 @@ func PodEviction(ctx context.Context, l log.Logger, ar v1.AdmissionReview, kubeC
 
 		if err = pdb.AccumulateResult(&otherSts, result); err != nil {
 			// opportunity to fail fast
-			level.Warn(request.log).Log("msg", request.denyMessage(err.Error()), "sts", otherSts.Name)
+			level.Info(request.log).Log("msg", request.denyMessage(err.Error()), "sts", otherSts.Name)
 			return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
 		}
 
 	}
 
 	if err = pdb.Validate(maxUnavailable); err != nil {
-		level.Warn(request.log).Log("msg", request.denyMessage("zpdb exceeded"), "err", err)
+		level.Info(request.log).Log("msg", request.denyMessage("zpdb exceeded"), "err", err)
 		return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
 	}
 

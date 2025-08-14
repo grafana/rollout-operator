@@ -18,7 +18,6 @@ import (
 // An PodObserver listens for pod changes, invalidating a PodEvictionCache on any pod state change.
 // The PodObserver is used by the pod eviction web hook handler.
 type PodObserver struct {
-	namespace     string
 	podsFactory   informers.SharedInformerFactory
 	podLister     corelisters.PodLister
 	podsInformer  cache.SharedIndexInformer
@@ -35,7 +34,6 @@ func NewPodObserver(kubeClient kubernetes.Interface, namespace string, logger lo
 	podsInformer := podsFactory.Core().V1().Pods()
 
 	c := &PodObserver{
-		namespace:     namespace,
 		podsFactory:   podsFactory,
 		podLister:     podsInformer.Lister(),
 		podsInformer:  podsInformer.Informer(),
@@ -78,8 +76,8 @@ func (c *PodObserver) invalidatePodEvictionCache(obj interface{}) {
 
 	// reduce logging noise as this code path will be run on any pod update
 	// this is cheaper than finding the zpdb config for a pod
-	// and worst case if we miss an eviction cache removal it self expires
-	if !(*c.PodEvictCache).HasPendingEviction(pod) {
+	// and worst case if we miss an eviction cache removal it self-expires
+	if !c.PodEvictCache.HasPendingEviction(pod) {
 		return
 	}
 
@@ -91,7 +89,7 @@ func (c *PodObserver) invalidatePodEvictionCache(obj interface{}) {
 	}
 
 	level.Info(c.logger).Log("msg", "accepting pod informer update - invaliding pod eviction cache", "name", pod.GetName(), "reason", pod.Status.Reason, "phase", pod.Status.Phase, "ready", util.IsPodRunningAndReady(pod))
-	(*c.PodEvictCache).Delete(pod)
+	c.PodEvictCache.Delete(pod)
 }
 
 func (c *PodObserver) onPodAdded(obj interface{}) {

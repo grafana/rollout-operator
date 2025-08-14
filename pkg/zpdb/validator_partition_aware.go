@@ -14,13 +14,24 @@ type ValidatorPartitionAware struct {
 	sts       *appsv1.StatefulSet
 	result    *ZoneStatusResult
 	partition string
-	matcher   *PartitionMatcher
+	matcher   PartitionMatcher
 	zones     int
 	pdbConfig *Config
 	log       *spanlogger.SpanLogger
 }
 
 func NewValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *Config, log *spanlogger.SpanLogger) *ValidatorPartitionAware {
+	partitionMatcher := func(pd *corev1.Pod) bool {
+		thisPartition, err := pdbConfig.PodPartition(pd)
+		if err != nil {
+			// the partition name was successfully extracted from the pod being evicted
+			// so if this regex has failed then the assumption is that it is not the same partition, as would have a different naming convention
+			// or the regex is too tightly defined
+			level.Error(log).Log("msg", "Unable to extract partition from pod name - check the pod partition name regex", "name", pd.Name)
+		}
+		return thisPartition == partition
+	}
+
 	return &ValidatorPartitionAware{
 		sts:       sts,
 		partition: partition,
@@ -28,18 +39,7 @@ func NewValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones
 		pdbConfig: pdbConfig,
 		log:       log,
 		result:    &ZoneStatusResult{},
-		matcher: &PartitionMatcher{
-			Same: func(pd *corev1.Pod) bool {
-				thisPartition, err := pdbConfig.PodPartition(pd)
-				if err != nil {
-					// the partition name was successfully extracted from the pod being evicted
-					// so if this regex has failed then the assumption is that it is not the same partition, as would have a different naming convention
-					// or the regex is too tightly defined
-					level.Error(log).Log("msg", "Unable to extract partition from pod name - check the pod partition name regex", "name", pd.Name)
-				}
-				return thisPartition == partition
-			},
-		},
+		matcher:   partitionMatcher,
 	}
 }
 
@@ -65,6 +65,6 @@ func (v *ValidatorPartitionAware) SuccessMessage() string {
 	return fmt.Sprintf("zpdb met for partition %s across %d zones", v.partition, v.zones)
 }
 
-func (v *ValidatorPartitionAware) ConsiderPod() *PartitionMatcher {
+func (v *ValidatorPartitionAware) ConsiderPod() PartitionMatcher {
 	return v.matcher
 }

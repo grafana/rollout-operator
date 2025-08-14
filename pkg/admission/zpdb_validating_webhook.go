@@ -52,7 +52,7 @@ func (v *zpdbValidatingWebhook) parse() (int32, error) {
 		return int32(http.StatusBadRequest), err
 	}
 
-	return int32(0), nil
+	return 0, nil
 }
 
 func (v *zpdbValidatingWebhook) allow() *v1.AdmissionResponse {
@@ -67,10 +67,10 @@ func (v *zpdbValidatingWebhook) deny(reason string, httpStatusCode int32) *v1.Ad
 	rsp := v1.AdmissionResponse{
 		Allowed: false,
 		UID:     v.request.Request.UID,
-	}
-	rsp.Result = &metav1.Status{
-		Message: reason,
-		Code:    httpStatusCode,
+		Result: &metav1.Status{
+			Message: reason,
+			Code:    httpStatusCode,
+		},
 	}
 	return &rsp
 }

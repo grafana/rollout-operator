@@ -3,6 +3,7 @@ package zpdb
 import (
 	"context"
 	"fmt"
+	"github.com/go-kit/log"
 	"testing"
 	"time"
 
@@ -13,19 +14,10 @@ import (
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
-type podObserverTestCase struct {
-	kubeClient *k8sfake.Clientset
-	logger     mockLogger
-	observer   *PodObserver
-}
-
-func newPodObserverTestCase() *podObserverTestCase {
-	test := podObserverTestCase{
-		logger:     mockLogger{},
-		kubeClient: k8sfake.NewClientset(),
-	}
-	test.observer = NewPodObserver(test.kubeClient, testNamespace, test.logger)
-	return &test
+func newPodObserverTestCase() (*k8sfake.Clientset, *PodObserver) {
+	client := k8sfake.NewClientset()
+	observer := NewPodObserver(client, testNamespace, log.NewNopLogger())
+	return client, observer
 }
 
 func createTestPod(name, namespace string) *corev1.Pod {
@@ -40,29 +32,29 @@ func createTestPod(name, namespace string) *corev1.Pod {
 
 // TestObserver_NewPdbObserver- basic constructor and life cycle test
 func TestObserver_NewPodObserver(t *testing.T) {
-	test := newPodObserverTestCase()
+	_, observer := newPodObserverTestCase()
 
-	require.NotNil(t, test.observer)
-	require.NotNil(t, test.observer.PodEvictCache)
-	require.NotNil(t, test.observer.podsFactory)
-	require.NotNil(t, test.observer.podsInformer)
-	require.NotNil(t, test.observer.logger)
-	require.NotNil(t, test.observer.stopCh)
-	require.NoError(t, test.observer.Start())
+	require.NotNil(t, observer)
+	require.NotNil(t, observer.PodEvictCache)
+	require.NotNil(t, observer.podsFactory)
+	require.NotNil(t, observer.podsInformer)
+	require.NotNil(t, observer.logger)
+	require.NotNil(t, observer.stopCh)
+	require.NoError(t, observer.Start())
 
 	// Ensure that stopCh has been opened
 	select {
-	case <-test.observer.stopCh:
+	case <-observer.stopCh:
 		t.Fatal("stopCh should not be closed initially")
 	default:
 		// Expected - channel is open
 	}
 
-	test.observer.Stop()
+	observer.Stop()
 
 	// Ensure that stopCh has been closed
 	select {
-	case <-test.observer.stopCh:
+	case <-observer.stopCh:
 		// Expected - channel is closed
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("stopCh should be closed after Stop()")
@@ -71,52 +63,52 @@ func TestObserver_NewPodObserver(t *testing.T) {
 
 // TestObserver_PodEvents validates the pod eviction cache is invalidated on pod changes
 func TestObserver_PodEvents(t *testing.T) {
-	test := newPodObserverTestCase()
-	require.NoError(t, test.observer.Start())
-	defer test.observer.Stop()
+	client, observer := newPodObserverTestCase()
+	require.NoError(t, observer.Start())
+	defer observer.Stop()
 
 	pod := createTestPod("test-pod", testNamespace)
 
 	// Add pod to fake client - this should trigger the informer and invalidate the cache
-	test.observer.PodEvictCache.RecordEviction(pod)
-	require.True(t, test.observer.PodEvictCache.HasPendingEviction(pod))
-	_, err := test.kubeClient.CoreV1().Pods(testNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	observer.PodEvictCache.RecordEviction(pod)
+	require.True(t, observer.PodEvictCache.HasPendingEviction(pod))
+	_, err := client.CoreV1().Pods(testNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
 	require.NoError(t, err)
-	awaitEviction(t, pod, test)
+	awaitEviction(t, pod, observer)
 
 	// Update pod to fake client - this should trigger the informer and invalidate the cache
-	test.observer.PodEvictCache.RecordEviction(pod)
-	require.True(t, test.observer.PodEvictCache.HasPendingEviction(pod))
-	_, err = test.kubeClient.CoreV1().Pods(testNamespace).Update(context.Background(), pod, metav1.UpdateOptions{})
+	observer.PodEvictCache.RecordEviction(pod)
+	require.True(t, observer.PodEvictCache.HasPendingEviction(pod))
+	_, err = client.CoreV1().Pods(testNamespace).Update(context.Background(), pod, metav1.UpdateOptions{})
 	require.NoError(t, err)
-	awaitEviction(t, pod, test)
+	awaitEviction(t, pod, observer)
 
 	// Delete pod to fake client - this should trigger the informer and invalidate the cache
-	test.observer.PodEvictCache.RecordEviction(pod)
-	require.True(t, test.observer.PodEvictCache.HasPendingEviction(pod))
-	err = test.kubeClient.CoreV1().Pods(testNamespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
+	observer.PodEvictCache.RecordEviction(pod)
+	require.True(t, observer.PodEvictCache.HasPendingEviction(pod))
+	err = client.CoreV1().Pods(testNamespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
 	require.NoError(t, err)
-	awaitEviction(t, pod, test)
+	awaitEviction(t, pod, observer)
 }
 
 // TestObserver_InvalidObject - tests that no panics occur if an invalid object is passed from the informers
 func TestPodObserver_InvalidObject(t *testing.T) {
-	test := newPodObserverTestCase()
-	require.NoError(t, test.observer.Start())
-	defer test.observer.Stop()
+	_, observer := newPodObserverTestCase()
+	require.NoError(t, observer.Start())
+	defer observer.Stop()
 
 	invalidObj := "not-a-pod"
 
 	// These should not panic
-	test.observer.onPodAdded(invalidObj)
-	test.observer.onPodUpdated(invalidObj, invalidObj)
-	test.observer.onPodDeleted(invalidObj)
+	observer.onPodAdded(invalidObj)
+	observer.onPodUpdated(invalidObj, invalidObj)
+	observer.onPodDeleted(invalidObj)
 }
 
 // awaitEviction awaits a pod to be evicted from the cache - sleeping for a short period and testing the cache a number of times.
-func awaitEviction(t *testing.T, pod *corev1.Pod, test *podObserverTestCase) {
+func awaitEviction(t *testing.T, pod *corev1.Pod, observer *PodObserver) {
 	task := func() bool {
-		return !test.observer.PodEvictCache.HasPendingEviction(pod)
+		return !observer.PodEvictCache.HasPendingEviction(pod)
 	}
 	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "Awaiting pod eviction")
 }

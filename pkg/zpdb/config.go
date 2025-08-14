@@ -53,8 +53,8 @@ func (c *Config) MatchesPod(pod *corev1.Pod) bool {
 	return selector.Matches(labels.Set(pod.Labels))
 }
 
-// MatchesSts returns true if this PdbConfig label Selector matches this pod
-func (c *Config) MatchesSts(sts *appsv1.StatefulSet) bool {
+// MatchesStatefulSet returns true if this PdbConfig label Selector matches this pod
+func (c *Config) MatchesStatefulSet(sts *appsv1.StatefulSet) bool {
 	selector := *c.Selector
 	return selector.Matches(labels.Set(sts.Labels))
 }
@@ -97,11 +97,6 @@ func (c *Config) PodPartition(pod *corev1.Pod) (string, error) {
 // A nil is returned for the Regexp if there is no string in the map.
 func valueAsRegex(config map[string]interface{}, regexField string, groupField string) (*regexp.Regexp, int, error) {
 	var regexString string
-	var groupValue int
-	var groupValueSet = false
-	var re *regexp.Regexp
-	var err error
-
 	if val, found := config[regexField]; !found || len(val.(string)) == 0 {
 		// no regex - this is ok
 		return nil, 0, nil
@@ -109,6 +104,8 @@ func valueAsRegex(config map[string]interface{}, regexField string, groupField s
 		regexString = val.(string)
 	}
 
+	var groupValue int
+	var groupValueSet = false
 	if val, found := config[groupField]; !found {
 		groupValue = 1
 	} else {
@@ -117,7 +114,8 @@ func valueAsRegex(config map[string]interface{}, regexField string, groupField s
 		groupValueSet = true
 	}
 
-	if re, err = regexp.Compile("^" + regexString + "$"); err != nil {
+	re, err := regexp.Compile("^" + regexString + "$")
+	if err != nil {
 		return nil, 0, err
 	}
 
@@ -128,13 +126,12 @@ func valueAsRegex(config map[string]interface{}, regexField string, groupField s
 		return nil, 0, errors.New("regular expression requires at least one subexpression")
 	} else if numSubexp > 1 && !groupValueSet {
 		// regex has multiple () but the index has not been set
-		return nil, 0, errors.New("regular expression has multiple subexpressions and requires an ,$index suffix")
+		return nil, 0, fmt.Errorf("regular expression has multiple subexpressions and requires %s to be set", groupField)
 	} else if numSubexp < groupValue {
 		// the index exceeds the number of groups
 		return nil, 0, errors.New("regular expression subexpression index out of range")
-	} else {
-		return re, groupValue, nil
 	}
+	return re, groupValue, nil
 }
 
 // ParseAndValidate attempts to parse the given Unstructured to a Config.

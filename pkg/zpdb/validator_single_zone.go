@@ -14,16 +14,14 @@ import (
 type ValidatorSingleZone struct {
 	sts     *appsv1.StatefulSet
 	result  *ZoneStatusResult
-	matcher *PartitionMatcher
+	matcher PartitionMatcher
 }
 
 func NewValidatorSingleZone(sts *appsv1.StatefulSet) *ValidatorSingleZone {
 	return &ValidatorSingleZone{
 		sts: sts,
-		matcher: &PartitionMatcher{
-			Same: func(pod *corev1.Pod) bool {
-				return true
-			},
+		matcher: func(pod *corev1.Pod) bool {
+			return true
 		},
 	}
 }
@@ -43,12 +41,12 @@ func (p *ValidatorSingleZone) AccumulateResult(sts *appsv1.StatefulSet, r *ZoneS
 
 func (p *ValidatorSingleZone) Validate(maxUnavailable int) error {
 	// add 1 to reflect the pod which is being requested for eviction
-	if p.result.NotReady+p.result.Unknown+1 > maxUnavailable {
+	if p.result.NotReady+p.result.Unknown >= maxUnavailable {
 		return errors.New(pdbMessage(p.result, p.sts.Name))
 	}
 	return nil
 }
 
-func (p *ValidatorSingleZone) ConsiderPod() *PartitionMatcher {
+func (p *ValidatorSingleZone) ConsiderPod() PartitionMatcher {
 	return p.matcher
 }
