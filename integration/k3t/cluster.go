@@ -3,6 +3,8 @@ package k3t
 import (
 	"context"
 	"fmt"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/client-go/dynamic"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -135,6 +137,12 @@ func NewCluster(ctx context.Context, t *testing.T, opts ...Option) Cluster {
 	clientset, err := kubernetes.NewForConfig(config)
 	require.NoError(t, err, "Failed to build kubernetes clientset")
 
+	apiExtClient, err := apiextensionsclient.NewForConfig(config)
+	require.NoError(t, err, "Failed to build apiextensions clientset")
+
+	apiDynClient, err := dynamic.NewForConfig(config)
+	require.NoError(t, err, "Failed to build dynamic client")
+
 	t.Logf("KUBECONFIG=%s", kubeConfigFile)
 
 	if len(opt.images) > 0 {
@@ -144,6 +152,8 @@ func NewCluster(ctx context.Context, t *testing.T, opts ...Option) Cluster {
 
 	return Cluster{
 		k:             clientset,
+		extK:          apiExtClient,
+		dynK:          apiDynClient,
 		clusterConfig: clusterConfig,
 		lbPort:        opt.lbPort,
 	}
@@ -167,13 +177,16 @@ func getFreePort(t *testing.T, defaultPort string) string {
 type Cluster struct {
 	clusterConfig *v1alpha5.ClusterConfig
 	k             *kubernetes.Clientset
+	extK          *apiextensionsclient.Clientset
+	dynK          *dynamic.DynamicClient
 	lbPort        string
 }
 
 func (c Cluster) API() *kubernetes.Clientset {
 	return c.k
 }
-
+func (c Cluster) ExtAPI() *apiextensionsclient.Clientset { return c.extK }
+func (c Cluster) DynK() *dynamic.DynamicClient           { return c.dynK }
 func (c Cluster) LBPort() string {
 	return c.lbPort
 }

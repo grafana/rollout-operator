@@ -5,6 +5,8 @@ package integration
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -16,10 +18,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func createMockServiceZone(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace, name string) {
+func createMockServiceZone(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace, name string, replicas int32) {
 	t.Helper()
 	{
-		_, err := api.AppsV1().StatefulSets(namespace).Create(ctx, mockServiceStatefulSet(name, "1", true), metav1.CreateOptions{})
+		_, err := api.AppsV1().StatefulSets(namespace).Create(ctx, mockServiceStatefulSet(name, "1", true, replicas), metav1.CreateOptions{})
 		require.NoError(t, err, "Can't create StatefulSet")
 	}
 
@@ -90,7 +92,7 @@ func mockServiceIngress(name string) *networkingv1.Ingress {
 	}
 }
 
-func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSet {
+func mockServiceStatefulSet(name, version string, ready bool, replicas int32) *appsv1.StatefulSet {
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -99,7 +101,7 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 			},
 		},
 		Spec: appsv1.StatefulSetSpec{
-			Replicas: ptr[int32](1),
+			Replicas: ptr[int32](replicas),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"name": name,
@@ -109,7 +111,8 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 				ObjectMeta: metav1.ObjectMeta{
 					Name: name,
 					Labels: map[string]string{
-						"name": name,
+						"name":          name,
+						"rollout-group": "mock",
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -156,6 +159,50 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 			},
 		},
 	}
+}
+
+func zoneAwarePodDisruptionBudgetSchema() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Group:    "rollout-operator.grafana.com",
+		Version:  "v1",
+		Resource: "zoneawarepoddisruptionbudgets", // plural name in CRD
+	}
+}
+
+func zoneAwarePodDisruptionBudgetSchemaKind() schema.GroupVersionKind {
+	return schema.GroupVersionKind{
+		Group:   "rollout-operator.grafana.com",
+		Version: "v1",
+		Kind:    "ZoneAwarePodDisruptionBudget",
+	}
+}
+
+func zoneAwarePodDisruptionBudget(namespace, name, rolloutGroup string, maxUnavailable int64) *unstructured.Unstructured {
+	zpdb := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rollout-operator.grafana.com/v1",
+			"kind":       "ZoneAwarePodDisruptionBudget",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+				"labels": map[string]interface{}{
+					"name": name,
+				},
+			},
+			"spec": map[string]interface{}{
+				"maxUnavailable": maxUnavailable,
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"rollout-group": rolloutGroup,
+					},
+				},
+			},
+		},
+	}
+
+	zpdb.SetGroupVersionKind(zoneAwarePodDisruptionBudgetSchemaKind())
+
+	return zpdb
 }
 
 func pathPrefix(svcName string) string {
