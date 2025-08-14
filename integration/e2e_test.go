@@ -5,10 +5,14 @@ package integration
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	_ "k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/grafana/rollout-operator/integration/k3t"
 )
@@ -20,24 +24,24 @@ func TestRolloutHappyCase(t *testing.T) {
 	api := cluster.API()
 
 	// Create rollout operator and check it's running and ready.
-	createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, false)
+	createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, false)
 	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 
 	// Create mock service, and check that it is in the desired state.
-	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a")
-	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b")
-	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-c")
+	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", int32(1))
+	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b", int32(1))
+	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-c", int32(1))
 	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 	requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 
 	// Update all mock service statefulsets.
-	_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-a", "2", false), metav1.UpdateOptions{})
+	_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-a", "2", false, int32(1)), metav1.UpdateOptions{})
 	require.NoError(t, err, "Can't update StatefulSet")
-	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-b", "2", false), metav1.UpdateOptions{})
+	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-b", "2", false, int32(1)), metav1.UpdateOptions{})
 	require.NoError(t, err, "Can't update StatefulSet")
-	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-c", "2", false), metav1.UpdateOptions{})
+	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-c", "2", false, int32(1)), metav1.UpdateOptions{})
 	require.NoError(t, err, "Can't update StatefulSet")
 
 	// First pod should be now version 2 and not be ready, the rest should be ready yet.
@@ -64,6 +68,287 @@ func TestRolloutHappyCase(t *testing.T) {
 	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectReady(), expectVersion("2"))
 }
 
+func awaitCABundleAssignment(webhookCnt int, ctx context.Context, api *kubernetes.Clientset) func() bool {
+	return func() bool {
+		list, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return false
+		}
+		if len(list.Items) != webhookCnt {
+			return false
+		}
+
+		success := true
+		for _, webhook := range list.Items {
+			if webhook.Webhooks[0].ClientConfig.CABundle == nil {
+				success = false
+			}
+		}
+
+		return success
+	}
+}
+
+// TestWebHookInformer validates that we can add validating webhooks before or after the rollout-operator has started, and they will have their CABundle decorated
+func TestWebHookInformer(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	api := cluster.API()
+
+	{
+		t.Log("Add a webhook before the rollout-operator is created")
+		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+		require.NoError(t, err)
+		require.Nil(t, wh.Webhooks[0].ClientConfig.CABundle)
+	}
+
+	{
+		t.Log("Add a webhook before the rollout-operator is created")
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+
+		t.Log("Await CABundle assignment")
+		require.Eventually(t, awaitCABundleAssignment(1, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
+	}
+
+	{
+		t.Log("Add a webhook after the rollout-operator has created")
+		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, zpdbValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+		require.NoError(t, err)
+		require.Nil(t, wh.Webhooks[0].ClientConfig.CABundle)
+
+		t.Log("Await CABundle assignment")
+		require.Eventually(t, awaitCABundleAssignment(2, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
+	}
+
+	{
+		t.Log("Add another webhooks")
+		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, podEvictionValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+		require.NoError(t, err)
+		require.Nil(t, wh.Webhooks[0].ClientConfig.CABundle)
+
+		t.Log("Await CABundle assignment")
+		require.Eventually(t, awaitCABundleAssignment(3, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
+	}
+}
+
+func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	api := cluster.API()
+
+	_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, zpdbValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, podEvictionValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	{
+		t.Log("Create rollout operator and check it's running and ready.")
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+	}
+
+	{
+		t.Log("Try to create an invalid zpdb configuration.")
+		zpdb := zoneAwarePodDisruptionBudget(corev1.NamespaceDefault, "ingester-zpdb", "mock", -1)
+		_, err = cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
+		require.Error(t, err)
+	}
+
+	{
+		t.Log("Create a valid zpdb configuration.")
+		zpdb := zoneAwarePodDisruptionBudget(corev1.NamespaceDefault, "ingester-zpdb", "mock", 1)
+		_, err = cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
+		require.NoError(t, err)
+	}
+
+	{
+		t.Log("Create 2 zones each with 2 pods.")
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", int32(2))
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b", int32(2))
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	}
+
+	nodeList, err := api.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, nodeList.Items, 1)
+	node := nodeList.Items[0]
+
+	{
+		t.Log("Cordon the node.")
+		t.Logf("Cordon node %s", node.Name)
+		node.Spec.Unschedulable = true
+		_, err = api.CoreV1().Nodes().Update(ctx, &node, metav1.UpdateOptions{})
+		require.NoError(t, err)
+	}
+
+	{
+		t.Log("Evict a pod.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-0", Namespace: corev1.NamespaceDefault}}
+		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+	}
+
+	{
+		t.Log("Deny a pod eviction in the same zone.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-1", Namespace: corev1.NamespaceDefault}}
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
+	}
+
+	{
+		t.Log("Deny a pod eviction in another zone.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
+	}
+}
+
+func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	api := cluster.API()
+
+	_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, zpdbValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, podEvictionValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	{
+		t.Log("Create rollout operator and check it's running and ready.")
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+	}
+
+	{
+		t.Log("Create a valid zpdb configuration.")
+		zpdb := zoneAwarePodDisruptionBudget(corev1.NamespaceDefault, "ingester-zpdb", "mock", 2)
+		_, err = cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
+		require.NoError(t, err)
+	}
+
+	{
+		t.Log("Create 2 zones each with 2 pods.")
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", int32(2))
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b", int32(2))
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	}
+
+	nodeList, err := api.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, nodeList.Items, 1)
+	node := nodeList.Items[0]
+
+	{
+		t.Log("Cordon the node.")
+		t.Logf("Cordon node %s", node.Name)
+		node.Spec.Unschedulable = true
+		_, err = api.CoreV1().Nodes().Update(ctx, &node, metav1.UpdateOptions{})
+		require.NoError(t, err)
+	}
+
+	{
+		t.Log("Evict a pod.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-0", Namespace: corev1.NamespaceDefault}}
+		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+	}
+
+	{
+		t.Log("Deny a pod eviction in another zone.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
+	}
+
+	{
+		t.Log("Allow a pod eviction in same zone.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-1", Namespace: corev1.NamespaceDefault}}
+		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+	}
+}
+
+func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	api := cluster.API()
+
+	_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, zpdbValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, podEvictionValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	{
+		t.Log("Create rollout operator and check it's running and ready.")
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+	}
+
+	{
+		t.Log("Create a valid zpdb configuration.")
+		zpdb := zoneAwarePodDisruptionBudgetWithRegex(corev1.NamespaceDefault, "ingester-zpdb", "mock", 1, "mock-zone-[a-z]+-([0-9]+)")
+		_, err = cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
+		require.NoError(t, err)
+	}
+
+	{
+		t.Log("Create 2 zones each with 2 pods. There are 2 partitions across 2 zones")
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", int32(2))
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b", int32(2))
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	}
+
+	nodeList, err := api.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, nodeList.Items, 1)
+	node := nodeList.Items[0]
+
+	{
+		t.Log("Cordon the node.")
+		t.Logf("Cordon node %s", node.Name)
+		node.Spec.Unschedulable = true
+		_, err = api.CoreV1().Nodes().Update(ctx, &node, metav1.UpdateOptions{})
+		require.NoError(t, err)
+	}
+
+	{
+		t.Log("Evict a pod in partition 0.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-0", Namespace: corev1.NamespaceDefault}}
+		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+	}
+
+	{
+		t.Log("Deny a pod eviction in the same partition.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in partition 0", "Eviction denied")
+	}
+
+	{
+		t.Log("Allow a pod eviction in another partition.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-1", Namespace: corev1.NamespaceDefault}}
+		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+	}
+
+	{
+		t.Log("Deny a pod eviction in the same partition.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-1", Namespace: corev1.NamespaceDefault}}
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in partition 1", "Eviction denied")
+	}
+}
+
 func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 	ctx := context.Background()
 
@@ -78,12 +363,12 @@ func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 	}
 
-	mock := mockServiceStatefulSet("mock", "1", true)
+	mock := mockServiceStatefulSet("mock", "1", true, int32(1))
 	{
 		t.Log("Create the service with two replicas.")
 		mock.Spec.Replicas = ptr[int32](2)
@@ -127,12 +412,12 @@ func TestNoDownscale_DownscaleUpdatingStatefulSet(t *testing.T) {
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 	}
 
-	mock := mockServiceStatefulSet("mock", "1", true)
+	mock := mockServiceStatefulSet("mock", "1", true, int32(1))
 	{
 		t.Log("Create the service with two replicas.")
 		mock.Labels["grafana.com/no-downscale"] = "true"
@@ -177,12 +462,12 @@ func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, true)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 	}
 
-	mock := mockServiceStatefulSet("mock", "1", true)
+	mock := mockServiceStatefulSet("mock", "1", true, int32(1))
 	mock.Labels["grafana.com/no-downscale"] = "true"
 	{
 		t.Log("Create the service with two replicas.")
