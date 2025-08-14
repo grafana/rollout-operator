@@ -31,7 +31,7 @@ func TestZoneTracker(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	// Create a new zoneTracker with the fake client
-	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
+	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
 
 	zones := []string{"testzone", "testzone2", "testzone3"}
 	stsList := &appsv1.StatefulSetList{
@@ -97,7 +97,7 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	// Create a new zoneTracker with the fake client
-	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
+	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
 
 	stsList := &appsv1.StatefulSetList{
 		Items: []appsv1.StatefulSet{
@@ -148,7 +148,7 @@ func TestLoadZonesCreatesInitialZones(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	// Create a new zoneTracker with the fake client
-	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
+	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
 
 	stsList := &appsv1.StatefulSetList{
 		Items: []appsv1.StatefulSet{
@@ -203,7 +203,7 @@ func TestLoadZonesEmptyConfigMap(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	// Create a new zoneTracker with the fake client
-	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
+	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
 
 	stsList := &appsv1.StatefulSetList{}
 
@@ -238,7 +238,7 @@ func TestSetDownscaled(t *testing.T) {
 	}
 
 	// Create a new zoneTracker with the fake client
-	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
+	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
 
 	// Test when zone does not exist in the map
 	zone := "nonexistentzone"
@@ -287,7 +287,7 @@ func TestLastDownscaledNonExistentZone(t *testing.T) {
 	client := fake.NewSimpleClientset()
 
 	// Create a new zoneTracker with the fake client
-	zt := newZoneTracker(client, "testnamespace", "testconfigmap")
+	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
 
 	time, _ := zt.lastDownscaled("nonexistentzone")
 	fmt.Printf("time: %v\n", time)
@@ -322,6 +322,7 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 	rolloutGroupIndexGateway := "index-gateway"
 	indexGatewayZoneA := "index-gateway-zone-a"
 
+	clusterDomain := "cluster.local"
 	namespace := "test"
 	dryRun := false
 	buildAdmissionRequest := func(rolloutGroup string, stsName string) admissionv1.AdmissionReview {
@@ -378,7 +379,7 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 
 	api := fake.NewSimpleClientset()
 
-	zt := newZoneTracker(api, namespace, "testconfigmap")
+	zt := newZoneTracker(api, clusterDomain, namespace, "testconfigmap")
 
 	// block the ingester-zone-a downscale request for rollout group ingester
 	ingesterZoneAPrepDownscaleDone := make(chan struct{})

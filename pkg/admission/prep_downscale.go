@@ -38,7 +38,7 @@ const (
 	maxPrepareGoroutines        = 32
 )
 
-func PrepareDownscale(ctx context.Context, rt http.RoundTripper, logger log.Logger, ar admissionv1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string) *admissionv1.AdmissionResponse {
+func PrepareDownscale(ctx context.Context, rt http.RoundTripper, logger log.Logger, ar admissionv1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string, clusterDomain string) *admissionv1.AdmissionResponse {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: otelhttp.NewTransport(rt, otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
@@ -47,18 +47,18 @@ func PrepareDownscale(ctx context.Context, rt http.RoundTripper, logger log.Logg
 	}
 
 	if useZoneTracker {
-		zt := newZoneTracker(api, ar.Request.Namespace, zoneTrackerConfigMapName)
+		zt := newZoneTracker(api, clusterDomain, ar.Request.Namespace, zoneTrackerConfigMapName)
 		return zt.prepareDownscale(ctx, logger, ar, api, client)
 	}
 
-	return prepareDownscale(ctx, logger, ar, api, client)
+	return prepareDownscale(ctx, logger, ar, api, client, clusterDomain)
 }
 
 type httpClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.AdmissionReview, api kubernetes.Interface, client httpClient) *admissionv1.AdmissionResponse {
+func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.AdmissionReview, api kubernetes.Interface, client httpClient, clusterDomain string) *admissionv1.AdmissionResponse {
 	logger, ctx := spanlogger.New(ctx, l, "admission.prepareDownscale()", tenantResolver)
 	defer logger.Finish()
 
@@ -175,7 +175,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.Admissio
 	}
 
 	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
-	eps := createEndpoints(ar, oldInfo, newInfo, stsPrepareInfo.port, stsPrepareInfo.path, stsPrepareInfo.serviceName)
+	eps := createEndpoints(ar, oldInfo, newInfo, stsPrepareInfo.port, stsPrepareInfo.path, stsPrepareInfo.serviceName, clusterDomain)
 
 	if err := sendPrepareShutdownRequests(ctx, logger, client, eps); err != nil {
 		// Down-scale operation is disallowed because at least one pod failed to
@@ -471,14 +471,14 @@ func checkReplicasChange(logger log.Logger, oldInfo, newInfo *objectInfo) *admis
 	return nil
 }
 
-func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInfo, port, path, serviceName string) []endpoint {
+func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInfo, port, path, serviceName, clusterDomain string) []endpoint {
 	diff := (*oldInfo.replicas - *newInfo.replicas)
 	eps := make([]endpoint, diff)
 
 	for i := range int(diff) {
 		index := int(*oldInfo.replicas) - i - 1 // nr in statefulset
 		eps[i].url = fmt.Sprintf("%s:%s/%s",
-			util.StatefulSetPodFQDN(ar.Request.Namespace, ar.Request.Name, index, serviceName),
+			util.StatefulSetPodFQDN(ar.Request.Namespace, ar.Request.Name, index, serviceName, clusterDomain),
 			port,
 			path,
 		)
