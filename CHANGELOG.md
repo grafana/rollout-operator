@@ -14,7 +14,7 @@
   * `k8s.io/api` from `v0.33.1` to `v0.33.3`
   * `k8s.io/apimachinery` from `v0.33.1` to `v0.33.3`
   * `k8s.io/client-go` from `v0.33.1` to `v0.33.3`
-* [ENHANCEMENT] Rollout-operator now uses an informer to monitor for new validating and mutating webhook configurations. The new webhooks will be patched with the self-signed CA. Webhook configurations can now be added after the rollout-operator has started. #262
+* [ENHANCEMENT] Automatically patch new validating and mutating rollout-operator webhooks with the self-signed CA if they are created after rollout-operator starts. #262
 * [BUGFIX] Always configure HTTP client with a timeout. #240
 * [BUGFIX] Use a StatefulSet's `.spec.serviceName` when constructing the delayed downscale endpoint for a pod. #258
 
