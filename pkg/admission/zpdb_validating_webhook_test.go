@@ -2,10 +2,10 @@ package admission
 
 import (
 	"context"
-	"github.com/go-kit/log"
 	"net/http"
 	"testing"
 
+	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
 	admissionv1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/runtime"
