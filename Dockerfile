@@ -1,6 +1,6 @@
 ARG BASEIMAGE=gcr.io/distroless/static-debian12:nonroot
 
-FROM golang:1.24-bookworm AS build
+FROM golang:1.25-bookworm AS build
 
 ARG TARGETOS
 ARG TARGETARCH
