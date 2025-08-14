@@ -3,8 +3,6 @@ package k3t
 import (
 	"context"
 	"fmt"
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	"k8s.io/client-go/dynamic"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,6 +19,8 @@ import (
 	k3d "github.com/k3d-io/k3d/v5/pkg/types"
 	"github.com/k3d-io/k3d/v5/version"
 	"github.com/stretchr/testify/require"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )

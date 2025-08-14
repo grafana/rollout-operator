@@ -5,8 +5,6 @@ package integration
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -14,6 +12,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 )
@@ -196,6 +196,36 @@ func zoneAwarePodDisruptionBudget(namespace, name, rolloutGroup string, maxUnava
 						"rollout-group": rolloutGroup,
 					},
 				},
+			},
+		},
+	}
+
+	zpdb.SetGroupVersionKind(zoneAwarePodDisruptionBudgetSchemaKind())
+
+	return zpdb
+}
+
+func zoneAwarePodDisruptionBudgetWithRegex(namespace, name, rolloutGroup string, maxUnavailable int64, podNamePartitionRegex string) *unstructured.Unstructured {
+	zpdb := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rollout-operator.grafana.com/v1",
+			"kind":       "ZoneAwarePodDisruptionBudget",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+				"labels": map[string]interface{}{
+					"name": name,
+				},
+			},
+			"spec": map[string]interface{}{
+				"maxUnavailable": maxUnavailable,
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"rollout-group": rolloutGroup,
+					},
+				},
+				"podNamePartitionRegex": podNamePartitionRegex,
+				"podNameRegexGroup":     1,
 			},
 		},
 	}
