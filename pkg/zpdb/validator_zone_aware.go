@@ -12,17 +12,15 @@ type ValidatorZoneAware struct {
 	sts     *appsv1.StatefulSet
 	result  *ZoneStatusResult
 	zones   int
-	matcher *PartitionMatcher
+	matcher PartitionMatcher
 }
 
 func NewValidatorZoneAware(sts *appsv1.StatefulSet, zones int) *ValidatorZoneAware {
 	return &ValidatorZoneAware{
 		sts:   sts,
 		zones: zones,
-		matcher: &PartitionMatcher{
-			Same: func(pod *corev1.Pod) bool {
-				return true
-			},
+		matcher: func(pod *corev1.Pod) bool {
+			return true
 		},
 	}
 }
@@ -44,7 +42,7 @@ func (v *ValidatorZoneAware) AccumulateResult(otherSts *appsv1.StatefulSet, r *Z
 }
 
 func (v *ValidatorZoneAware) Validate(maxUnavailable int) error {
-	if v.result.NotReady+v.result.Unknown+1 > maxUnavailable {
+	if v.result.NotReady+v.result.Unknown >= maxUnavailable {
 		return errors.New(pdbMessage(v.result, v.sts.Name))
 	}
 	return nil
@@ -54,6 +52,6 @@ func (v *ValidatorZoneAware) SuccessMessage() string {
 	return fmt.Sprintf("zpdb met across %d zones", v.zones)
 }
 
-func (v *ValidatorZoneAware) ConsiderPod() *PartitionMatcher {
+func (v *ValidatorZoneAware) ConsiderPod() PartitionMatcher {
 	return v.matcher
 }

@@ -10,15 +10,15 @@ import (
 
 type Cache struct {
 	// name --> config
-	cache map[string]*Config
-	lock  sync.RWMutex
+	entries map[string]*Config
+	lock    sync.RWMutex
 }
 
 func NewCache() *Cache {
 	return &Cache{
 		// no initial size given as we are not expecting many entries
-		cache: map[string]*Config{},
-		lock:  sync.RWMutex{},
+		entries: map[string]*Config{},
+		lock:    sync.RWMutex{},
 	}
 }
 
@@ -42,11 +42,11 @@ func (c *Cache) AddOrUpdateRaw(obj *unstructured.Unstructured) (bool, int64, err
 func (c *Cache) addOrUpdate(pdb *Config) (bool, int64) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	oldCfg, found := c.cache[pdb.Name]
+	oldCfg, found := c.entries[pdb.Name]
 	if found && oldCfg.Generation >= pdb.Generation {
 		return false, oldCfg.Generation
 	}
-	c.cache[pdb.Name] = pdb
+	c.entries[pdb.Name] = pdb
 	return true, pdb.Generation
 }
 
@@ -57,14 +57,15 @@ func (c *Cache) addOrUpdate(pdb *Config) (bool, int64) {
 func (c *Cache) Delete(generation int64, name string) (bool, int64) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	oldCfg, found := c.cache[name]
-	if found && oldCfg.Generation <= generation {
-		delete(c.cache, name)
-		return true, oldCfg.Generation
-	} else if found {
+	oldCfg, found := c.entries[name]
+	if !found {
+		return false, -1
+	}
+	if oldCfg.Generation > generation {
 		return false, oldCfg.Generation
 	}
-	return false, -1
+	delete(c.entries, name)
+	return true, oldCfg.Generation
 }
 
 // Find returns a PdbConfig for a given pod, based on the config selector matching.
@@ -74,7 +75,7 @@ func (c *Cache) Find(pod *corev1.Pod) (*Config, error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	var pdbMatch *Config
-	for _, pdb := range c.cache {
+	for _, pdb := range c.entries {
 		if pdb.MatchesPod(pod) {
 			if pdbMatch != nil {
 				return nil, errors.New("multiple zoned pod disruption budgets found for pod")
@@ -89,5 +90,5 @@ func (c *Cache) Find(pod *corev1.Pod) (*Config, error) {
 func (c *Cache) Size() int {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	return len(c.cache)
+	return len(c.entries)
 }

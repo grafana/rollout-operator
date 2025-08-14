@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"github.com/go-kit/log"
 	"net/http"
 	"testing"
 
@@ -10,49 +11,35 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-type zoneAwarePdbTestContext struct {
-	ctx     context.Context
-	request admissionv1.AdmissionReview
-	logs    *dummyLogger
-}
-
 // TestZoneAwarePdbValidatorHandlerSuccess tests with a valid configuration
 func TestZoneAwarePdbValidatorHandlerSuccess(t *testing.T) {
-	test := newZoneAwarePdbTestContext(createValidatingWebHookAdmissionReviewValid())
-	test.assertAllowResponse(t)
+	request := createValidatingWebHookAdmissionReviewValid()
+	assertAllowResponse(t, request)
 }
 
 // TestZoneAwarePdbValidatorHandlerBadConfig tests with an invalid configuration
 // See other test files for in-depth config validation
 func TestZoneAwarePdbValidatorHandlerBadConfig(t *testing.T) {
-	test := newZoneAwarePdbTestContext(createValidatingWebHookAdmissionReviewInvalid())
-	test.assertDenyResponse(t, "invalid value: max unavailable must be 0 <= val, got -1", http.StatusBadRequest)
+	request := createValidatingWebHookAdmissionReviewInvalid()
+	assertDenyResponse(t, request, "invalid value: max unavailable must be 0 <= val, got -1", http.StatusBadRequest)
 }
 
 // TestZoneAwarePdbValidatorHandlerParseError tests with a structural error in parsing the request object
 func TestZoneAwarePdbValidatorHandlerParseError(t *testing.T) {
-	test := newZoneAwarePdbTestContext(createValidatingWebHookAdmissionReviewNoObject())
-	test.assertDenyResponse(t, "unexpected end of JSON input", http.StatusBadRequest)
+	request := createValidatingWebHookAdmissionReviewNoObject()
+	assertDenyResponse(t, request, "unexpected end of JSON input", http.StatusBadRequest)
 }
 
-func newZoneAwarePdbTestContext(request admissionv1.AdmissionReview) *zoneAwarePdbTestContext {
-	testCtx := &zoneAwarePdbTestContext{}
-	testCtx.ctx = context.Background()
-	testCtx.request = request
-	testCtx.logs = newDummyLogger()
-	return testCtx
-}
-
-func (c *zoneAwarePdbTestContext) assertDenyResponse(t *testing.T, reason string, statusCode int) {
-	response := ZoneAwarePdbValidatingWebhookHandler(context.Background(), c.logs, c.request)
+func assertDenyResponse(t *testing.T, request admissionv1.AdmissionReview, reason string, statusCode int) {
+	response := ZoneAwarePdbValidatingWebhookHandler(context.Background(), log.NewNopLogger(), request)
 	require.NotNil(t, response.UID)
 	require.False(t, response.Allowed)
 	require.Equal(t, reason, response.Result.Message)
 	require.Equal(t, int32(statusCode), response.Result.Code)
 }
 
-func (c *zoneAwarePdbTestContext) assertAllowResponse(t *testing.T) {
-	response := ZoneAwarePdbValidatingWebhookHandler(context.Background(), c.logs, c.request)
+func assertAllowResponse(t *testing.T, request admissionv1.AdmissionReview) {
+	response := ZoneAwarePdbValidatingWebhookHandler(context.Background(), log.NewNopLogger(), request)
 	require.NotNil(t, response.UID)
 	require.True(t, response.Allowed)
 }

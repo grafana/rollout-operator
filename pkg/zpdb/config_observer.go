@@ -22,8 +22,6 @@ const (
 // An ConfigObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the Cache.
 // The ConfigObserver is used by the pod eviction web hook handler.
 type ConfigObserver struct {
-	namespace string
-
 	pdbFactory  dynamicinformer.DynamicSharedInformerFactory
 	pdbInformer cache.SharedIndexInformer
 	PdbCache    *Cache
@@ -50,7 +48,6 @@ func NewConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 	pdbInformer := pdbFactory.ForResource(gvr)
 
 	c := &ConfigObserver{
-		namespace:     namespace,
 		pdbFactory:    pdbFactory,
 		pdbInformer:   pdbInformer.Informer(),
 		PdbCache:      NewCache(),

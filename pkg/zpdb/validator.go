@@ -14,7 +14,7 @@ type Validator interface {
 	ConsiderSts(sts *appsv1.StatefulSet) bool
 
 	// ConsiderPod returns a matcher which is used to test if a pod should be considered in the PDB tallies
-	ConsiderPod() *PartitionMatcher
+	ConsiderPod() PartitionMatcher
 
 	// AccumulateResult is called for each StatefulSet which is tested
 	AccumulateResult(sts *appsv1.StatefulSet, result *ZoneStatusResult) error
@@ -27,10 +27,8 @@ type Validator interface {
 }
 
 // A PartitionMatcher is a utility to assist in matching pods to a partition.
-type PartitionMatcher struct {
-	// Same returns true if this pod is in the same zone/partition as the eviction pod
-	Same func(pod *corev1.Pod) bool
-}
+// Returns true if this pod is in the same zone/partition as the eviction pod
+type PartitionMatcher func(pod *corev1.Pod) bool
 
 // A ZoneStatusResult holds the status of a pod availability within a zone / StatefulSet
 type ZoneStatusResult struct {
@@ -65,10 +63,10 @@ func pdbMessage(result *ZoneStatusResult, span string) string {
 		msg += fmt.Sprintf("%d %s unknown", result.Unknown, plural("pod", result.Unknown))
 	}
 
-	// under ingester-zone-a partition 0
-	// under ingester-zone-a
+	// in ingester-zone-a partition 0
+	// in ingester-zone-a
 	if len(span) > 0 {
-		msg += fmt.Sprintf(" under %s", span)
+		msg += fmt.Sprintf(" in %s", span)
 	}
 	return msg
 }

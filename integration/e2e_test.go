@@ -197,13 +197,13 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 	{
 		t.Log("Deny a pod eviction in the same zone.")
 		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-1", Namespace: corev1.NamespaceDefault}}
-		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready under mock-zone-a", "Eviction denied")
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
 	}
 
 	{
 		t.Log("Deny a pod eviction in another zone.")
 		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
-		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready under mock-zone-a", "Eviction denied")
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
 	}
 }
 
@@ -265,7 +265,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 	{
 		t.Log("Deny a pod eviction in another zone.")
 		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
-		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready under mock-zone-a", "Eviction denied")
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
 	}
 
 	{
@@ -333,7 +333,7 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 	{
 		t.Log("Deny a pod eviction in the same partition.")
 		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
-		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready under partition 0", "Eviction denied")
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in partition 0", "Eviction denied")
 	}
 
 	{
@@ -345,7 +345,7 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 	{
 		t.Log("Deny a pod eviction in the same partition.")
 		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-1", Namespace: corev1.NamespaceDefault}}
-		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready under partition 1", "Eviction denied")
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in partition 1", "Eviction denied")
 	}
 }
 

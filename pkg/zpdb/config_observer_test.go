@@ -2,52 +2,33 @@ package zpdb
 
 import (
 	"context"
+	"github.com/go-kit/log"
 	"testing"
 	"time"
 
+	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/fake"
-	k8sfake "k8s.io/client-go/kubernetes/fake"
-
-	"github.com/grafana/rollout-operator/pkg/config"
 )
 
-// mockLogger implements log.Logger interface for testing
-type mockLogger struct{}
-
-func (m mockLogger) Log(keyvals ...interface{}) error {
-	return nil
-}
-
-type configObserverTestCase struct {
-	kubeClient    *k8sfake.Clientset
-	dynamicClient *fake.FakeDynamicClient
-	logger        mockLogger
-	observer      *ConfigObserver
-}
-
-func newConfigObserverTestCase() *configObserverTestCase {
-	test := configObserverTestCase{
-		logger:     mockLogger{},
-		kubeClient: k8sfake.NewClientset(),
-		dynamicClient: fake.NewSimpleDynamicClientWithCustomListKinds(
-			runtime.NewScheme(),
-			map[schema.GroupVersionResource]string{
-				{
-					Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
-					Version:  ZoneAwarePodDisruptionBudgetsVersion,
-					Resource: ZoneAwarePodDisruptionBudgetsNamePlural,
-				}: ZoneAwarePodDisruptionBudgetName + "List",
-			},
-			// No objects passed - will return empty list on query
-		),
-	}
-	test.observer = NewConfigObserver(test.dynamicClient, testNamespace, test.logger)
-	return &test
+func newConfigObserverTestCase() (*fake.FakeDynamicClient, *ConfigObserver) {
+	dynamicClient := fake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{
+			{
+				Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
+				Version:  ZoneAwarePodDisruptionBudgetsVersion,
+				Resource: ZoneAwarePodDisruptionBudgetsNamePlural,
+			}: ZoneAwarePodDisruptionBudgetName + "List",
+		},
+		// No objects passed - will return empty list on query
+	)
+	observer := NewConfigObserver(dynamicClient, testNamespace, log.NewNopLogger())
+	return dynamicClient, observer
 }
 
 const (
@@ -78,30 +59,22 @@ func newPDB(name string) *unstructured.Unstructured {
 
 // TestObserver_NewPdbObserver- basic constructor and life cycle test
 func TestObserver_NewPdbObserver(t *testing.T) {
-	test := newConfigObserverTestCase()
-
-	require.NotNil(t, test.observer)
-	require.NotNil(t, test.observer.PdbCache)
-	require.NotNil(t, test.observer.pdbFactory)
-	require.NotNil(t, test.observer.pdbInformer)
-	require.NotNil(t, test.observer.logger)
-	require.NotNil(t, test.observer.stopCh)
-
-	require.NoError(t, test.observer.Start())
+	_, observer := newConfigObserverTestCase()
+	require.NoError(t, observer.Start())
 
 	// Ensure that stopCh has been opened
 	select {
-	case <-test.observer.stopCh:
+	case <-observer.stopCh:
 		t.Fatal("stopCh should not be closed initially")
 	default:
 		// Expected - channel is open
 	}
 
-	test.observer.Stop()
+	observer.Stop()
 
 	// Ensure that stopCh has been closed
 	select {
-	case <-test.observer.stopCh:
+	case <-observer.stopCh:
 		// Expected - channel is closed
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("stopCh should be closed after Stop()")
@@ -110,24 +83,24 @@ func TestObserver_NewPdbObserver(t *testing.T) {
 
 // TestObserver_InvalidObject - tests that no panics occur if an invalid object is passed from the informers
 func TestConfigObserver_InvalidObject(t *testing.T) {
-	test := newConfigObserverTestCase()
-	require.NoError(t, test.observer.Start())
-	defer test.observer.Stop()
+	_, observer := newConfigObserverTestCase()
+	require.NoError(t, observer.Start())
+	defer observer.Stop()
 
 	invalidObj := "not-a-config"
 
-	test.observer.onPdbAdded(invalidObj)
-	test.observer.onPdbUpdated(invalidObj, invalidObj)
-	test.observer.onPdbDeleted(invalidObj)
+	observer.onPdbAdded(invalidObj)
+	observer.onPdbUpdated(invalidObj, invalidObj)
+	observer.onPdbDeleted(invalidObj)
 }
 
 // TestObserver_ZPDBEvents_AddValidZPDB - tests the zpdb cache being updated on observed config changes
 func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
-	test := newConfigObserverTestCase()
-	require.NoError(t, test.observer.Start())
-	defer test.observer.Stop()
+	dynamicClient, observer := newConfigObserverTestCase()
+	require.NoError(t, observer.Start())
+	defer observer.Stop()
 
-	require.Equal(t, test.observer.PdbCache.Size(), 0)
+	require.Equal(t, observer.PdbCache.Size(), 0)
 
 	gvr := schema.GroupVersionResource{
 		Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
@@ -136,49 +109,49 @@ func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	}
 
 	// test triggering a new zpdb being created
-	_, err := test.dynamicClient.Resource(gvr).Namespace(testNamespace).Create(context.Background(), newPDB("test-zpdb"), metav1.CreateOptions{})
+	_, err := dynamicClient.Resource(gvr).Namespace(testNamespace).Create(context.Background(), newPDB("test-zpdb"), metav1.CreateOptions{})
 	require.NoError(t, err)
 
 	task := func() bool {
-		return test.observer.PdbCache.Size() > 0
+		return observer.PdbCache.Size() > 0
 	}
 	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "zpdb config cache has not been initialized")
-	require.Equal(t, 1, test.observer.PdbCache.Size())
-	require.Contains(t, test.observer.PdbCache.cache, "test-zpdb")
-	require.Equal(t, int64(1), test.observer.PdbCache.cache["test-zpdb"].Generation)
+	require.Equal(t, 1, observer.PdbCache.Size())
+	require.Contains(t, observer.PdbCache.entries, "test-zpdb")
+	require.Equal(t, int64(1), observer.PdbCache.entries["test-zpdb"].Generation)
 
 	// test triggering a new zpdb being updated
 	updatedPdb := newPDB("test-zpdb")
 	updatedPdb.SetGeneration(int64(3))
 
-	_, err = test.dynamicClient.Resource(gvr).Namespace(testNamespace).Update(context.Background(), updatedPdb, metav1.UpdateOptions{})
+	_, err = dynamicClient.Resource(gvr).Namespace(testNamespace).Update(context.Background(), updatedPdb, metav1.UpdateOptions{})
 	require.NoError(t, err)
 
 	task = func() bool {
-		return test.observer.PdbCache.cache["test-zpdb"].Generation == int64(3)
+		return observer.PdbCache.entries["test-zpdb"].Generation == int64(3)
 	}
 	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "zpdb config cache has not been updated")
-	require.Equal(t, 1, test.observer.PdbCache.Size())
-	require.Equal(t, int64(3), test.observer.PdbCache.cache["test-zpdb"].Generation)
+	require.Equal(t, 1, observer.PdbCache.Size())
+	require.Equal(t, int64(3), observer.PdbCache.entries["test-zpdb"].Generation)
 
 	// test triggering a stale zpdb update coming in
 	stalePdb := newPDB("test-zpdb")
 	stalePdb.SetGeneration(int64(2))
 
-	_, err = test.dynamicClient.Resource(gvr).Namespace(testNamespace).Update(context.Background(), stalePdb, metav1.UpdateOptions{})
+	_, err = dynamicClient.Resource(gvr).Namespace(testNamespace).Update(context.Background(), stalePdb, metav1.UpdateOptions{})
 	require.NoError(t, err)
 
 	// give long enough that the informer will have fired
 	time.Sleep(100 * time.Millisecond)
 
-	require.Equal(t, 1, test.observer.PdbCache.Size())
-	require.Equal(t, int64(3), test.observer.PdbCache.cache["test-zpdb"].Generation)
+	require.Equal(t, 1, observer.PdbCache.Size())
+	require.Equal(t, int64(3), observer.PdbCache.entries["test-zpdb"].Generation)
 
 	// test stale delete is ignored - calling handler direct as dynamic client delete is limited
-	test.observer.onPdbDeleted(stalePdb)
-	require.Equal(t, test.observer.PdbCache.Size(), 1)
+	observer.onPdbDeleted(stalePdb)
+	require.Equal(t, observer.PdbCache.Size(), 1)
 
 	stalePdb.SetGeneration(int64(5))
-	test.observer.onPdbDeleted(stalePdb)
-	require.Equal(t, test.observer.PdbCache.Size(), 0)
+	observer.onPdbDeleted(stalePdb)
+	require.Equal(t, observer.PdbCache.Size(), 0)
 }

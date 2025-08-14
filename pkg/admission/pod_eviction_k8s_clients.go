@@ -61,7 +61,7 @@ func (a *k8sClient) findRelatedStatefulSets(namespace string, selector *labels.S
 // It is possible for pods to be in a state where they are not yet returned by the pod listing. These pods should be considered and are reported as unknown.
 // The number of unknown pods is determined as the difference between the StatefulSets State.Replica count minus the number of pods listed.
 // The given Pod is excluded from testing, but is included in the total of tested pods
-func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, matcher *zpdb.PartitionMatcher, evictionCache *zpdb.PodEvictionCache) (*zpdb.ZoneStatusResult, error) {
+func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, matcher zpdb.PartitionMatcher, evictionCache *zpdb.PodEvictionCache) (*zpdb.ZoneStatusResult, error) {
 	podsSelector := labels.NewSelector().Add(
 		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
@@ -86,7 +86,7 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 	for _, pd := range list.Items {
 
 		// we do not consider pods which are in a different partition
-		if !matcher.Same(&pd) {
+		if !matcher(&pd) {
 			continue
 		}
 

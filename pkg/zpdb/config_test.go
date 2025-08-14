@@ -87,7 +87,7 @@ func TestBadRegex(t *testing.T) {
 
 	raw[fieldPodNamePartitionRegex] = "ingester-zone-([a-z])-([0-9]+)"
 	_, _, err = valueAsRegex(raw, fieldPodNamePartitionRegex, fieldPodNameRegexGroup)
-	require.ErrorContains(t, err, "regular expression has multiple subexpressions and requires an ,$index suffix")
+	require.ErrorContains(t, err, "regular expression has multiple subexpressions and requires podNameRegexGroup to be set")
 
 	raw[fieldPodNameRegexGroup] = int64(10)
 	raw[fieldPodNamePartitionRegex] = "ingester-zone-([a-z])-([0-9]+),$10"
