@@ -19,7 +19,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/config"
 )
 
-func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx context.Context, groupName string, sets []*appsv1.StatefulSet, client httpClient) (bool, error) {
+func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx context.Context, groupName string, sets []*appsv1.StatefulSet, clusterDomain string, client httpClient) (bool, error) {
 	// Return early no matter what after scaling up or down a single StatefulSet to make sure that rollout-operator
 	// works with up-to-date models.
 	for _, sts := range sets {
@@ -38,7 +38,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		referenceResourceDesiredReplicas := scaleObj.Spec.Replicas
 		if currentReplicas == referenceResourceDesiredReplicas {
 			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, referenceResourceDesiredReplicas)
-			cancelDelayedDownscaleIfConfigured(ctx, c.logger, sts, client, referenceResourceDesiredReplicas)
+			cancelDelayedDownscaleIfConfigured(ctx, c.logger, sts, clusterDomain, client, referenceResourceDesiredReplicas)
 			// No change in the number of replicas: don't log because this will be the result most of the time.
 			continue
 		}
@@ -46,7 +46,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		// We're going to change number of replicas on the statefulset.
 		// If there is delayed downscale configured on the statefulset, we will first handle delay part, and only if that succeeds,
 		// continue with downscaling or upscaling.
-		desiredReplicas, err := checkScalingDelay(ctx, c.logger, sts, client, currentReplicas, referenceResourceDesiredReplicas)
+		desiredReplicas, err := checkScalingDelay(ctx, c.logger, sts, c.clusterDomain, client, currentReplicas, referenceResourceDesiredReplicas)
 		if err != nil {
 			level.Warn(c.logger).Log("msg", "not scaling statefulset due to failed scaling delay check",
 				"group", groupName,

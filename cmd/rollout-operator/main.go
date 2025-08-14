@@ -53,6 +53,7 @@ type config struct {
 	serverPort           int
 	kubeAPIURL           string
 	kubeConfigFile       string
+	kubeClusterDomain    string
 	kubeNamespace        string
 	kubeClientTimeout    time.Duration
 	reconcileInterval    time.Duration
@@ -82,6 +83,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "HTTP client timeout. This applies to requests issued to both the Kubernetes API and Kubernetes resource endpoints.")
+	fs.StringVar(&cfg.kubeClusterDomain, "kubernetes.cluster-domain", "cluster.local", "The Kubernetes cluster domain.")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
 	cfg.clusterValidationCfg.RegisterFlagsWithPrefix("server.cluster-validation.http.", fs)
@@ -106,14 +108,17 @@ func (cfg *config) register(fs *flag.FlagSet) {
 
 func (cfg config) validate() error {
 	// Validate CLI flags.
+	if cfg.kubeClusterDomain == "" {
+		return errors.New("-kubernetes.cluster-domain cannot be an empty string")
+	}
 	if cfg.kubeNamespace == "" {
-		return errors.New("the Kubernetes namespace has not been specified")
+		return errors.New("-kubernetes.namespace has not been specified")
 	}
 	if (cfg.kubeAPIURL == "") != (cfg.kubeConfigFile == "") {
-		return errors.New("either configure both Kubernetes API URL and config file or none of them")
+		return errors.New("either configure both -kubernetes.api-url and -kubernetes.config-file or neither")
 	}
 	if cfg.useZoneTracker && cfg.zoneTrackerConfigMapName == "" {
-		return errors.New("the zone tracker ConfigMap name has not been specified")
+		return errors.New("-use-zone-tracker is true, but -zone-tracker.config-map-name has not been specified")
 	}
 	if err := cfg.clusterValidationCfg.Validate("http", cfg.kubeNamespace); err != nil {
 		return err
@@ -216,7 +221,7 @@ func main() {
 	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, evictionController, webhookObserver)
 
 	// Init the controller
-	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
+	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
 	check(errors.Wrap(c.Init(), "failed to init controller"))
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).
@@ -293,7 +298,7 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 	check(evictionController.Start())
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-		return admission.PrepareDownscale(ctx, rt, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName)
+		return admission.PrepareDownscale(ctx, rt, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName, cfg.kubeClusterDomain)
 	}
 
 	podEvictionFunc := func(ctx context.Context, _ log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {
