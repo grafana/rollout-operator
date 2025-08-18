@@ -19,6 +19,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
+          cache: ${{ github.event_name != 'push' }}
       - run: make rollout-operator
 
   test:
@@ -31,6 +32,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
+          cache: ${{ github.event_name != 'push' }}
       - run: make test
       - run: make test-boringcrypto
 
@@ -44,6 +46,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
+          cache: ${{ github.event_name != 'push' }}
       - run: make build-image
       - run: make integration
 
@@ -57,6 +60,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
+          cache: ${{ github.event_name != 'push' }}
       - run: make build-image-boringcrypto
       - run: make integration
 
@@ -70,6 +74,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
+          cache: ${{ github.event_name != 'push' }}
       - uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
         with:
           version: v2.4.0
@@ -95,6 +100,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
+          cache: false
       - name: Log in to Docker Hub
         uses: grafana/shared-workflows/actions/dockerhub-login@dockerhub-login/v1.0.2
       - name: Generate image tag
