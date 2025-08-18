@@ -19,7 +19,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
-          cache: ${{ github.event_name != 'push' }}
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - run: make rollout-operator
 
   test:
@@ -32,7 +32,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
-          cache: ${{ github.event_name != 'push' }}
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - run: make test
       - run: make test-boringcrypto
 
@@ -46,7 +46,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
-          cache: ${{ github.event_name != 'push' }}
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - run: make build-image
       - run: make integration
 
@@ -60,7 +60,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
-          cache: ${{ github.event_name != 'push' }}
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - run: make build-image-boringcrypto
       - run: make integration
 
@@ -74,7 +74,7 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
-          cache: ${{ github.event_name != 'push' }}
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
         with:
           version: v2.4.0
@@ -102,7 +102,7 @@ jobs:
           check-latest: true
           cache: false
       - name: Log in to Docker Hub
-        uses: grafana/shared-workflows/actions/dockerhub-login@dockerhub-login/v1.0.2
+        uses: grafana/shared-workflows/actions/dockerhub-login@c6d954f7cd9c0022018982e01268de6cb75b913c # dockerhub-login/v1.0.2
       - name: Generate image tag
         id: image_tag
         run: |
