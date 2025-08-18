@@ -1,7 +1,8 @@
 name: ci
 on:
   push:
-    branches: [main]
+    branches: [ main ]
+    tags: [ '*' ]
   pull_request:
 
 permissions:
@@ -73,3 +74,47 @@ jobs:
         with:
           version: v2.4.0
           args: --timeout=5m
+
+  push-image:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - test
+      - integration
+      - integration-boringcrypto
+      - lint
+    if: github.event_name == 'push' # We want this job to run for both pushes to main, as well as new tags.
+    permissions:
+      contents: write # Needed to be able to create releases.
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+        with:
+          go-version: '1.25'
+          check-latest: true
+      - name: Log in to Docker Hub
+        uses: grafana/shared-workflows/actions/dockerhub-login@dockerhub-login/v1.0.2
+      - name: Generate image tag
+        id: image_tag
+        run: |
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=main-$SHA" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+      - name: Build and push image
+        run: make publish-images
+        env:
+          IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        run: make release-notes | gh release create "$IMAGE_TAG" --notes-file -
+        env:
+          IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
