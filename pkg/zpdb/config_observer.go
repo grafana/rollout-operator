@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
-	"k8s.io/client-go/tools/cache"
+	k8cache "k8s.io/client-go/tools/cache"
 )
 
 const (
@@ -19,12 +19,11 @@ const (
 	informerSyncInterval = 5 * time.Minute
 )
 
-// An ConfigObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the Cache.
-// The ConfigObserver is used by the pod eviction web hook handler.
-type ConfigObserver struct {
+// An configObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the configCache.
+type configObserver struct {
 	pdbFactory  dynamicinformer.DynamicSharedInformerFactory
-	pdbInformer cache.SharedIndexInformer
-	PdbCache    *Cache
+	pdbInformer k8cache.SharedIndexInformer
+	pdbCache    *configCache
 
 	dynamicClient dynamic.Interface
 	logger        log.Logger
@@ -33,7 +32,7 @@ type ConfigObserver struct {
 	stopCh chan struct{}
 }
 
-func NewConfigObserver(dynamic dynamic.Interface, namespace string, logger log.Logger) *ConfigObserver {
+func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.Logger) *configObserver {
 	gvr := schema.GroupVersionResource{
 		Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
 		Version:  ZoneAwarePodDisruptionBudgetsVersion,
@@ -47,10 +46,10 @@ func NewConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 	)
 	pdbInformer := pdbFactory.ForResource(gvr)
 
-	c := &ConfigObserver{
+	c := &configObserver{
 		pdbFactory:    pdbFactory,
 		pdbInformer:   pdbInformer.Informer(),
-		PdbCache:      NewCache(),
+		pdbCache:      newConfigCache(),
 		dynamicClient: dynamic,
 		logger:        logger,
 		stopCh:        make(chan struct{}),
@@ -59,8 +58,8 @@ func NewConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 	return c
 }
 
-func (c *ConfigObserver) Start() error {
-	_, err := c.pdbInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+func (c *configObserver) start() error {
+	_, err := c.pdbInformer.AddEventHandler(k8cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onPdbAdded,
 		UpdateFunc: c.onPdbUpdated,
 		DeleteFunc: c.onPdbDeleted,
@@ -73,7 +72,7 @@ func (c *ConfigObserver) Start() error {
 
 	// Wait until all informer caches have been synced.
 	level.Info(c.logger).Log("msg", "zpdb config informer caches are syncing")
-	if ok := cache.WaitForCacheSync(c.stopCh, c.pdbInformer.HasSynced); !ok {
+	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbInformer.HasSynced); !ok {
 		return errors.New("zpdb config informer caches failed to sync")
 	}
 	level.Info(c.logger).Log("msg", "zpdb config informer caches have synced")
@@ -81,25 +80,29 @@ func (c *ConfigObserver) Start() error {
 	return nil
 }
 
-func (c *ConfigObserver) onPdbAdded(obj interface{}) {
+func (c *configObserver) addOrUpdate(obj *unstructured.Unstructured) {
+	updated, generation, err := c.pdbCache.addOrUpdateRaw(obj)
+	if err != nil {
+		level.Error(c.logger).Log("msg", "zpdb configuration error", "name", obj.GetName(), "err", err)
+	} else if updated {
+		level.Info(c.logger).Log("msg", "zpdb configuration updated", "name", obj.GetName(), "generation", generation)
+	} else {
+		level.Info(c.logger).Log("msg", "zpdb configuration update ignored", "name", obj.GetName(), "generation", generation, "ignored-generation", obj.GetGeneration())
+	}
+}
+
+func (c *configObserver) onPdbAdded(obj interface{}) {
 	unstructuredObj, isUnstructured := obj.(*unstructured.Unstructured)
 	if !isUnstructured {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
 		return
 	}
 
-	updated, generation, err := c.PdbCache.AddOrUpdateRaw(unstructuredObj)
-	if err != nil {
-		level.Error(c.logger).Log("msg", "error parsing zpdb configuration", "name", unstructuredObj.GetName(), "err", err)
-	} else if updated {
-		level.Info(c.logger).Log("msg", "zpdb configuration updated", "name", unstructuredObj.GetName(), "generation", generation)
-	} else {
-		level.Info(c.logger).Log("msg", "zpdb configuration update ignored", "name", unstructuredObj.GetName(), "generation", generation, "ignored-generation", unstructuredObj.GetGeneration())
-	}
+	c.addOrUpdate(unstructuredObj)
 }
 
-func (c *ConfigObserver) onPdbUpdated(old, new interface{}) {
-	oldCfg, oldIsUnstructured := old.(*unstructured.Unstructured)
+func (c *configObserver) onPdbUpdated(old, new interface{}) {
+	_, oldIsUnstructured := old.(*unstructured.Unstructured)
 	newCfg, newIsUnstructured := new.(*unstructured.Unstructured)
 
 	if !oldIsUnstructured || !newIsUnstructured {
@@ -107,32 +110,23 @@ func (c *ConfigObserver) onPdbUpdated(old, new interface{}) {
 		return
 	}
 
-	if oldCfg.GetGeneration() != newCfg.GetGeneration() {
-		updated, generation, err := c.PdbCache.AddOrUpdateRaw(newCfg)
-		if err != nil {
-			level.Error(c.logger).Log("msg", "zpdb configuration error", "name", newCfg.GetName(), "err", err)
-		} else if updated {
-			level.Info(c.logger).Log("msg", "zpdb configuration updated", "name", newCfg.GetName(), "generation", generation)
-		} else {
-			level.Info(c.logger).Log("msg", "zpdb configuration update ignored", "name", newCfg.GetName(), "generation", generation, "ignored-generation", newCfg.GetGeneration())
-		}
-	}
+	c.addOrUpdate(newCfg)
 }
 
-func (c *ConfigObserver) onPdbDeleted(obj interface{}) {
+func (c *configObserver) onPdbDeleted(obj interface{}) {
 	oldCfg, oldIsUnstructured := obj.(*unstructured.Unstructured)
 	if !oldIsUnstructured {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
 		return
 	}
-	success, generation := c.PdbCache.Delete(oldCfg.GetGeneration(), oldCfg.GetName())
+	success, generation := c.pdbCache.delete(oldCfg.GetGeneration(), oldCfg.GetName())
 	if success {
 		level.Info(c.logger).Log("msg", "zpdb configuration deleted", "old", oldCfg.GetName(), "generation", generation)
 	} else {
-		level.Info(c.logger).Log("msg", "zpdb configuration delete ignored", "old", oldCfg.GetName(), "generation", generation)
+		level.Info(c.logger).Log("msg", "zpdb configuration delete ignored", "name", oldCfg.GetName(), "generation", generation, "ignored-generation", oldCfg.GetGeneration())
 	}
 }
 
-func (c *ConfigObserver) Stop() {
+func (c *configObserver) stop() {
 	close(c.stopCh)
 }

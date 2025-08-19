@@ -7,15 +7,15 @@ import (
 )
 
 func TestLifecycle(t *testing.T) {
-	cache := NewPodEvictionCache()
+	cache := newPodEvictionCache()
 	pod := newPodCacheTest("pod-1", "")
 	// pod not yet in the zpdb
-	require.False(t, cache.HasPendingEviction(pod))
+	require.False(t, cache.hasPendingEviction(pod))
 	// delete no existent entry
-	cache.Delete(pod)
+	cache.delete(pod)
 	// mark as evicted
-	cache.RecordEviction(pod)
-	require.True(t, cache.HasPendingEviction(pod))
-	cache.Delete(pod)
-	require.False(t, cache.HasPendingEviction(pod))
+	cache.recordEviction(pod)
+	require.True(t, cache.hasPendingEviction(pod))
+	cache.delete(pod)
+	require.False(t, cache.hasPendingEviction(pod))
 }

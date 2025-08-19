@@ -523,4 +523,4 @@ Note - `maxUnavailable` can be set to 0. In this case no voluntary evictions in 
 
 Note - a validating webhook configuration is provided in [development](./development/zone-aware-pod-disruption-budget-validating-webhook.yaml) which allows the `rollout-operator` to verify a `ZoneAwarePodDisruptionBudget` configuration being created or updated. This will ensure that no invalid configuration can be applied.
 
-Note - the `podNameRegexGroup` allows for the capture group index to be set. This is required if the partition regex has more than one set of groupings () in the expression. 1-based indexing is used, such that 1 will match the first parenthesized capture group.
+Note - the `podNameRegexGroup` allows for the capture group index to be set. This is required if the partition regex has more than one set of groupings `(...)` in the expression. 1-based indexing is used, such that 1 will match the first parenthesized capture group.

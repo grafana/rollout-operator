@@ -5,6 +5,8 @@ package integration
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,7 +17,10 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -38,8 +43,11 @@ func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *k
 	_, err = api.RbacV1().RoleBindings(namespace).Create(ctx, rolloutOperatorRoleBinding(namespace), metav1.CreateOptions{})
 	require.NoError(t, err)
 
+	crd, err := zoneAwarePodDistruptionBudgetCustomResourceDefinition()
+	require.NoError(t, err)
+
 	_, err = extApi.ApiextensionsV1().CustomResourceDefinitions().
-		Create(context.Background(), zoneAwarePodDistruptionBudgetCustomResourceDefinition(), metav1.CreateOptions{})
+		Create(context.Background(), crd, metav1.CreateOptions{})
 	require.NoError(t, err)
 
 	if webhook {
@@ -296,171 +304,74 @@ func webhookRolloutOperatorClusterRole(namespace string) *rbacv1.ClusterRole {
 	}
 }
 
-func zoneAwarePodDistruptionBudgetCustomResourceDefinition() *apiextensionsv1.CustomResourceDefinition {
-	return &apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "zoneawarepoddisruptionbudgets.rollout-operator.grafana.com",
-		},
-		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-			Group: "rollout-operator.grafana.com",
-			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
-				{
-					Name:    "v1",
-					Served:  true,
-					Storage: true,
-					Schema: &apiextensionsv1.CustomResourceValidation{
-						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
-							Type: "object",
-							Properties: map[string]apiextensionsv1.JSONSchemaProps{
-								"spec": {
-									Type:     "object",
-									Required: []string{"selector"},
-									Properties: map[string]apiextensionsv1.JSONSchemaProps{
-										"maxUnavailable": {
-											Type:        "integer",
-											Description: "The number of pods that can be unavailable within a zone or partition.",
-											Minimum:     &[]float64{0}[0],
-										},
-										"maxUnavailablePercentage": {
-											Type:        "integer",
-											Description: "Calculate the maxUnavailable value as a percentage of the StatefulSet's spec.Replica count. This option is not supported when using podNamePartitionRegex.",
-											Minimum:     &[]float64{0}[0],
-											Maximum:     &[]float64{100}[0],
-										},
-										"selector": {
-											Type:        "object",
-											Description: "A selector for finding pods and statefulsets that this ZoneAwarePodDisruptionBudget applies to.",
-											Required:    []string{"matchLabels"},
-											Properties: map[string]apiextensionsv1.JSONSchemaProps{
-												"matchLabels": {
-													Type:                 "object",
-													AdditionalProperties: &apiextensionsv1.JSONSchemaPropsOrBool{Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"}},
-												},
-											},
-										},
-										"podNamePartitionRegex": {
-											Type:        "string",
-											Description: "A regular expression for returning a partition name given a pod name. This field is optional and should only be used when the ZoneAwarePodDisruptionBudget is to be scoped to a partition, such as a multi-zone ingester deployment with ingest_storage_enabled. Enabling this changes the ZPDB functionality such that minAvailability is applied across ALL zones for a given partition. When not enabled, the minAvailability is applied to pods within the eviction zone assuming there are no disruptions in the other zones.",
-										},
-										"podNameRegexGroup": {
-											Type:        "integer",
-											Minimum:     &[]float64{1}[0],
-											Description: "The regular expression group number that contains the partition name. This field is only required when the podNamePartitionRegex field is set and has more then one subexpression grouping. The default value is 1.",
-										},
-									},
-								},
-							},
-						},
-					},
-					Subresources: &apiextensionsv1.CustomResourceSubresources{
-						Status: &apiextensionsv1.CustomResourceSubresourceStatus{},
-					},
-				},
-			},
-			Scope: apiextensionsv1.NamespaceScoped,
-			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Kind:       "ZoneAwarePodDisruptionBudget",
-				Plural:     "zoneawarepoddisruptionbudgets",
-				Singular:   "zoneawarepoddisruptionbudget",
-				ShortNames: []string{"pdbz"},
-			},
-		},
+var (
+	scheme       = runtime.NewScheme()
+	codecs       = serializer.NewCodecFactory(scheme)
+	deserializer = codecs.UniversalDeserializer()
+	// this is the namespace used in the ../development examples
+	templateNamespace = "rollout-operator-development"
+)
+
+func loadConfigurationFromDisk(path, namespaceOld, namespaceNew string, into runtime.Object) (*runtime.Object, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file from disk: %w", err)
 	}
+
+	var str = string(data)
+	if len(namespaceOld) > 0 || len(namespaceNew) > 0 {
+		str = strings.ReplaceAll(string(data), namespaceOld, namespaceNew)
+	}
+
+	jsonData, err := yaml.ToJSON([]byte(str))
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert yaml to json: %w", err)
+	}
+
+	obj, _, err := deserializer.Decode(jsonData, nil, into)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode from json: %w", err)
+	}
+
+	return &obj, nil
 }
 
-func zpdbValidatingWebhook(namespace string) *admissionregistrationv1.ValidatingWebhookConfiguration {
-	name := "zpdb-validation-" + namespace
-
-	return &admissionregistrationv1.ValidatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-			Labels: map[string]string{
-				"grafana.com/inject-rollout-operator-ca": "true",
-				"grafana.com/namespace":                  namespace,
-			},
-		},
-		Webhooks: []admissionregistrationv1.ValidatingWebhook{
-			{
-				Name: name + ".grafana.com",
-				ClientConfig: admissionregistrationv1.WebhookClientConfig{
-					Service: &admissionregistrationv1.ServiceReference{
-						Namespace: namespace,
-						Name:      "rollout-operator",
-						Path:      ptr("/admission/zpdb-validation"),
-					},
-				},
-				Rules: []admissionregistrationv1.RuleWithOperations{
-					{
-						Operations: []admissionregistrationv1.OperationType{
-							admissionregistrationv1.Create,
-							admissionregistrationv1.Update,
-						},
-						Rule: admissionregistrationv1.Rule{
-							APIGroups:   []string{"rollout-operator.grafana.com"},
-							APIVersions: []string{"v1"},
-							Resources:   []string{"zoneawarepoddisruptionbudgets"},
-							Scope:       ptr(admissionregistrationv1.NamespacedScope),
-						},
-					},
-				},
-				AdmissionReviewVersions: []string{"v1"},
-				NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"kubernetes.io/metadata.name": namespace,
-					},
-				},
-				FailurePolicy: ptr(admissionregistrationv1.Fail),
-				SideEffects:   ptr(admissionregistrationv1.SideEffectClassNone),
-			},
-		},
+func loadCustomResourceDefinitionFromDisk(path string) (*apiextensionsv1.CustomResourceDefinition, error) {
+	object, err := loadConfigurationFromDisk(path, "", "", &apiextensionsv1.CustomResourceDefinition{})
+	if err != nil {
+		return nil, err
 	}
+	obj := *object
+	crd, ok := obj.(*apiextensionsv1.CustomResourceDefinition)
+	if !ok {
+		return nil, fmt.Errorf("decoded object is not a CustomResourceDefinition")
+	}
+	return crd, nil
 }
 
-func podEvictionValidatingWebhook(namespace string) *admissionregistrationv1.ValidatingWebhookConfiguration {
-	name := "pod-eviction-" + namespace
-
-	return &admissionregistrationv1.ValidatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-			Labels: map[string]string{
-				"grafana.com/inject-rollout-operator-ca": "true",
-				"grafana.com/namespace":                  namespace,
-			},
-		},
-		Webhooks: []admissionregistrationv1.ValidatingWebhook{
-			{
-				Name: name + ".grafana.com",
-				ClientConfig: admissionregistrationv1.WebhookClientConfig{
-					Service: &admissionregistrationv1.ServiceReference{
-						Namespace: namespace,
-						Name:      "rollout-operator",
-						Path:      ptr("/admission/pod-eviction"),
-					},
-				},
-				Rules: []admissionregistrationv1.RuleWithOperations{
-					{
-						Operations: []admissionregistrationv1.OperationType{
-							admissionregistrationv1.Create,
-						},
-						Rule: admissionregistrationv1.Rule{
-							APIGroups:   []string{""},
-							APIVersions: []string{"v1"},
-							Resources:   []string{"pods/eviction"},
-							Scope:       ptr(admissionregistrationv1.NamespacedScope),
-						},
-					},
-				},
-				AdmissionReviewVersions: []string{"v1"},
-				NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"kubernetes.io/metadata.name": namespace,
-					},
-				},
-				FailurePolicy: ptr(admissionregistrationv1.Fail),
-				SideEffects:   ptr(admissionregistrationv1.SideEffectClassNone),
-			},
-		},
+func loadValidatingWebhookConfigurationFromDisk(path, namespaceOld, namespaceNew string) (*admissionregistrationv1.ValidatingWebhookConfiguration, error) {
+	object, err := loadConfigurationFromDisk(path, namespaceOld, namespaceNew, &admissionregistrationv1.ValidatingWebhookConfiguration{})
+	if err != nil {
+		return nil, err
 	}
+	obj := *object
+	webhook, ok := obj.(*admissionregistrationv1.ValidatingWebhookConfiguration)
+	if !ok {
+		return nil, fmt.Errorf("decoded object is not a ValidatingWebhookConfiguration")
+	}
+	return webhook, nil
+}
+
+func zoneAwarePodDistruptionBudgetCustomResourceDefinition() (*apiextensionsv1.CustomResourceDefinition, error) {
+	return loadCustomResourceDefinitionFromDisk("../development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml")
+}
+
+func zpdbValidatingWebhook(namespace string) (*admissionregistrationv1.ValidatingWebhookConfiguration, error) {
+	return loadValidatingWebhookConfigurationFromDisk("../development/zone-aware-pod-disruption-budget-validating-webhook.yaml", templateNamespace, namespace)
+}
+
+func podEvictionValidatingWebhook(namespace string) (*admissionregistrationv1.ValidatingWebhookConfiguration, error) {
+	return loadValidatingWebhookConfigurationFromDisk("../development/eviction-webhook.yaml", templateNamespace, namespace)
 }
 
 func noDownscaleValidatingWebhook(namespace string) *admissionregistrationv1.ValidatingWebhookConfiguration {

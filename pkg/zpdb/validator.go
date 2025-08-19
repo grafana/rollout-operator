@@ -7,37 +7,37 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// A Validator allows for different pdb implementations
-type Validator interface {
+// A validator allows for different pdb implementations
+type validator interface {
 
-	// ConsiderSts returns true if this StatefulSet should be considered in the PDB tallies
-	ConsiderSts(sts *appsv1.StatefulSet) bool
+	// considerSts returns true if this StatefulSet should be considered in the PDB tallies
+	considerSts(sts *appsv1.StatefulSet) bool
 
-	// ConsiderPod returns a matcher which is used to test if a pod should be considered in the PDB tallies
-	ConsiderPod() PartitionMatcher
+	// considerPod returns a matcher which is used to test if a pod should be considered in the PDB tallies
+	considerPod() partitionMatcher
 
-	// AccumulateResult is called for each StatefulSet which is tested
-	AccumulateResult(sts *appsv1.StatefulSet, result *ZoneStatusResult) error
+	// accumulateResult is called for each StatefulSet which is tested
+	accumulateResult(sts *appsv1.StatefulSet, result *zoneStatusResult) error
 
-	// Validate is called after all the StatefulSets have been tested - this function validates that the PDB will not be breached
-	Validate(maxUnavailable int) error
+	// validate is called after all the StatefulSets have been tested - this function validates that the PDB will not be breached
+	validate(maxUnavailable int) error
 
-	// SuccessMessage returns a success message we return in the eviction response
-	SuccessMessage() string
+	// successMessage returns a success message we return in the eviction response
+	successMessage() string
 }
 
-// A PartitionMatcher is a utility to assist in matching pods to a partition.
+// A partitionMatcher is a utility to assist in matching pods to a partition.
 // Returns true if this pod is in the same zone/partition as the eviction pod
-type PartitionMatcher func(pod *corev1.Pod) bool
+type partitionMatcher func(pod *corev1.Pod) bool
 
-// A ZoneStatusResult holds the status of a pod availability within a zone / StatefulSet
-type ZoneStatusResult struct {
+// A zoneStatusResult holds the status of a pod availability within a zone / StatefulSet
+type zoneStatusResult struct {
 	// the number of pods tested for their status
-	Tested int
+	tested int
 	// the number of pods who are not ready/running
-	NotReady int
+	notReady int
 	// the number of pods we do not know their status
-	Unknown int
+	unknown int
 }
 
 // plural appends an 's' to the given string if the value is > 1.
@@ -49,18 +49,18 @@ func plural(s string, value int) string {
 }
 
 // pdbMessage creates a message which includes the number of not ready and unknown pods within the given span
-func pdbMessage(result *ZoneStatusResult, span string) string {
+func pdbMessage(result *zoneStatusResult, span string) string {
 	msg := ""
-	if result.NotReady > 0 {
+	if result.notReady > 0 {
 		// 1 pod not ready
-		msg += fmt.Sprintf("%d %s not ready", result.NotReady, plural("pod", result.NotReady))
-		if result.Unknown > 0 {
+		msg += fmt.Sprintf("%d %s not ready", result.notReady, plural("pod", result.notReady))
+		if result.unknown > 0 {
 			msg += ", "
 		}
 	}
-	if result.Unknown > 0 {
+	if result.unknown > 0 {
 		// 2 pods unknown
-		msg += fmt.Sprintf("%d %s unknown", result.Unknown, plural("pod", result.Unknown))
+		msg += fmt.Sprintf("%d %s unknown", result.unknown, plural("pod", result.unknown))
 	}
 
 	// in ingester-zone-a partition 0

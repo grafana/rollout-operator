@@ -113,7 +113,10 @@ func TestWebHookInformer(t *testing.T) {
 
 	{
 		t.Log("Add a webhook after the rollout-operator has created")
-		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, zpdbValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+		vwh, err := zpdbValidatingWebhook(corev1.NamespaceDefault)
+		require.NoError(t, err)
+
+		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
 		require.NoError(t, err)
 		require.Nil(t, wh.Webhooks[0].ClientConfig.CABundle)
 
@@ -123,7 +126,10 @@ func TestWebHookInformer(t *testing.T) {
 
 	{
 		t.Log("Add another webhooks")
-		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, podEvictionValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+		vwh, err := podEvictionValidatingWebhook(corev1.NamespaceDefault)
+		require.NoError(t, err)
+
+		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
 		require.NoError(t, err)
 		require.Nil(t, wh.Webhooks[0].ClientConfig.CABundle)
 
@@ -138,10 +144,16 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
-	_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, zpdbValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	vwh, err := zpdbValidatingWebhook(corev1.NamespaceDefault)
 	require.NoError(t, err)
 
-	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, podEvictionValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	vwh, err = podEvictionValidatingWebhook(corev1.NamespaceDefault)
+	require.NoError(t, err)
+
+	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
 	require.NoError(t, err)
 
 	{
@@ -213,10 +225,16 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
-	_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, zpdbValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	vwh, err := zpdbValidatingWebhook(corev1.NamespaceDefault)
 	require.NoError(t, err)
 
-	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, podEvictionValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	vwh, err = podEvictionValidatingWebhook(corev1.NamespaceDefault)
+	require.NoError(t, err)
+
+	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
 	require.NoError(t, err)
 
 	{
@@ -281,10 +299,16 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
-	_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, zpdbValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	vwh, err := zpdbValidatingWebhook(corev1.NamespaceDefault)
 	require.NoError(t, err)
 
-	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, podEvictionValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
+	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	vwh, err = podEvictionValidatingWebhook(corev1.NamespaceDefault)
+	require.NoError(t, err)
+
+	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
 	require.NoError(t, err)
 
 	{

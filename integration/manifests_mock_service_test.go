@@ -16,6 +16,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
+
+	rcfg "github.com/grafana/rollout-operator/pkg/config"
+	zpdb "github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 func createMockServiceZone(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace, name string, replicas int32) {
@@ -163,25 +166,25 @@ func mockServiceStatefulSet(name, version string, ready bool, replicas int32) *a
 
 func zoneAwarePodDisruptionBudgetSchema() schema.GroupVersionResource {
 	return schema.GroupVersionResource{
-		Group:    "rollout-operator.grafana.com",
-		Version:  "v1",
-		Resource: "zoneawarepoddisruptionbudgets", // plural name in CRD
+		Group:    zpdb.ZoneAwarePodDisruptionBudgetsSpecGroup,
+		Version:  zpdb.ZoneAwarePodDisruptionBudgetsVersion,
+		Resource: zpdb.ZoneAwarePodDisruptionBudgetsNamePlural, // plural name in CRD
 	}
 }
 
 func zoneAwarePodDisruptionBudgetSchemaKind() schema.GroupVersionKind {
 	return schema.GroupVersionKind{
-		Group:   "rollout-operator.grafana.com",
-		Version: "v1",
-		Kind:    "ZoneAwarePodDisruptionBudget",
+		Group:   zpdb.ZoneAwarePodDisruptionBudgetsSpecGroup,
+		Version: zpdb.ZoneAwarePodDisruptionBudgetsVersion,
+		Kind:    zpdb.ZoneAwarePodDisruptionBudgetName,
 	}
 }
 
 func zoneAwarePodDisruptionBudget(namespace, name, rolloutGroup string, maxUnavailable int64) *unstructured.Unstructured {
 	zpdb := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "rollout-operator.grafana.com/v1",
-			"kind":       "ZoneAwarePodDisruptionBudget",
+			"apiVersion": fmt.Sprintf("%s/%s", zpdb.ZoneAwarePodDisruptionBudgetsSpecGroup, zpdb.ZoneAwarePodDisruptionBudgetsVersion),
+			"kind":       zpdb.ZoneAwarePodDisruptionBudgetName,
 			"metadata": map[string]interface{}{
 				"name":      name,
 				"namespace": namespace,
@@ -190,16 +193,17 @@ func zoneAwarePodDisruptionBudget(namespace, name, rolloutGroup string, maxUnava
 				},
 			},
 			"spec": map[string]interface{}{
-				"maxUnavailable": maxUnavailable,
-				"selector": map[string]interface{}{
-					"matchLabels": map[string]interface{}{
-						"rollout-group": rolloutGroup,
+				zpdb.FieldMaxUnavailable: maxUnavailable,
+				zpdb.FieldSelector: map[string]interface{}{
+					zpdb.FieldMatchLabels: map[string]interface{}{
+						rcfg.RolloutGroupLabelKey: rolloutGroup,
 					},
 				},
 			},
 		},
 	}
 
+	// because this is an unstructured object we must explicitly set this so the dynamic client can find this resource
 	zpdb.SetGroupVersionKind(zoneAwarePodDisruptionBudgetSchemaKind())
 
 	return zpdb
@@ -208,8 +212,8 @@ func zoneAwarePodDisruptionBudget(namespace, name, rolloutGroup string, maxUnava
 func zoneAwarePodDisruptionBudgetWithRegex(namespace, name, rolloutGroup string, maxUnavailable int64, podNamePartitionRegex string) *unstructured.Unstructured {
 	zpdb := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "rollout-operator.grafana.com/v1",
-			"kind":       "ZoneAwarePodDisruptionBudget",
+			"apiVersion": fmt.Sprintf("%s/%s", zpdb.ZoneAwarePodDisruptionBudgetsSpecGroup, zpdb.ZoneAwarePodDisruptionBudgetsVersion),
+			"kind":       zpdb.ZoneAwarePodDisruptionBudgetName,
 			"metadata": map[string]interface{}{
 				"name":      name,
 				"namespace": namespace,
@@ -218,18 +222,19 @@ func zoneAwarePodDisruptionBudgetWithRegex(namespace, name, rolloutGroup string,
 				},
 			},
 			"spec": map[string]interface{}{
-				"maxUnavailable": maxUnavailable,
-				"selector": map[string]interface{}{
-					"matchLabels": map[string]interface{}{
-						"rollout-group": rolloutGroup,
+				zpdb.FieldMaxUnavailable: maxUnavailable,
+				zpdb.FieldSelector: map[string]interface{}{
+					zpdb.FieldMatchLabels: map[string]interface{}{
+						rcfg.RolloutGroupLabelKey: rolloutGroup,
 					},
 				},
-				"podNamePartitionRegex": podNamePartitionRegex,
-				"podNameRegexGroup":     1,
+				zpdb.FieldPodNamePartitionRegex: podNamePartitionRegex,
+				zpdb.FieldPodNameRegexGroup:     1,
 			},
 		},
 	}
 
+	// because this is an unstructured object we must explicitly set this so the dynamic client can find this resource
 	zpdb.SetGroupVersionKind(zoneAwarePodDisruptionBudgetSchemaKind())
 
 	return zpdb

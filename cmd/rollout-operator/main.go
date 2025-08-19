@@ -207,18 +207,13 @@ func main() {
 	dynamicClient, err := dynamic.NewForConfigAndClient(kubeConfig, httpClient)
 	check(errors.Wrap(err, "failed to init dynamicClient"))
 
-	// watches for ZoneAwarePodDisruptionBudget configurations being applied
-	zpdbConfigObserver := zpdb.NewConfigObserver(dynamicClient, cfg.kubeNamespace, logger)
-	check(errors.Wrap(zpdbConfigObserver.Start(), "failed to init zpdb config observer"))
-
-	// watches for Pod changes
-	podObserver := zpdb.NewPodObserver(kubeClient, cfg.kubeNamespace, logger)
-	check(errors.Wrap(podObserver.Start(), "failed to init zpdb pod observer"))
-
-	// watches for validating webhooks being added - used in the TLS server init
+	// watches for validating webhooks being added - this is only started if the TLS server is started
 	webhookObserver := tlscert.NewWebhookObserver(kubeClient, cfg.kubeNamespace, logger)
 
-	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, zpdbConfigObserver.PdbCache, podObserver.PodEvictCache, webhookObserver)
+	// controller for pod eviction - this is only started if the TLS server is started
+	evictionController := zpdb.NewEvictionController(kubeClient, dynamicClient, cfg.kubeNamespace, logger)
+
+	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, evictionController, webhookObserver)
 
 	// Init the controller
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
@@ -228,8 +223,7 @@ func main() {
 	go func() {
 		waitForSignalOrRestart(logger, restart)
 		c.Stop()
-		zpdbConfigObserver.Stop()
-		podObserver.Stop()
+		evictionController.Stop()
 		webhookObserver.Stop()
 	}()
 
@@ -251,7 +245,7 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, pdbCache *zpdb.Cache, podEvictionCache *zpdb.PodEvictionCache, webhookObserver *tlscert.WebhookObserver) {
+func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
 		return
@@ -293,15 +287,17 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 
 		// Start monitoring for validating webhook configurations and patch if required
 		check(webhookObserver.Init(webHookListener))
-
 	}
+
+	// Start monitoring for zpdb configurations and pods
+	check(evictionController.Start())
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
 		return admission.PrepareDownscale(ctx, rt, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName)
 	}
 
-	podEvictionFunc := func(ctx context.Context, l log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-		return admission.PodEviction(ctx, logger, ar, api, pdbCache, podEvictionCache)
+	podEvictionFunc := func(ctx context.Context, _ log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {
+		return evictionController.HandlePodEvictionRequest(ctx, ar)
 	}
 
 	zpdbValidationFunc := func(ctx context.Context, l log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {
@@ -312,7 +308,7 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 	check(errors.Wrap(err, "failed to create tls server"))
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, kubeClient))
-	tlsSrv.Handle(admission.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, kubeClient))
+	tlsSrv.Handle(zpdb.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, kubeClient))
 	tlsSrv.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(zpdbValidationFunc, logger, kubeClient))
 	check(errors.Wrap(tlsSrv.Start(), "failed to start tls server"))
 }

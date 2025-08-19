@@ -10,19 +10,19 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-type ValidatorPartitionAware struct {
+type validatorPartitionAware struct {
 	sts       *appsv1.StatefulSet
-	result    *ZoneStatusResult
+	result    *zoneStatusResult
 	partition string
-	matcher   PartitionMatcher
+	matcher   partitionMatcher
 	zones     int
-	pdbConfig *Config
+	pdbConfig *config
 	log       *spanlogger.SpanLogger
 }
 
-func NewValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *Config, log *spanlogger.SpanLogger) *ValidatorPartitionAware {
+func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config, log *spanlogger.SpanLogger) *validatorPartitionAware {
 	partitionMatcher := func(pd *corev1.Pod) bool {
-		thisPartition, err := pdbConfig.PodPartition(pd)
+		thisPartition, err := pdbConfig.podPartition(pd)
 		if err != nil {
 			// the partition name was successfully extracted from the pod being evicted
 			// so if this regex has failed then the assumption is that it is not the same partition, as would have a different naming convention
@@ -32,39 +32,39 @@ func NewValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones
 		return thisPartition == partition
 	}
 
-	return &ValidatorPartitionAware{
+	return &validatorPartitionAware{
 		sts:       sts,
 		partition: partition,
 		zones:     zones,
 		pdbConfig: pdbConfig,
 		log:       log,
-		result:    &ZoneStatusResult{},
+		result:    &zoneStatusResult{},
 		matcher:   partitionMatcher,
 	}
 }
 
-func (v *ValidatorPartitionAware) ConsiderSts(otherSts *appsv1.StatefulSet) bool {
+func (v *validatorPartitionAware) considerSts(otherSts *appsv1.StatefulSet) bool {
 	return otherSts.UID != v.sts.UID
 }
 
-func (v *ValidatorPartitionAware) AccumulateResult(_ *appsv1.StatefulSet, r *ZoneStatusResult) error {
-	v.result.Tested += r.Tested
-	v.result.NotReady += r.NotReady
-	v.result.Unknown += r.Unknown
+func (v *validatorPartitionAware) accumulateResult(_ *appsv1.StatefulSet, r *zoneStatusResult) error {
+	v.result.tested += r.tested
+	v.result.notReady += r.notReady
+	v.result.unknown += r.unknown
 	return nil
 }
 
-func (v *ValidatorPartitionAware) Validate(maxUnavailable int) error {
-	if v.result.NotReady+v.result.Unknown >= maxUnavailable {
+func (v *validatorPartitionAware) validate(maxUnavailable int) error {
+	if v.result.notReady+v.result.unknown >= maxUnavailable {
 		return errors.New(pdbMessage(v.result, "partition "+v.partition))
 	}
 	return nil
 }
 
-func (v *ValidatorPartitionAware) SuccessMessage() string {
+func (v *validatorPartitionAware) successMessage() string {
 	return fmt.Sprintf("zpdb met for partition %s across %d zones", v.partition, v.zones)
 }
 
-func (v *ValidatorPartitionAware) ConsiderPod() PartitionMatcher {
+func (v *validatorPartitionAware) considerPod() partitionMatcher {
 	return v.matcher
 }

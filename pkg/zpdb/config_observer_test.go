@@ -2,6 +2,7 @@ package zpdb
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,11 +14,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/fake"
 
-	"github.com/grafana/rollout-operator/pkg/config"
+	rolloutconfig "github.com/grafana/rollout-operator/pkg/config"
 )
 
-func newConfigObserverTestCase() (*fake.FakeDynamicClient, *ConfigObserver) {
-	dynamicClient := fake.NewSimpleDynamicClientWithCustomListKinds(
+const (
+	testNamespace = "test-namespace"
+)
+
+func newFakeDynamicClient() *fake.FakeDynamicClient {
+	return fake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{
 			{
@@ -28,27 +33,27 @@ func newConfigObserverTestCase() (*fake.FakeDynamicClient, *ConfigObserver) {
 		},
 		// No objects passed - will return empty list on query
 	)
-	observer := NewConfigObserver(dynamicClient, testNamespace, log.NewNopLogger())
-	return dynamicClient, observer
 }
 
-const (
-	testNamespace = "test-namespace"
-)
+func newConfigObserverTestCase() (*fake.FakeDynamicClient, *configObserver) {
+	dynamicClient := newFakeDynamicClient()
+	observer := newConfigObserver(dynamicClient, testNamespace, log.NewNopLogger())
+	return dynamicClient, observer
+}
 
 func newPDB(name string) *unstructured.Unstructured {
 	ret := unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "rollout-operator.grafana.com/v1",
-			"kind":       "ZoneAwarePodDisruptionBudget",
+			"apiVersion": fmt.Sprintf("%s/%s", ZoneAwarePodDisruptionBudgetsSpecGroup, ZoneAwarePodDisruptionBudgetsVersion),
+			"kind":       ZoneAwarePodDisruptionBudgetName,
 			"metadata": map[string]interface{}{
 				"name": name,
 			},
 			"spec": map[string]interface{}{
-				"maxUnavailable": int64(1),
-				"selector": map[string]interface{}{
-					"matchLabels": map[string]interface{}{
-						config.RolloutGroupLabelKey: "test-group",
+				FieldMaxUnavailable: int64(1),
+				FieldSelector: map[string]interface{}{
+					FieldMatchLabels: map[string]interface{}{
+						rolloutconfig.RolloutGroupLabelKey: "test-group",
 					},
 				},
 			},
@@ -61,22 +66,19 @@ func newPDB(name string) *unstructured.Unstructured {
 // TestObserver_NewPdbObserver- basic constructor and life cycle test
 func TestObserver_NewPdbObserver(t *testing.T) {
 	_, observer := newConfigObserverTestCase()
-	require.NoError(t, observer.Start())
+	require.NoError(t, observer.start())
 
-	// Ensure that stopCh has been opened
 	select {
 	case <-observer.stopCh:
 		t.Fatal("stopCh should not be closed initially")
 	default:
-		// Expected - channel is open
+
 	}
 
-	observer.Stop()
+	observer.stop()
 
-	// Ensure that stopCh has been closed
 	select {
 	case <-observer.stopCh:
-		// Expected - channel is closed
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("stopCh should be closed after Stop()")
 	}
@@ -85,8 +87,8 @@ func TestObserver_NewPdbObserver(t *testing.T) {
 // TestObserver_InvalidObject - tests that no panics occur if an invalid object is passed from the informers
 func TestConfigObserver_InvalidObject(t *testing.T) {
 	_, observer := newConfigObserverTestCase()
-	require.NoError(t, observer.Start())
-	defer observer.Stop()
+	require.NoError(t, observer.start())
+	defer observer.stop()
 
 	invalidObj := "not-a-config"
 
@@ -95,13 +97,13 @@ func TestConfigObserver_InvalidObject(t *testing.T) {
 	observer.onPdbDeleted(invalidObj)
 }
 
-// TestObserver_ZPDBEvents_AddValidZPDB - tests the zpdb cache being updated on observed config changes
+// TestObserver_ZPDBEvents_AddValidZPDB - tests the zpdb configCache being updated on observed config changes
 func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	dynamicClient, observer := newConfigObserverTestCase()
-	require.NoError(t, observer.Start())
-	defer observer.Stop()
+	require.NoError(t, observer.start())
+	defer observer.stop()
 
-	require.Equal(t, observer.PdbCache.Size(), 0)
+	require.Equal(t, observer.pdbCache.size(), 0)
 
 	gvr := schema.GroupVersionResource{
 		Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
@@ -114,12 +116,12 @@ func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	require.NoError(t, err)
 
 	task := func() bool {
-		return observer.PdbCache.Size() > 0
+		return observer.pdbCache.size() > 0
 	}
-	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "zpdb config cache has not been initialized")
-	require.Equal(t, 1, observer.PdbCache.Size())
-	require.Contains(t, observer.PdbCache.entries, "test-zpdb")
-	require.Equal(t, int64(1), observer.PdbCache.entries["test-zpdb"].Generation)
+	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "zpdb config configCache has not been initialized")
+	require.Equal(t, 1, observer.pdbCache.size())
+	require.Contains(t, observer.pdbCache.entries, "test-zpdb")
+	require.Equal(t, int64(1), observer.pdbCache.entries["test-zpdb"].generation)
 
 	// test triggering a new zpdb being updated
 	updatedPdb := newPDB("test-zpdb")
@@ -129,11 +131,11 @@ func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	require.NoError(t, err)
 
 	task = func() bool {
-		return observer.PdbCache.entries["test-zpdb"].Generation == int64(3)
+		return observer.pdbCache.entries["test-zpdb"].generation == int64(3)
 	}
-	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "zpdb config cache has not been updated")
-	require.Equal(t, 1, observer.PdbCache.Size())
-	require.Equal(t, int64(3), observer.PdbCache.entries["test-zpdb"].Generation)
+	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "zpdb config configCache has not been updated")
+	require.Equal(t, 1, observer.pdbCache.size())
+	require.Equal(t, int64(3), observer.pdbCache.entries["test-zpdb"].generation)
 
 	// test triggering a stale zpdb update coming in
 	stalePdb := newPDB("test-zpdb")
@@ -142,17 +144,14 @@ func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	_, err = dynamicClient.Resource(gvr).Namespace(testNamespace).Update(context.Background(), stalePdb, metav1.UpdateOptions{})
 	require.NoError(t, err)
 
-	// give long enough that the informer will have fired
-	time.Sleep(100 * time.Millisecond)
-
-	require.Equal(t, 1, observer.PdbCache.Size())
-	require.Equal(t, int64(3), observer.PdbCache.entries["test-zpdb"].Generation)
+	require.Eventually(t, func() bool { return observer.pdbCache.size() == 1 }, time.Second*1, time.Millisecond*10)
+	require.Equal(t, int64(3), observer.pdbCache.entries["test-zpdb"].generation)
 
 	// test stale delete is ignored - calling handler direct as dynamic client delete is limited
 	observer.onPdbDeleted(stalePdb)
-	require.Equal(t, observer.PdbCache.Size(), 1)
+	require.Equal(t, observer.pdbCache.size(), 1)
 
 	stalePdb.SetGeneration(int64(5))
 	observer.onPdbDeleted(stalePdb)
-	require.Equal(t, observer.PdbCache.Size(), 0)
+	require.Equal(t, observer.pdbCache.size(), 0)
 }

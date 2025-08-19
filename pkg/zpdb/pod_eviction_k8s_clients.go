@@ -1,4 +1,4 @@
-package admission
+package zpdb
 
 import (
 	"context"
@@ -13,7 +13,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/pkg/util"
-	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 // A k8sClient holds the Kubernetes API client used to query Kubernetes
@@ -59,9 +58,9 @@ func (a *k8sClient) findRelatedStatefulSets(namespace string, selector *labels.S
 
 // podsNotRunningAndReady finds the pods managed by a given StatefulSet. Each pod is inspected to see if it is ready and running. A tally of the total number of pods and the number not ready/running is returned.
 // It is possible for pods to be in a state where they are not yet returned by the pod listing. These pods should be considered and are reported as unknown.
-// The number of unknown pods is determined as the difference between the StatefulSets State.Replica count minus the number of pods listed.
+// The number of unknown pods is determined as the difference between the StatefulSets Replica count minus the number of pods listed.
 // The given Pod is excluded from testing, but is included in the total of tested pods
-func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, matcher zpdb.PartitionMatcher, evictionCache *zpdb.PodEvictionCache) (*zpdb.ZoneStatusResult, error) {
+func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, matcher partitionMatcher, evictionCache *podEvictionCache) (*zoneStatusResult, error) {
 	podsSelector := labels.NewSelector().Add(
 		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
@@ -74,7 +73,7 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 		return nil, err
 	}
 
-	result := &zpdb.ZoneStatusResult{Tested: 0, NotReady: 0, Unknown: 0}
+	result := &zoneStatusResult{tested: 0, notReady: 0, unknown: 0}
 
 	// replicas is the number of Pods created by the StatefulSet controller.
 	// Spec.Replicas - the desired number of pods as set from config or by a controller
@@ -90,19 +89,19 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 			continue
 		}
 
-		if pod.UID != pd.UID && (evictionCache.HasPendingEviction(&pd) || !util.IsPodRunningAndReady(&pd)) {
+		if pod.UID != pd.UID && (evictionCache.hasPendingEviction(&pd) || !util.IsPodRunningAndReady(&pd)) {
 			// if a pod has recently been evicted then we assume it is not ready
 			// this is avoiding a possible race condition of concurrent eviction requests are occurring and an eviction has not yet caused a pod state change
-			result.NotReady++
+			result.notReady++
 		}
 
-		result.Tested++
+		result.tested++
 	}
 
 	// we consider the pod as not ready if there should be a given replica count but it is not yet being found in the pods query
 	// note that the effect here is that we do not know which partition these other pods will be in, so we have to attribute them to this partition to be safe
 	if len(list.Items) < replicas {
-		result.Unknown = replicas - len(list.Items)
+		result.unknown = replicas - len(list.Items)
 	}
 
 	return result, nil
