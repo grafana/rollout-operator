@@ -57,13 +57,6 @@ func (c *config) matchesPod(pod *corev1.Pod) bool {
 	return selector.Matches(labels.Set(pod.Labels))
 }
 
-func (c *config) min(a int32, b int32) int32 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // maxUnavailablePods returns the number of allowed unavailable pods.
 func (c *config) maxUnavailablePods(sts *appsv1.StatefulSet) int {
 	if c.maxUnavailable > 0 {
@@ -73,7 +66,7 @@ func (c *config) maxUnavailablePods(sts *appsv1.StatefulSet) int {
 	if c.maxUnavailablePercentage > 0 && sts.Spec.Replicas != nil && *sts.Spec.Replicas > 0 {
 
 		// The min() is used to give the most conservative calculation as to the allowed number of unavailable pods.
-		replicas := c.min(*sts.Spec.Replicas, sts.Status.Replicas)
+		replicas := min(*sts.Spec.Replicas, sts.Status.Replicas)
 
 		if replicas == 0 {
 			return 0
