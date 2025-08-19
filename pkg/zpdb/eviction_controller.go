@@ -27,7 +27,7 @@ type EvictionController struct {
 	// a lock used to control finding a specific named lock
 	lock sync.RWMutex
 
-	// a lock for each config name
+	// a lock for each (zpdb) config name
 	locks map[string]*sync.Mutex
 
 	kubeClient kubernetes.Interface

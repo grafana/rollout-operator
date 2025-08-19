@@ -15,7 +15,7 @@ const (
 type podEvictionCacheValue struct {
 	// the expiry time for this record
 	expires time.Time
-	// then generation of the pod when added
+	// the generation of the pod when added
 	generation int64
 }
 
