@@ -194,3 +194,8 @@ func TestMin(t *testing.T) {
 	assert.Equal(t, 1, min(1))
 	assert.Equal(t, 3, min(4, 3, 5))
 }
+
+func TestStatefulSetPodFQDN(t *testing.T) {
+	assert.Equal(t, "statefulset-1.service.namespace.svc.cluster.local.", StatefulSetPodFQDN("namespace", "statefulset", 1, "service", "cluster.local"))
+	assert.Equal(t, "sts-0.example-service.ns.svc.cluster.example.", StatefulSetPodFQDN("ns", "sts", 0, "example-service", "cluster.example"))
+}

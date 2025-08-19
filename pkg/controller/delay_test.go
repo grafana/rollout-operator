@@ -14,6 +14,7 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 		namespace       string
 		statefulSetName string
 		serviceName     string
+		clusterDomain   string
 		from            int
 		to              int
 		inputURL        string
@@ -24,6 +25,7 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 			namespace:       "test-namespace",
 			statefulSetName: "test-statefulset",
 			serviceName:     "test-service",
+			clusterDomain:   "cluster.local",
 			from:            0,
 			to:              2,
 			inputURL:        "http://example.com/api/prepare",
@@ -47,6 +49,7 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 			namespace:       "prod-namespace",
 			statefulSetName: "prod-statefulset",
 			serviceName:     "prod-service",
+			clusterDomain:   "cluster.local",
 			from:            1,
 			to:              3,
 			inputURL:        "http://example.com:8080/api/prepare",
@@ -72,7 +75,7 @@ func TestCreatePrepareDownscaleEndpoints(t *testing.T) {
 			inputURL, err := url.Parse(tc.inputURL)
 			require.NoError(t, err)
 
-			result := createPrepareDownscaleEndpoints(tc.namespace, tc.statefulSetName, tc.serviceName, tc.from, tc.to, inputURL)
+			result := createPrepareDownscaleEndpoints(tc.namespace, tc.statefulSetName, tc.serviceName, tc.clusterDomain, tc.from, tc.to, inputURL)
 
 			assert.Equal(t, tc.expected, result)
 		})
