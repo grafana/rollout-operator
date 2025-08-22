@@ -4,7 +4,6 @@ package integration
 
 import (
 	"context"
-	"github.com/grafana/rollout-operator/pkg/util"
 	"testing"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	_ "k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/grafana/rollout-operator/integration/k3t"
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 func TestRolloutHappyCase(t *testing.T) {
