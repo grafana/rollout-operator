@@ -1,0 +1,14 @@
+apiVersion: rollout-operator.grafana.com/v1
+kind: ZoneAwarePodDisruptionBudget
+metadata:
+  name: test-app-rollout
+  namespace: rollout-operator-development
+  labels:
+    name: test-app-rollout
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      rollout-group: test-app
+  # podNamePartitionRegex: "[a-z\\-]+-zone-[a-z]-([0-9]+)"
+  # podNameRegexGroup: 1

@@ -5,6 +5,8 @@ package integration
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -12,21 +14,26 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
 )
 
 const certificateSecretName = "certificate"
 
-func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace string, webhook bool) {
-	createRolloutOperatorDependencies(t, ctx, api, namespace, webhook)
+func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, namespace string, webhook bool) {
+	createRolloutOperatorDependencies(t, ctx, api, extApi, namespace, webhook)
 
 	_, err := api.AppsV1().Deployments(namespace).Create(ctx, rolloutOperatorDeployment(namespace, webhook), metav1.CreateOptions{})
 	require.NoError(t, err)
 }
 
-func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace string, webhook bool) {
+func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, namespace string, webhook bool) {
 	_, err := api.CoreV1().ServiceAccounts(namespace).Create(ctx, rolloutOperatorServiceAccount(), metav1.CreateOptions{})
 	require.NoError(t, err)
 
@@ -34,6 +41,13 @@ func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *k
 	require.NoError(t, err)
 
 	_, err = api.RbacV1().RoleBindings(namespace).Create(ctx, rolloutOperatorRoleBinding(namespace), metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	crd, err := zoneAwarePodDistruptionBudgetCustomResourceDefinition()
+	require.NoError(t, err)
+
+	_, err = extApi.ApiextensionsV1().CustomResourceDefinitions().
+		Create(context.Background(), crd, metav1.CreateOptions{})
 	require.NoError(t, err)
 
 	if webhook {
@@ -181,6 +195,11 @@ func rolloutOperatorRole() *rbacv1.Role {
 				Resources: []string{"statefulsets/status"},
 				Verbs:     []string{"update"},
 			},
+			{
+				APIGroups: []string{"rollout-operator.grafana.com"},
+				Resources: []string{"zoneawarepoddisruptionbudgets"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
 		},
 	}
 }
@@ -283,6 +302,76 @@ func webhookRolloutOperatorClusterRole(namespace string) *rbacv1.ClusterRole {
 			},
 		},
 	}
+}
+
+var (
+	scheme       = runtime.NewScheme()
+	codecs       = serializer.NewCodecFactory(scheme)
+	deserializer = codecs.UniversalDeserializer()
+	// this is the namespace used in the ../development examples
+	templateNamespace = "rollout-operator-development"
+)
+
+func loadConfigurationFromDisk(path, namespaceOld, namespaceNew string, into runtime.Object) (*runtime.Object, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file from disk: %w", err)
+	}
+
+	var str = string(data)
+	if len(namespaceOld) > 0 || len(namespaceNew) > 0 {
+		str = strings.ReplaceAll(string(data), namespaceOld, namespaceNew)
+	}
+
+	jsonData, err := yaml.ToJSON([]byte(str))
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert yaml to json: %w", err)
+	}
+
+	obj, _, err := deserializer.Decode(jsonData, nil, into)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode from json: %w", err)
+	}
+
+	return &obj, nil
+}
+
+func loadCustomResourceDefinitionFromDisk(path string) (*apiextensionsv1.CustomResourceDefinition, error) {
+	object, err := loadConfigurationFromDisk(path, "", "", &apiextensionsv1.CustomResourceDefinition{})
+	if err != nil {
+		return nil, err
+	}
+	obj := *object
+	crd, ok := obj.(*apiextensionsv1.CustomResourceDefinition)
+	if !ok {
+		return nil, fmt.Errorf("decoded object is not a CustomResourceDefinition")
+	}
+	return crd, nil
+}
+
+func loadValidatingWebhookConfigurationFromDisk(path, namespaceOld, namespaceNew string) (*admissionregistrationv1.ValidatingWebhookConfiguration, error) {
+	object, err := loadConfigurationFromDisk(path, namespaceOld, namespaceNew, &admissionregistrationv1.ValidatingWebhookConfiguration{})
+	if err != nil {
+		return nil, err
+	}
+	obj := *object
+	webhook, ok := obj.(*admissionregistrationv1.ValidatingWebhookConfiguration)
+	if !ok {
+		return nil, fmt.Errorf("decoded object is not a ValidatingWebhookConfiguration")
+	}
+	return webhook, nil
+}
+
+func zoneAwarePodDistruptionBudgetCustomResourceDefinition() (*apiextensionsv1.CustomResourceDefinition, error) {
+	return loadCustomResourceDefinitionFromDisk("../development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml")
+}
+
+func zpdbValidatingWebhook(namespace string) (*admissionregistrationv1.ValidatingWebhookConfiguration, error) {
+	return loadValidatingWebhookConfigurationFromDisk("../development/zone-aware-pod-disruption-budget-validating-webhook.yaml", templateNamespace, namespace)
+}
+
+func podEvictionValidatingWebhook(namespace string) (*admissionregistrationv1.ValidatingWebhookConfiguration, error) {
+	return loadValidatingWebhookConfigurationFromDisk("../development/eviction-webhook.yaml", templateNamespace, namespace)
 }
 
 func noDownscaleValidatingWebhook(namespace string) *admissionregistrationv1.ValidatingWebhookConfiguration {
