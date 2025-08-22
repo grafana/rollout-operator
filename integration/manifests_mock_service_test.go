@@ -21,7 +21,7 @@ import (
 	zpdb "github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
-func createMockServiceZone(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace, name string, replicas int32) {
+func createMockServiceZone(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace, name string, replicas int) {
 	t.Helper()
 	{
 		_, err := api.AppsV1().StatefulSets(namespace).Create(ctx, mockServiceStatefulSet(name, "1", true, replicas), metav1.CreateOptions{})
@@ -95,7 +95,7 @@ func mockServiceIngress(name string) *networkingv1.Ingress {
 	}
 }
 
-func mockServiceStatefulSet(name, version string, ready bool, replicas int32) *appsv1.StatefulSet {
+func mockServiceStatefulSet(name, version string, ready bool, replicas int) *appsv1.StatefulSet {
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -104,7 +104,7 @@ func mockServiceStatefulSet(name, version string, ready bool, replicas int32) *a
 			},
 		},
 		Spec: appsv1.StatefulSetSpec{
-			Replicas: ptr[int32](replicas),
+			Replicas: ptr[int32](int32(replicas)),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"name": name,

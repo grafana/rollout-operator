@@ -100,20 +100,33 @@ func (c *config) podPartition(pod *corev1.Pod) (string, error) {
 // A nil is returned for the Regexp if there is no string in the map.
 func valueAsRegex(config map[string]interface{}, regexField string, groupField string) (*regexp.Regexp, int, error) {
 	var regexString string
-	if val, found := config[regexField]; !found || len(val.(string)) == 0 {
+	val, found := config[regexField]
+	if !found {
 		// no regex - this is ok
 		return nil, 0, nil
-	} else {
-		regexString = val.(string)
+	}
+
+	regexString, ok := val.(string)
+	if !ok {
+		return nil, 0, fmt.Errorf("failed to extract regex value from config field %s", regexField)
+	}
+
+	if len(regexString) == 0 {
+		// no regex - this is ok
+		return nil, 0, nil
 	}
 
 	var groupValue int
 	var groupValueSet = false
-	if val, found := config[groupField]; !found {
+	val, found = config[groupField]
+	if !found {
 		groupValue = 1
 	} else {
-		// note that the CRD constrains this to be >= 1
-		groupValue = int(val.(int64))
+		tmp, ok := val.(int64)
+		if !ok {
+			return nil, 0, fmt.Errorf("failed to extract group value from config field %s", groupField)
+		}
+		groupValue = int(tmp)
 		groupValueSet = true
 	}
 
@@ -163,12 +176,21 @@ func ParseAndValidate(obj *unstructured.Unstructured) (*config, error) {
 	}
 
 	if maxUnavailableFound {
-		cfg.maxUnavailable = int(maxUnavailable.(int64))
+
+		tmp, ok := maxUnavailable.(int64)
+		if !ok {
+			return nil, fmt.Errorf("failed to extract value from config field %s", FieldMaxUnavailable)
+		}
+		cfg.maxUnavailable = int(tmp)
 		if cfg.maxUnavailable < 0 {
 			return nil, fmt.Errorf("invalid value: max unavailable must be 0 <= val, got %d", cfg.maxUnavailable)
 		}
 	} else if maxUnavailableFoundP {
-		cfg.maxUnavailablePercentage = int(maxUnavailableP.(int64))
+		tmp, ok := maxUnavailableP.(int64)
+		if !ok {
+			return nil, fmt.Errorf("failed to extract value from config field %s", FieldMaxUnavailablePercentage)
+		}
+		cfg.maxUnavailablePercentage = int(tmp)
 		cfg.maxUnavailable = 0
 		if cfg.maxUnavailablePercentage < 0 || cfg.maxUnavailablePercentage > 100 {
 			return nil, fmt.Errorf("invalid value: max unavailable percentage must be 0 <= val <= 100, got %d", cfg.maxUnavailablePercentage)

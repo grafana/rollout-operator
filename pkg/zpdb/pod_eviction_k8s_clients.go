@@ -81,7 +81,13 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 	// In a normal running state these values will be equal.
 	// If the system is up-scaled or down-scaled the Spec.Replicas will initially increase or decrease and eventually the Status.Replicas will converge
 	// Taking the max value errs on the side of caution
-	replicas := max(int(sts.Status.Replicas), int(*sts.Spec.Replicas))
+	var replicas int
+	if sts.Spec.Replicas == nil {
+		replicas = int(sts.Status.Replicas)
+	} else {
+		replicas = max(int(sts.Status.Replicas), int(*sts.Spec.Replicas))
+	}
+
 	for _, pd := range list.Items {
 
 		// we do not consider pods which are in a different partition
