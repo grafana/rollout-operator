@@ -278,10 +278,10 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 
 		webHookListener := &tlscert.WebhookConfigurationListener{
 			OnValidatingWebhookConfiguration: func(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) error {
-				return tlscert.PatchCABundleOnValidatingWebhook(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook, true)
+				return tlscert.PatchCABundleOnValidatingWebhook(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
 			},
 			OnMutatingWebhookConfiguration: func(webhook *admissionregistrationv1.MutatingWebhookConfiguration) error {
-				return tlscert.PatchCABundleOnMutatingWebhook(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook, true)
+				return tlscert.PatchCABundleOnMutatingWebhook(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
 			},
 		}
 
