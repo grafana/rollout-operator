@@ -55,12 +55,6 @@ func NewWebhookObserver(kubeClient kubernetes.Interface, namespace string, logge
 }
 
 func (c *WebhookObserver) onWebHookConfigurationObserved(obj interface{}) {
-
-	if c.onEvent == nil {
-		level.Error(c.log).Log("msg", "webhook configuration listener has not been initialized")
-		return
-	}
-
 	// avoid any concurrent modifications where the same webhook is passed in
 	c.lock.Lock()
 	defer c.lock.Unlock()
