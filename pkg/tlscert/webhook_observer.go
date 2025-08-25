@@ -2,6 +2,7 @@ package tlscert
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -32,6 +33,8 @@ type WebhookObserver struct {
 	informerMutatingWebhooks   cache.SharedIndexInformer
 	log                        log.Logger
 	stopCh                     chan struct{}
+	lock                       sync.Mutex
+	onEvent                    *WebhookConfigurationListener
 }
 
 func NewWebhookObserver(kubeClient kubernetes.Interface, namespace string, logger log.Logger) *WebhookObserver {
@@ -45,31 +48,44 @@ func NewWebhookObserver(kubeClient kubernetes.Interface, namespace string, logge
 		informerMutatingWebhooks:   factory.Admissionregistration().V1().MutatingWebhookConfigurations().Informer(),
 		log:                        logger,
 		stopCh:                     make(chan struct{}),
+		lock:                       sync.Mutex{},
 	}
 
 	return c
 }
 
+func (c *WebhookObserver) onWebHookConfigurationObserved(obj interface{}) {
+	// avoid any concurrent modifications where the same webhook is passed in
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	var err error
+	switch obj := obj.(type) {
+	case *admissionregistrationv1.ValidatingWebhookConfiguration:
+		err = c.onEvent.OnValidatingWebhookConfiguration(obj)
+	case *admissionregistrationv1.MutatingWebhookConfiguration:
+		err = c.onEvent.OnMutatingWebhookConfiguration(obj)
+	default:
+		level.Error(c.log).Log("msg", "unknown object", "type", fmt.Sprintf("%T", obj))
+	}
+	if err != nil {
+		level.Error(c.log).Log("msg", "unknown to call configuration listener", "err", err)
+	}
+}
+
 // Init starts watching for validating and mutating webhook configurations being added.
 // The given WebhookConfigurationListener is called when any webhook configurations is added.
 func (c *WebhookObserver) Init(onEvent *WebhookConfigurationListener) error {
+	c.onEvent = onEvent
 
 	informers := []cache.SharedIndexInformer{c.informerValidatingWebhooks, c.informerMutatingWebhooks}
 	for _, informer := range informers {
 		if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				var err error
-				switch obj := obj.(type) {
-				case *admissionregistrationv1.ValidatingWebhookConfiguration:
-					err = onEvent.OnValidatingWebhookConfiguration(obj)
-				case *admissionregistrationv1.MutatingWebhookConfiguration:
-					err = onEvent.OnMutatingWebhookConfiguration(obj)
-				default:
-					level.Error(c.log).Log("msg", "Unknown object", "type", fmt.Sprintf("%T", obj))
-				}
-				if err != nil {
-					level.Error(c.log).Log("msg", "Unable to call webhook configuration listener", "err", err)
-				}
+				c.onWebHookConfigurationObserved(obj)
+			},
+			UpdateFunc: func(_, new interface{}) {
+				c.onWebHookConfigurationObserved(new)
 			},
 		}); err != nil {
 			return errors.Wrap(err, "failed to add webhook listener")
