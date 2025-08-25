@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/kubernetes/scheme"
 
@@ -148,6 +150,20 @@ func TestWebHookInformer(t *testing.T) {
 		require.Nil(t, wh.Webhooks[0].ClientConfig.CABundle)
 
 		t.Log("Await CABundle assignment")
+		require.Eventually(t, awaitCABundleAssignment(3, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
+
+		wh, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Get(ctx, wh.GetName(), metav1.GetOptions{})
+		require.NoError(t, err)
+
+		t.Log("Update a webhook")
+		wh.Webhooks[0].ClientConfig.CABundle = nil
+		data, err := json.Marshal(wh)
+		require.NoError(t, err)
+		wh, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Patch(context.Background(), wh.GetName(), types.MergePatchType, data, metav1.PatchOptions{})
+		require.NoError(t, err)
+		require.Nil(t, wh.Webhooks[0].ClientConfig.CABundle)
+
+		t.Log("Await CABundle assignment after update")
 		require.Eventually(t, awaitCABundleAssignment(3, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
 	}
 }

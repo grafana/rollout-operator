@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -19,7 +20,7 @@ import (
 // Webhook configurations should have the following labels:
 // "grafana.com/inject-rollout-operator-ca": "true",
 // "grafana.com/namespace":                  <specified namespace>,
-func PatchCABundleOnValidatingWebhook(logger log.Logger, kubeClient kubernetes.Interface, namespace string, caPEM []byte, wh *v1.ValidatingWebhookConfiguration) error {
+func PatchCABundleOnValidatingWebhook(logger log.Logger, kubeClient kubernetes.Interface, namespace string, caPEM []byte, wh *v1.ValidatingWebhookConfiguration, retryOnModifiedError bool) error {
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{
 		"grafana.com/inject-rollout-operator-ca": "true",
 		"grafana.com/namespace":                  namespace,
@@ -51,6 +52,14 @@ func PatchCABundleOnValidatingWebhook(logger log.Logger, kubeClient kubernetes.I
 
 	res, err := kubeClient.AdmissionregistrationV1().ValidatingWebhookConfigurations().Patch(context.Background(), wh.GetName(), types.MergePatchType, data, metav1.PatchOptions{})
 	if err != nil {
+		if retryOnModifiedError && strings.Contains(err.Error(), "the object has been modified") {
+			// load the latest version of the webhook - it is possible for the object to have been changed from when it is passed in this function and when the patch is applied
+			wh, err := kubeClient.AdmissionregistrationV1().ValidatingWebhookConfigurations().Get(context.Background(), wh.GetName(), metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to load latest version of webhook configuration: %w", err)
+			}
+			return PatchCABundleOnValidatingWebhook(logger, kubeClient, namespace, caPEM, wh, false)
+		}
 		return fmt.Errorf("failed to patch validating webhook configuration: %w", err)
 	}
 	level.Info(logger).Log("msg", "patched validating webhook configuration with CA bundle", "name", res.GetName())
@@ -61,7 +70,7 @@ func PatchCABundleOnValidatingWebhook(logger log.Logger, kubeClient kubernetes.I
 // Webhook configurations should have the following labels:
 // "grafana.com/inject-rollout-operator-ca": "true",
 // "grafana.com/namespace":                  <specified namespace>,
-func PatchCABundleOnMutatingWebhook(logger log.Logger, kubeClient kubernetes.Interface, namespace string, caPEM []byte, wh *v1.MutatingWebhookConfiguration) error {
+func PatchCABundleOnMutatingWebhook(logger log.Logger, kubeClient kubernetes.Interface, namespace string, caPEM []byte, wh *v1.MutatingWebhookConfiguration, retryOnModifiedError bool) error {
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{
 		"grafana.com/inject-rollout-operator-ca": "true",
 		"grafana.com/namespace":                  namespace,
@@ -87,6 +96,15 @@ func PatchCABundleOnMutatingWebhook(logger log.Logger, kubeClient kubernetes.Int
 
 	data, err := json.Marshal(wh)
 	if err != nil {
+		if retryOnModifiedError && strings.Contains(err.Error(), "the object has been modified") {
+			// load the latest version of the webhook - it is possible for the object to have been changed from when it is passed in this function and when the patch is applied
+			wh, err := kubeClient.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(context.Background(), wh.GetName(), metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to load latest version of webhook configuration: %w", err)
+			}
+			return PatchCABundleOnMutatingWebhook(logger, kubeClient, namespace, caPEM, wh, false)
+		}
+
 		return fmt.Errorf("failed to marshal mutating webhook configuration: %w", err)
 	}
 

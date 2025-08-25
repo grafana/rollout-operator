@@ -2,12 +2,14 @@ package tlscert
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -69,8 +71,9 @@ func TestWebhookObserver_ListenerInvoked(t *testing.T) {
 	require.Empty(t, observedValidatingWebhooks)
 	require.Empty(t, observedMutatingWebhooks)
 
-	_, err := client.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(context.Background(), validatingWebhookConfiguration("validating-webhook"), metav1.CreateOptions{})
+	validatingWebhook, err := client.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(context.Background(), validatingWebhookConfiguration("validating-webhook"), metav1.CreateOptions{})
 	require.NoError(t, err)
+	require.NotEmpty(t, validatingWebhook)
 
 	// wait for the informer to be aware of this create
 	task := func() bool {
@@ -80,8 +83,9 @@ func TestWebhookObserver_ListenerInvoked(t *testing.T) {
 	require.Equal(t, "validating-webhook", observedValidatingWebhooks[0].Name)
 	require.Empty(t, observedMutatingWebhooks)
 
-	_, err = client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(context.Background(), mutatingWebhookConfiguration("mutating-webhook"), metav1.CreateOptions{})
+	mutatingWebhook, err := client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(context.Background(), mutatingWebhookConfiguration("mutating-webhook"), metav1.CreateOptions{})
 	require.NoError(t, err)
+	require.NotEmpty(t, mutatingWebhook)
 
 	// wait for the informer to be aware of this create
 	task = func() bool {
@@ -89,6 +93,32 @@ func TestWebhookObserver_ListenerInvoked(t *testing.T) {
 	}
 	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "MutatingWebhookConfiguration should have 1 MutatingWebhookConfiguration")
 	require.Equal(t, "mutating-webhook", observedMutatingWebhooks[0].Name)
+
+	// modify our validating webhook
+	validatingWebhook.SetLabels(map[string]string{"foo": "bar"})
+	data, err := json.Marshal(validatingWebhook)
+	require.NoError(t, err)
+	_, err = client.AdmissionregistrationV1().ValidatingWebhookConfigurations().Patch(context.Background(), validatingWebhook.GetName(), types.MergePatchType, data, metav1.PatchOptions{})
+	require.NoError(t, err)
+
+	// wait for the informer to be aware of this create
+	task = func() bool {
+		return len(observedValidatingWebhooks) == 2
+	}
+	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "ValidatingWebhookConfiguration should have 2 ValidatingWebhookConfigurations")
+
+	// modify our mutating webhook
+	mutatingWebhook.SetLabels(map[string]string{"foo": "bar"})
+	data, err = json.Marshal(mutatingWebhook)
+	require.NoError(t, err)
+	_, err = client.AdmissionregistrationV1().MutatingWebhookConfigurations().Patch(context.Background(), mutatingWebhook.GetName(), types.MergePatchType, data, metav1.PatchOptions{})
+	require.NoError(t, err)
+
+	// wait for the informer to be aware of this create
+	task = func() bool {
+		return len(observedMutatingWebhooks) == 2
+	}
+	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "MutatingWebhookConfiguration should have 2 MutatingWebhookConfigurations")
 }
 
 // validatingWebhookConfiguration returns a new ValidatingWebhookConfiguration with only it's name set
