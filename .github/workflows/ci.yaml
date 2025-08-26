@@ -128,3 +128,4 @@ jobs:
         run: make release-notes | gh release create "$IMAGE_TAG" --notes-file -
         env:
           IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
