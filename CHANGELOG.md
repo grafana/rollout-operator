@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.29.0
+
 * [CHANGE] Rename flag `server.cluster-validation.http.exclude-paths` to `server.cluster-validation.http.excluded-paths` to align with `dskit`. #247
 * [ENHANCEMENT] Update Go to `1.25` #263
 * [ENHANCEMENT] Updated dependencies, including: #236 #238 #242 #247 #257
