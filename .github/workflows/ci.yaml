@@ -88,7 +88,7 @@ jobs:
       - integration
       - integration-boringcrypto
       - lint
-    if: github.event_name == 'push' # We want this job to run for both pushes to main, as well as new tags.
+    if: github.event_name == 'push' && github.ref_type == 'tag' # Only run for tag pushes
     permissions:
       contents: write # Needed to be able to create releases.
       id-token: write
