@@ -36,7 +36,7 @@ build-image: clean ## Build the rollout-operator image
 .PHONY: build-image-boringcrypto
 build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto
 	# Tags with the regular image repo for integration testing
-	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) -f Dockerfile.boringcrypto .
+	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) -f Dockerfile.boringcrypto .
 
 .PHONY: publish-images
 publish-images: publish-standard-image publish-boringcrypto-image ## Build and publish both the standard and boringcrypto images
