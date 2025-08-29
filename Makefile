@@ -20,6 +20,15 @@ BORINGCRYPTO_BASE_IMAGE=gcr.io/distroless/base-nossl-debian12:nonroot
 
 .DEFAULT_GOAL := rollout-operator
 
+REGO_POLICIES_PATH=operations/policies
+
+# path to jsonnetfmt
+JSONNET_FMT := jsonnetfmt
+
+# path to the mimir rollout-operator manifests
+JSONNET_MANIFESTS_PATHS := operations
+
+
 # Adapted from https://www.thapaliya.com/en/writings/well-documented-makefiles/
 .PHONY: help
 help: ## Display this help and any documented user-facing targets
@@ -86,3 +95,30 @@ fix-lint: ## Automatically fix linting issues where possible
 clean: ## Run go clean and remove the rollout-operator binary
 	rm -f rollout-operator
 	go clean ./...
+
+.PHONY: check-jsonnet-manifests
+check-jsonnet-manifests: ## Check the rollout-operator manifests.
+check-jsonnet-manifests: format-jsonnet-manifests
+	@echo "Checking diff:"
+	@./tools/find-diff-or-untracked.sh $(JSONNET_MANIFESTS_PATHS) || (echo "Please format jsonnet manifests by running 'make format-jsonnet-manifests'" && false)
+
+.PHONY: check-jsonnet-tests
+check-jsonnet-tests: ## Check the jsonnet tests output.
+check-jsonnet-tests: build-jsonnet-tests jsonnet-conftest-test
+	@./tools/find-diff-or-untracked.sh operations/mimir-tests || (echo "Please rebuild jsonnet tests output 'make build-jsonnet-tests'" && false)
+
+.PHONY: format-jsonnet-manifests
+format-jsonnet-manifests: ## Format the rollout-operator manifests.
+	@find $(JSONNET_MANIFESTS_PATHS) -type f -name '*.libsonnet' -print -o -name '*.jsonnet' -print | xargs $(JSONNET_FMT) -i
+
+.PHONY: build-jsonnet-tests
+build-jsonnet-tests: ## Build the rollout-operator tests.
+	@./operations/rollout-operator-tests/build.sh
+
+.PHONY: jsonnet-conftest-quick-test
+jsonnet-conftest-quick-test: ## Does not rebuild the yaml manifests, use the target jsonnet-conftest-test for that
+jsonnet-conftest-quick-test:
+	@./operations/rollout-operator-tests/run-conftest.sh --policies-path $(REGO_POLICIES_PATH) --manifests-path ./operations/rollout-operator-tests
+
+.PHONY: jsonnet-conftest-test
+jsonnet-conftest-test: build-jsonnet-tests jsonnet-conftest-quick-test
