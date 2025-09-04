@@ -2,6 +2,17 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #280
+  * `k8s.io/api` from `v0.33.3` to `v0.34.0`
+  * `k8s.io/apiextensions-apiserver` from `v0.33.0` to `v0.34.0`
+  * `k8s.io/apimachinery` from `v0.33.3` to `v0.34.0`
+  * `k8s.io/client-go` from `v0.33.3` to `v0.34.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.62.0` to `v0.63.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.62.0` to `v0.63.0`
+  * `go.opentelemetry.io/otel` from `v1.37.0` to `v1.38.0`
+  * `go.opentelemetry.io/otel/trace` from `v1.37.0` to `v1.38.0`
+  * `sigs.k8s.io/controller-runtime` from `v0.21.0` to `v0.22.0`
+
 ## v0.29.0
 
 * [CHANGE] Rename flag `server.cluster-validation.http.exclude-paths` to `server.cluster-validation.http.excluded-paths` to align with `dskit`. #247
