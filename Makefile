@@ -13,15 +13,12 @@ IMAGE_TAG ?= $(subst /,-,$(GIT_BRANCH))-$(GIT_REVISION)
 # systems gsed won't be installed, so will use sed as expected.
 SED ?= $(shell which gsed 2>/dev/null || which sed)
 
-# We don't want find to scan inside a bunch of directories
-DONT_FIND := \( -name vendor -o -name .git -o -name .cache -o -name .pkg \) -prune -o
-MAKE_FILES := $(shell find . $(DONT_FIND) \( -name 'Makefile' -o -name '*.mk' \) -print)
-
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 
 DONT_FIND := -name vendor -prune -o -name .git -prune -o -name .cache -prune -o -name .pkg -prune
 GO_FILES := $(shell find . $(DONT_FIND) -o -type f -name '*.go' -print)
+MAKE_FILES := $(shell find . $(DONT_FIND) -o -name 'Makefile' -print -o -name '*.mk' -print)
 
 # Boringcrypto has a different base image for glibc
 BORINGCRYPTO_BASE_IMAGE=gcr.io/distroless/base-nossl-debian12:nonroot
