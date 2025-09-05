@@ -9,6 +9,14 @@ GIT_REVISION := $(shell git rev-parse --short HEAD)
 IMAGE_PREFIX ?= grafana
 IMAGE_TAG ?= $(subst /,-,$(GIT_BRANCH))-$(GIT_REVISION)
 
+# Support gsed on OSX (installed via brew), falling back to sed. On Linux
+# systems gsed won't be installed, so will use sed as expected.
+SED ?= $(shell which gsed 2>/dev/null || which sed)
+
+# We don't want find to scan inside a bunch of directories
+DONT_FIND := \( -name vendor -o -name .git -o -name .cache -o -name .pkg \) -prune -o
+MAKE_FILES := $(shell find . $(DONT_FIND) \( -name 'Makefile' -o -name '*.mk' \) -print)
+
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 
@@ -75,7 +83,8 @@ integration/mock-service/.uptodate:
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
 
 .PHONY: lint
-lint: ## Run golangci-lint
+lint: ## Run lints to check for style issues.
+lint: check-makefiles
 	golangci-lint run --timeout=5m
 
 .PHONY: fix-lint
@@ -86,3 +95,13 @@ fix-lint: ## Automatically fix linting issues where possible
 clean: ## Run go clean and remove the rollout-operator binary
 	rm -f rollout-operator
 	go clean ./...
+
+.PHONY: check-makefiles
+check-makefiles: ## Check the makefiles format.
+check-makefiles:
+	@git diff --exit-code -- $(MAKE_FILES) || (echo "Please format Makefiles by running 'make format-makefiles'" && false)
+
+.PHONY: format-makefiles
+format-makefiles: ## Format all Makefiles.
+format-makefiles: $(MAKE_FILES)
+	$(SED) -i -e 's/^\(\t*\)  /\1\t/g' -e 's/^\(\t*\) /\1/' -- $?
