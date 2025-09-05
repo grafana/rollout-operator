@@ -88,7 +88,7 @@ jobs:
       - integration
       - integration-boringcrypto
       - lint
-    if: github.event_name == 'push' && github.ref_type == 'tag' # Only run for tag pushes
+    if: github.event_name == 'push' # We want this job to run for both pushes to main, as well as new tags
     permissions:
       contents: write # Needed to be able to create releases.
       id-token: write
@@ -120,7 +120,12 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
       - name: Build and push image
-        run: make publish-images
+        run: |
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            make publish-images
+          else
+            make publish-standard-image
+          fi
         env:
           IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
       - name: Publish release
