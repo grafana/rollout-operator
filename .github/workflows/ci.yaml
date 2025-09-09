@@ -47,6 +47,21 @@ jobs:
           go-version: '1.25'
           check-latest: true
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
+      - name: Install jsonnet
+        run: |
+          JSONNET_VERSION=0.21.0
+          curl -sL "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/go-jsonnet_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin
+      - name: Install tk
+        run: |
+          TANKA_VERSION="0.34.1"
+          sudo curl -sLo /usr/local/bin/tk https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64
+          sudo chmod a+x /usr/local/bin/tk
+      - name: Install jb
+        run: |
+          JSONNET_BUNDLER_VERSION="0.6.0"
+          sudo curl -sLo /usr/local/bin/jb https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64
+          sudo chmod a+x /usr/local/bin/jb
       - run: make build-image
       - run: make integration
 
@@ -61,6 +76,21 @@ jobs:
           go-version: '1.25'
           check-latest: true
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
+      - name: Install jsonnet
+        run: |
+          JSONNET_VERSION=0.21.0
+          curl -sL "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/go-jsonnet_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin
+      - name: Install tk
+        run: |
+          TANKA_VERSION="0.34.1"
+          sudo curl -sLo /usr/local/bin/tk https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64
+          sudo chmod a+x /usr/local/bin/tk
+      - name: Install jb
+        run: |
+          JSONNET_BUNDLER_VERSION="0.6.0"
+          sudo curl -sLo /usr/local/bin/jb https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64
+          sudo chmod a+x /usr/local/bin/jb
       - run: make build-image-boringcrypto
       - run: make integration
 
@@ -80,6 +110,37 @@ jobs:
           version: v2.4.0
           args: --timeout=5m
 
+  lint-jsonnet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+        with:
+          persist-credentials: false
+      - name: Install jsonnet
+        run: |
+          JSONNET_VERSION=0.21.0
+          curl -sL "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/go-jsonnet_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin
+      - name: Install conftest
+        run: |
+          CONTEST_VERSION="0.62.0"
+          curl -sL "https://github.com/open-policy-agent/conftest/releases/download/v${CONTEST_VERSION}/conftest_${CONTEST_VERSION}_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin
+      - name: Install tk
+        run: |
+          TANKA_VERSION="0.34.1"
+          sudo curl -sLo /usr/local/bin/tk https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64
+          sudo chmod a+x /usr/local/bin/tk
+      - name: Install jb
+        run: |
+          JSONNET_BUNDLER_VERSION="0.6.0"
+          sudo curl -sLo /usr/local/bin/jb https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64
+          sudo chmod a+x /usr/local/bin/jb
+      - name: Check Jsonnet Manifests
+        run: make check-jsonnet-manifests
+      - name: Check Jsonnet Tests
+        run: make check-jsonnet-tests
+
   push-image:
     runs-on: ubuntu-latest
     needs:
@@ -88,6 +149,7 @@ jobs:
       - integration
       - integration-boringcrypto
       - lint
+      - lint-jsonnet
     if: github.event_name == 'push' # We want this job to run for both pushes to main, as well as new tags
     permissions:
       contents: write # Needed to be able to create releases.

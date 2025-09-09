@@ -26,8 +26,10 @@ func TestRolloutHappyCase(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
+	path := initManifestFiles(t, "webhooks-not-enabled")
+
 	// Create rollout operator and check it's running and ready.
-	createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, false)
+	createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, false)
 	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 
@@ -112,28 +114,25 @@ func TestWebHookInformer(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
+	path := initManifestFiles(t, "webhooks-enabled")
+
 	{
 		t.Log("Add a webhook before the rollout-operator is created")
-		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
+		wh := createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookNoDownscale)
 		require.Nil(t, wh.Webhooks[0].ClientConfig.CABundle)
 	}
 
 	{
 		t.Log("Starting rollout-operator with existing webhook")
-		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 
 		t.Log("Await CABundle assignment")
-		require.Eventually(t, awaitCABundleAssignment(1, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
+		require.Eventually(t, awaitCABundleAssignment(1, ctx, api), time.Second*60, time.Millisecond*10, "New webhooks have CABundle added")
 	}
 
 	{
 		t.Log("Add a webhook after the rollout-operator has created")
-		vwh, err := zpdbValidatingWebhook(corev1.NamespaceDefault)
-		require.NoError(t, err)
-
-		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
-		require.NoError(t, err)
+		wh := createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
 		require.Nil(t, wh.Webhooks[0].ClientConfig.CABundle)
 
 		t.Log("Await CABundle assignment")
@@ -142,17 +141,13 @@ func TestWebHookInformer(t *testing.T) {
 
 	{
 		t.Log("Add another webhook")
-		vwh, err := podEvictionValidatingWebhook(corev1.NamespaceDefault)
-		require.NoError(t, err)
-
-		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
-		require.NoError(t, err)
+		wh := createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
 		require.Nil(t, wh.Webhooks[0].ClientConfig.CABundle)
 
 		t.Log("Await CABundle assignment")
 		require.Eventually(t, awaitCABundleAssignment(3, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
 
-		wh, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Get(ctx, wh.GetName(), metav1.GetOptions{})
+		wh, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Get(ctx, wh.GetName(), metav1.GetOptions{})
 		require.NoError(t, err)
 
 		t.Log("Update a webhook")
@@ -174,21 +169,15 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
-	vwh, err := zpdbValidatingWebhook(corev1.NamespaceDefault)
-	require.NoError(t, err)
-
-	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
-	require.NoError(t, err)
-
-	vwh, err = podEvictionValidatingWebhook(corev1.NamespaceDefault)
-	require.NoError(t, err)
-
-	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
-	require.NoError(t, err)
+	path := initManifestFiles(t, "max-unavailable-1")
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
+
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
+
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 
@@ -199,15 +188,13 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 	{
 		t.Log("Try to create an invalid zpdb configuration.")
 		zpdb := zoneAwarePodDisruptionBudget(corev1.NamespaceDefault, "ingester-zpdb", "mock", -1)
-		_, err = cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
+		_, err := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
 		require.Error(t, err)
 	}
 
 	{
 		t.Log("Create a valid zpdb configuration.")
-		zpdb := zoneAwarePodDisruptionBudget(corev1.NamespaceDefault, "ingester-zpdb", "mock", 1)
-		_, err = cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
-		require.NoError(t, err)
+		_ = createZoneAwarePodDisruptionBudget(t, cluster, ctx, path+yamlZpdbConfig)
 	}
 
 	{
@@ -266,21 +253,15 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
-	vwh, err := zpdbValidatingWebhook(corev1.NamespaceDefault)
-	require.NoError(t, err)
-
-	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
-	require.NoError(t, err)
-
-	vwh, err = podEvictionValidatingWebhook(corev1.NamespaceDefault)
-	require.NoError(t, err)
-
-	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
-	require.NoError(t, err)
+	path := initManifestFiles(t, "max-unavailable-2")
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
+
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
+
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 
@@ -290,9 +271,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 
 	{
 		t.Log("Create a valid zpdb configuration.")
-		zpdb := zoneAwarePodDisruptionBudget(corev1.NamespaceDefault, "ingester-zpdb", "mock", 2)
-		_, err = cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
-		require.NoError(t, err)
+		_ = createZoneAwarePodDisruptionBudget(t, cluster, ctx, path+yamlZpdbConfig)
 	}
 
 	{
@@ -335,21 +314,15 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
-	vwh, err := zpdbValidatingWebhook(corev1.NamespaceDefault)
-	require.NoError(t, err)
-
-	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
-	require.NoError(t, err)
-
-	vwh, err = podEvictionValidatingWebhook(corev1.NamespaceDefault)
-	require.NoError(t, err)
-
-	_, err = api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, vwh, metav1.CreateOptions{})
-	require.NoError(t, err)
+	path := initManifestFiles(t, "max-unavailable-1-with-regex")
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
+
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
+
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 
@@ -359,9 +332,7 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 
 	{
 		t.Log("Create a valid zpdb configuration.")
-		zpdb := zoneAwarePodDisruptionBudgetWithRegex(corev1.NamespaceDefault, "ingester-zpdb", "mock", 1, "mock-zone-[a-z]+-([0-9]+)")
-		_, err = cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
-		require.NoError(t, err)
+		_ = createZoneAwarePodDisruptionBudget(t, cluster, ctx, path+yamlZpdbConfig)
 	}
 
 	{
@@ -427,15 +398,16 @@ func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
+	path := initManifestFiles(t, "webhooks-enabled")
+
 	{
 		t.Log("Create the webhook before the rollout-operator, as rollout-operator should update its certificate.")
-		_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookNoDownscale)
 	}
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 	}
@@ -476,15 +448,16 @@ func TestNoDownscale_DownscaleUpdatingStatefulSet(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
+	path := initManifestFiles(t, "webhooks-enabled")
+
 	{
 		t.Log("Create the webhook before the rollout-operator, as rollout-operator should update its certificate.")
-		_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookNoDownscale)
 	}
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 	}
@@ -526,15 +499,16 @@ func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
 	api := cluster.API()
 
+	path := initManifestFiles(t, "webhooks-enabled")
+
 	{
 		t.Log("Create the webhook before the rollout-operator, as rollout-operator should update its certificate.")
-		_, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, noDownscaleValidatingWebhook(corev1.NamespaceDefault), metav1.CreateOptions{})
-		require.NoError(t, err)
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookNoDownscale)
 	}
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), corev1.NamespaceDefault, true)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 	}

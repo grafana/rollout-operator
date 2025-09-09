@@ -4,9 +4,10 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,290 +18,94 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/grafana/rollout-operator/integration/k3t"
 )
 
-const certificateSecretName = "certificate"
+// These manifest files are generated via jsonnet-integration-tests
+const (
+	yamlWebhookNoDownscale    = "admissionregistration.k8s.io-v1.ValidatingWebhookConfiguration-no-downscale-default.yaml"
+	yamlWebhookPodEviction    = "admissionregistration.k8s.io-v1.ValidatingWebhookConfiguration-pod-eviction-default.yaml"
+	yamlWebhookZpdbValidation = "admissionregistration.k8s.io-v1.ValidatingWebhookConfiguration-zpdb-validation-default.yaml"
+	yamlDeployment            = "apps-v1.Deployment-rollout-operator.yaml"
+	yamlClusterRole           = "rbac.authorization.k8s.io-v1.ClusterRole-rollout-operator-default-webhook-cert-update-role.yaml"
+	yamlCluserRoleBinding     = "rbac.authorization.k8s.io-v1.ClusterRoleBinding-rollout-operator-default-webhook-cert-secret-rolebinding.yaml"
+	yamlRole                  = "rbac.authorization.k8s.io-v1.Role-rollout-operator-role.yaml"
+	yamlRoleSecret            = "rbac.authorization.k8s.io-v1.Role-rollout-operator-webhook-cert-secret-role.yaml"
+	yamlRoleBinding           = "rbac.authorization.k8s.io-v1.RoleBinding-rollout-operator-rolebinding.yaml"
+	yamlRoleBindingSecret     = "rbac.authorization.k8s.io-v1.RoleBinding-rollout-operator-webhook-cert-secret-rolebinding.yaml"
+	yamlService               = "v1.Service-rollout-operator.yaml"
+	yamlServiceAccount        = "v1.ServiceAccount-rollout-operator.yaml"
+	yamlZpdbConfig            = "rollout-operator.grafana.com-v1.ZoneAwarePodDisruptionBudget-mock-rollout.yaml"
+	yamlPathTemplate          = "jsonnet-integration-tests/environments/%s/yaml/"
+)
 
-func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, namespace string, webhook bool) {
-	createRolloutOperatorDependencies(t, ctx, api, extApi, namespace, webhook)
+// initManifestFiles re-generates the yaml manifest files from jsonnet.
+// Each test has a jsonnet configuration in the jsonnet-integration directory.
+// This function re-generates the manifest files associated with the given test,
+// allowing the generated files to be used within the integration tests.
+// Returns the path to the generated files.
+func initManifestFiles(t *testing.T, test string) string {
+	t.Log("Generating manifest files for " + test)
+	cmd := exec.Command("jsonnet-integration/build.sh", test)
+	err := cmd.Start()
+	require.NoError(t, err)
+	err = cmd.Wait()
+	require.NoError(t, err)
 
-	_, err := api.AppsV1().Deployments(namespace).Create(ctx, rolloutOperatorDeployment(namespace, webhook), metav1.CreateOptions{})
+	return fmt.Sprintf(yamlPathTemplate, test)
+}
+
+func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook bool) {
+	createRolloutOperatorDependencies(t, ctx, api, extApi, directory, webhook)
+
+	deployment := loadFromDisk[appsv1.Deployment](t, directory+yamlDeployment, &appsv1.Deployment{})
+	_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Create(ctx, deployment, metav1.CreateOptions{})
 	require.NoError(t, err)
 }
 
-func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, namespace string, webhook bool) {
-	_, err := api.CoreV1().ServiceAccounts(namespace).Create(ctx, rolloutOperatorServiceAccount(), metav1.CreateOptions{})
+func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook bool) {
+
+	serviceAccount := loadFromDisk[corev1.ServiceAccount](t, directory+yamlServiceAccount, &corev1.ServiceAccount{})
+	_, err := api.CoreV1().ServiceAccounts(corev1.NamespaceDefault).Create(ctx, serviceAccount, metav1.CreateOptions{})
 	require.NoError(t, err)
 
-	_, err = api.RbacV1().Roles(namespace).Create(ctx, rolloutOperatorRole(), metav1.CreateOptions{})
+	role := loadFromDisk[rbacv1.Role](t, directory+yamlRole, &rbacv1.Role{})
+	_, err = api.RbacV1().Roles(corev1.NamespaceDefault).Create(ctx, role, metav1.CreateOptions{})
 	require.NoError(t, err)
 
-	_, err = api.RbacV1().RoleBindings(namespace).Create(ctx, rolloutOperatorRoleBinding(namespace), metav1.CreateOptions{})
-	require.NoError(t, err)
-
-	crd, err := zoneAwarePodDistruptionBudgetCustomResourceDefinition()
-	require.NoError(t, err)
-
-	_, err = extApi.ApiextensionsV1().CustomResourceDefinitions().
-		Create(context.Background(), crd, metav1.CreateOptions{})
+	roleBinding := loadFromDisk[rbacv1.RoleBinding](t, directory+yamlRoleBinding, &rbacv1.RoleBinding{})
+	_, err = api.RbacV1().RoleBindings(corev1.NamespaceDefault).Create(ctx, roleBinding, metav1.CreateOptions{})
 	require.NoError(t, err)
 
 	if webhook {
-		_, err = api.RbacV1().Roles(namespace).Create(ctx, webhookRolloutOperatorRole(), metav1.CreateOptions{})
+		_ = createZoneAwarePodDistruptionBudgetCustomResourceDefinition(t, extApi)
+		_ = createReplicaTemplateCustomResourceDefinition(t, extApi)
+
+		operatorRole := loadFromDisk[rbacv1.Role](t, directory+yamlRoleSecret, &rbacv1.Role{})
+		_, err = api.RbacV1().Roles(corev1.NamespaceDefault).Create(ctx, operatorRole, metav1.CreateOptions{})
 		require.NoError(t, err)
 
-		_, err = api.RbacV1().RoleBindings(namespace).Create(ctx, webhookRolloutOperatorRoleBinding(namespace), metav1.CreateOptions{})
+		operatorRoleBinding := loadFromDisk[rbacv1.RoleBinding](t, directory+yamlRoleBindingSecret, &rbacv1.RoleBinding{})
+		_, err = api.RbacV1().RoleBindings(corev1.NamespaceDefault).Create(ctx, operatorRoleBinding, metav1.CreateOptions{})
 		require.NoError(t, err)
 
-		_, err := api.RbacV1().ClusterRoles().Create(ctx, webhookRolloutOperatorClusterRole(namespace), metav1.CreateOptions{})
+		clusterRole := loadFromDisk[rbacv1.ClusterRole](t, directory+yamlClusterRole, &rbacv1.ClusterRole{})
+		_, err = api.RbacV1().ClusterRoles().Create(ctx, clusterRole, metav1.CreateOptions{})
 		require.NoError(t, err)
 
-		_, err = api.RbacV1().ClusterRoleBindings().Create(ctx, webhookRolloutOperatorClusterRoleBinding(namespace), metav1.CreateOptions{})
+		clusterRoleBinding := loadFromDisk[rbacv1.ClusterRoleBinding](t, directory+yamlCluserRoleBinding, &rbacv1.ClusterRoleBinding{})
+		_, err = api.RbacV1().ClusterRoleBindings().Create(ctx, clusterRoleBinding, metav1.CreateOptions{})
 		require.NoError(t, err)
 
-		_, err = api.CoreV1().Services(namespace).Create(ctx, rolloutOperatorService(), metav1.CreateOptions{})
+		service := loadFromDisk[corev1.Service](t, directory+yamlService, &corev1.Service{})
+		_, err = api.CoreV1().Services(corev1.NamespaceDefault).Create(ctx, service, metav1.CreateOptions{})
 		require.NoError(t, err)
-	}
-}
-
-func rolloutOperatorDeployment(namespace string, webhook bool) *appsv1.Deployment {
-	args := []string{
-		fmt.Sprintf("-kubernetes.namespace=%s", namespace),
-		"-reconcile.interval=1s",
-		"-log.level=debug",
-	}
-	if webhook {
-		args = append(args,
-			"-server-tls.enabled=true",
-			"-server-tls.self-signed-cert.secret-name="+certificateSecretName,
-		)
-	}
-
-	return &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "rollout-operator",
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: ptr[int32](1),
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"name": "rollout-operator",
-				},
-			},
-			Strategy: appsv1.DeploymentStrategy{
-				Type: appsv1.RollingUpdateDeploymentStrategyType,
-				RollingUpdate: &appsv1.RollingUpdateDeployment{
-					MaxUnavailable: &intstr.IntOrString{
-						Type:   intstr.Int,
-						IntVal: 1,
-					},
-					MaxSurge: &intstr.IntOrString{
-						Type:   intstr.Int,
-						IntVal: 0,
-					},
-				},
-			},
-			MinReadySeconds: 10,
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"name": "rollout-operator",
-					},
-				},
-				Spec: corev1.PodSpec{
-					ServiceAccountName: "rollout-operator",
-					Containers: []corev1.Container{
-						{
-							Name:            "rollout-operator",
-							Image:           "rollout-operator:latest",
-							Args:            args,
-							ImagePullPolicy: "IfNotPresent",
-							Ports: []corev1.ContainerPort{
-								{
-									Name:          "http-metrics",
-									ContainerPort: 8001,
-								},
-							},
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/ready",
-										Port: intstr.FromInt(8001),
-									},
-								},
-								InitialDelaySeconds: 1,
-								TimeoutSeconds:      1,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-}
-
-func rolloutOperatorServiceAccount() *corev1.ServiceAccount {
-	return &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "rollout-operator",
-		},
-	}
-}
-
-func rolloutOperatorRoleBinding(namespace string) *rbacv1.RoleBinding {
-	return &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "rollout-operator-rolebinding",
-		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "Role",
-			Name:     "rollout-operator-role",
-		},
-		Subjects: []rbacv1.Subject{
-			{
-				Kind:      "ServiceAccount",
-				Name:      "rollout-operator",
-				Namespace: namespace,
-			},
-		},
-	}
-
-}
-
-// rolloutOperatorRole provides the role for the "default" rollout-operator functionality.
-func rolloutOperatorRole() *rbacv1.Role {
-	return &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "rollout-operator-role",
-		},
-		Rules: []rbacv1.PolicyRule{
-			{
-				APIGroups: []string{""},
-				Resources: []string{"pods"},
-				Verbs:     []string{"list", "get", "watch", "delete"},
-			},
-			{
-				APIGroups: []string{"apps"},
-				Resources: []string{"statefulsets"},
-				Verbs:     []string{"list", "get", "watch"},
-			},
-			{
-				APIGroups: []string{"apps"},
-				Resources: []string{"statefulsets/status"},
-				Verbs:     []string{"update"},
-			},
-			{
-				APIGroups: []string{"rollout-operator.grafana.com"},
-				Resources: []string{"zoneawarepoddisruptionbudgets"},
-				Verbs:     []string{"get", "list", "watch"},
-			},
-		},
-	}
-}
-func rolloutOperatorService() *corev1.Service {
-	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "rollout-operator",
-		},
-		Spec: corev1.ServiceSpec{
-			Type: corev1.ServiceTypeClusterIP,
-			Selector: map[string]string{
-				"name": "rollout-operator",
-			},
-			Ports: []corev1.ServicePort{
-				{
-					Name:       "https",
-					Protocol:   corev1.ProtocolTCP,
-					Port:       443,
-					TargetPort: intstr.FromInt(8443),
-				},
-			},
-			PublishNotReadyAddresses: true, // We want to control them even if they're not ready.
-		},
-	}
-}
-
-// webhookRolloutOperatorRole provides the role for the rollout-operator with required permissions to create secrets
-// that store the webhook certificate and to edit the validation webhooks
-func webhookRolloutOperatorRole() *rbacv1.Role {
-	return &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "rollout-operator-webhook-role",
-		},
-		Rules: []rbacv1.PolicyRule{
-			{
-				APIGroups:     []string{""},
-				Resources:     []string{"secrets"},
-				ResourceNames: []string{certificateSecretName},
-				Verbs:         []string{"update", "get"},
-			},
-			{
-				APIGroups: []string{""},
-				Resources: []string{"secrets"},
-				Verbs:     []string{"create"},
-			},
-		},
-	}
-}
-
-func webhookRolloutOperatorRoleBinding(namespace string) *rbacv1.RoleBinding {
-	return &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "rollout-operator-webhook-rolebinding",
-		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "Role",
-			Name:     "rollout-operator-webhook-role",
-		},
-		Subjects: []rbacv1.Subject{
-			{
-				Kind:      "ServiceAccount",
-				Name:      "rollout-operator",
-				Namespace: namespace,
-			},
-		},
-	}
-}
-
-func webhookRolloutOperatorClusterRoleBinding(namespace string) *rbacv1.ClusterRoleBinding {
-	return &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: fmt.Sprintf("rollout-operator-webhook-%s-clusterrolebinding", namespace),
-		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     fmt.Sprintf("rollout-operator-webhook-%s-clusterrole", namespace),
-		},
-		Subjects: []rbacv1.Subject{
-			{
-				Kind:      "ServiceAccount",
-				Name:      "rollout-operator",
-				Namespace: namespace,
-			},
-		},
-	}
-}
-
-func webhookRolloutOperatorClusterRole(namespace string) *rbacv1.ClusterRole {
-	return &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: fmt.Sprintf("rollout-operator-webhook-%s-clusterrole", namespace),
-		},
-		Rules: []rbacv1.PolicyRule{
-			{
-				APIGroups: []string{"admissionregistration.k8s.io"},
-				Resources: []string{"validatingwebhookconfigurations", "mutatingwebhookconfigurations"},
-				Verbs:     []string{"list", "patch", "watch"},
-			},
-		},
 	}
 }
 
@@ -308,122 +113,83 @@ var (
 	scheme       = runtime.NewScheme()
 	codecs       = serializer.NewCodecFactory(scheme)
 	deserializer = codecs.UniversalDeserializer()
-	// this is the namespace used in the ../development examples
-	templateNamespace = "rollout-operator-development"
 )
 
-func loadConfigurationFromDisk(path, namespaceOld, namespaceNew string, into runtime.Object) (*runtime.Object, error) {
-	data, err := os.ReadFile(path)
+func loadToMapFromDisk(path string, obj map[string]interface{}) error {
+	bytes, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file from disk: %w", err)
+		return fmt.Errorf("failed to read file from disk: %w", err)
 	}
 
-	var str = string(data)
-	if len(namespaceOld) > 0 || len(namespaceNew) > 0 {
-		str = strings.ReplaceAll(string(data), namespaceOld, namespaceNew)
+	jsonData, err := yaml.ToJSON(bytes)
+	if err != nil {
+		return fmt.Errorf("failed to convert yaml to json: %w", err)
 	}
 
-	jsonData, err := yaml.ToJSON([]byte(str))
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert yaml to json: %w", err)
+	if err := json.Unmarshal(jsonData, &obj); err != nil {
+		return fmt.Errorf("failed to unmarshal yaml to map: %w", err)
 	}
+
+	return nil
+}
+
+func loadFromDisk[T any](t *testing.T, path string, into runtime.Object) *T {
+	bytes, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	jsonData, err := yaml.ToJSON(bytes)
+	require.NoError(t, err)
 
 	obj, _, err := deserializer.Decode(jsonData, nil, into)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode from json: %w", err)
-	}
+	require.NoError(t, err)
 
-	return &obj, nil
+	ptr, ok := any(obj).(*T)
+	require.True(t, ok)
+
+	return ptr
 }
 
-func loadCustomResourceDefinitionFromDisk(path string) (*apiextensionsv1.CustomResourceDefinition, error) {
-	object, err := loadConfigurationFromDisk(path, "", "", &apiextensionsv1.CustomResourceDefinition{})
-	if err != nil {
-		return nil, err
-	}
-	obj := *object
-	crd, ok := obj.(*apiextensionsv1.CustomResourceDefinition)
-	if !ok {
-		return nil, fmt.Errorf("decoded object is not a CustomResourceDefinition")
-	}
-	return crd, nil
+func loadCustomResourceDefinitionFromDisk(t *testing.T, path string) *apiextensionsv1.CustomResourceDefinition {
+	return loadFromDisk[apiextensionsv1.CustomResourceDefinition](t, path, &apiextensionsv1.CustomResourceDefinition{})
 }
 
-func loadValidatingWebhookConfigurationFromDisk(path, namespaceOld, namespaceNew string) (*admissionregistrationv1.ValidatingWebhookConfiguration, error) {
-	object, err := loadConfigurationFromDisk(path, namespaceOld, namespaceNew, &admissionregistrationv1.ValidatingWebhookConfiguration{})
-	if err != nil {
-		return nil, err
+func loadValidatingWebhookConfigurationFromFile(t *testing.T, path string) *admissionregistrationv1.ValidatingWebhookConfiguration {
+	return loadFromDisk[admissionregistrationv1.ValidatingWebhookConfiguration](t, path, &admissionregistrationv1.ValidatingWebhookConfiguration{})
+}
+
+func createZoneAwarePodDistruptionBudgetCustomResourceDefinition(t *testing.T, extApi *apiextensionsclient.Clientset) *apiextensionsv1.CustomResourceDefinition {
+	obj, err := extApi.ApiextensionsV1().CustomResourceDefinitions().Create(context.Background(), loadCustomResourceDefinitionFromDisk(t, "../development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml"), metav1.CreateOptions{})
+	require.NoError(t, err)
+	return obj
+}
+
+func createReplicaTemplateCustomResourceDefinition(t *testing.T, extApi *apiextensionsclient.Clientset) *apiextensionsv1.CustomResourceDefinition {
+	obj, err := extApi.ApiextensionsV1().CustomResourceDefinitions().Create(context.Background(), loadCustomResourceDefinitionFromDisk(t, "../development/replica-templates-custom-resource-definition.yaml"), metav1.CreateOptions{})
+	require.NoError(t, err)
+	return obj
+}
+
+func createValidatingWebhookConfiguration(t *testing.T, api *kubernetes.Clientset, ctx context.Context, path string) *admissionregistrationv1.ValidatingWebhookConfiguration {
+	obj, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Create(ctx, loadValidatingWebhookConfigurationFromFile(t, path), metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	return obj
+}
+
+func createZoneAwarePodDisruptionBudget(t *testing.T, cluster k3t.Cluster, ctx context.Context, path string) *unstructured.Unstructured {
+	obj := map[string]interface{}{}
+	err := loadToMapFromDisk(path, obj)
+	require.NoError(t, err)
+
+	zpdb := &unstructured.Unstructured{
+		Object: obj,
 	}
-	obj := *object
-	webhook, ok := obj.(*admissionregistrationv1.ValidatingWebhookConfiguration)
-	if !ok {
-		return nil, fmt.Errorf("decoded object is not a ValidatingWebhookConfiguration")
-	}
-	return webhook, nil
-}
 
-func zoneAwarePodDistruptionBudgetCustomResourceDefinition() (*apiextensionsv1.CustomResourceDefinition, error) {
-	return loadCustomResourceDefinitionFromDisk("../development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml")
-}
+	// because this is an unstructured object we must explicitly set this so the dynamic client can find this resource
+	zpdb.SetGroupVersionKind(zoneAwarePodDisruptionBudgetSchemaKind())
 
-func zpdbValidatingWebhook(namespace string) (*admissionregistrationv1.ValidatingWebhookConfiguration, error) {
-	return loadValidatingWebhookConfigurationFromDisk("../development/zone-aware-pod-disruption-budget-validating-webhook.yaml", templateNamespace, namespace)
-}
+	ret, err := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
+	require.NoError(t, err)
 
-func podEvictionValidatingWebhook(namespace string) (*admissionregistrationv1.ValidatingWebhookConfiguration, error) {
-	return loadValidatingWebhookConfigurationFromDisk("../development/eviction-webhook.yaml", templateNamespace, namespace)
-}
-
-func noDownscaleValidatingWebhook(namespace string) *admissionregistrationv1.ValidatingWebhookConfiguration {
-	return &admissionregistrationv1.ValidatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: fmt.Sprintf("no-downscale-%s", namespace),
-			Labels: map[string]string{
-				"grafana.com/inject-rollout-operator-ca": "true",
-				"grafana.com/namespace":                  namespace,
-			},
-			Annotations:     nil,
-			OwnerReferences: nil,
-			Finalizers:      nil,
-			ManagedFields:   nil,
-		},
-		Webhooks: []admissionregistrationv1.ValidatingWebhook{
-			{
-				Name: fmt.Sprintf("no-downscale-%s.grafana.com", namespace),
-				ClientConfig: admissionregistrationv1.WebhookClientConfig{
-					Service: &admissionregistrationv1.ServiceReference{
-						Namespace: namespace,
-						Name:      "rollout-operator",
-						Path:      ptr("/admission/no-downscale"),
-					},
-				},
-				Rules: []admissionregistrationv1.RuleWithOperations{
-					{
-						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Update},
-						Rule: admissionregistrationv1.Rule{
-							APIGroups:   []string{"apps"},
-							APIVersions: []string{"v1"},
-							Resources: []string{
-								"statefulsets",
-								"deployments",
-								"replicasets",
-								"statefulsets/scale",
-								"deployments/scale",
-								"replicasets/scale",
-							},
-							Scope: ptr(admissionregistrationv1.NamespacedScope),
-						},
-					},
-				},
-				NamespaceSelector: &metav1.LabelSelector{
-					// This is just an example of matching changes only in a specific namespace.
-					// https://kubernetes.io/docs/reference/labels-annotations-taints/#kubernetes-io-metadata-name
-					MatchLabels: map[string]string{"kubernetes.io/metadata.name": namespace},
-				},
-				FailurePolicy:           ptr(admissionregistrationv1.Fail),
-				SideEffects:             ptr(admissionregistrationv1.SideEffectClassNone),
-				AdmissionReviewVersions: []string{"v1"},
-			},
-		},
-	}
+	return ret
 }

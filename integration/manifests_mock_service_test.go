@@ -209,37 +209,6 @@ func zoneAwarePodDisruptionBudget(namespace, name, rolloutGroup string, maxUnava
 	return zpdb
 }
 
-func zoneAwarePodDisruptionBudgetWithRegex(namespace, name, rolloutGroup string, maxUnavailable int64, podNamePartitionRegex string) *unstructured.Unstructured {
-	zpdb := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": fmt.Sprintf("%s/%s", zpdb.ZoneAwarePodDisruptionBudgetsSpecGroup, zpdb.ZoneAwarePodDisruptionBudgetsVersion),
-			"kind":       zpdb.ZoneAwarePodDisruptionBudgetName,
-			"metadata": map[string]interface{}{
-				"name":      name,
-				"namespace": namespace,
-				"labels": map[string]interface{}{
-					"name": name,
-				},
-			},
-			"spec": map[string]interface{}{
-				zpdb.FieldMaxUnavailable: maxUnavailable,
-				zpdb.FieldSelector: map[string]interface{}{
-					zpdb.FieldMatchLabels: map[string]interface{}{
-						rcfg.RolloutGroupLabelKey: rolloutGroup,
-					},
-				},
-				zpdb.FieldPodNamePartitionRegex: podNamePartitionRegex,
-				zpdb.FieldPodNameRegexGroup:     1,
-			},
-		},
-	}
-
-	// because this is an unstructured object we must explicitly set this so the dynamic client can find this resource
-	zpdb.SetGroupVersionKind(zoneAwarePodDisruptionBudgetSchemaKind())
-
-	return zpdb
-}
-
 func pathPrefix(svcName string) string {
 	return "/" + svcName
 }

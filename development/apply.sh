@@ -20,4 +20,5 @@ done
 
 kubectl apply --wait -f "$SCRIPT_DIR/namespace.yaml"
 kubectl apply --wait -f "$SCRIPT_DIR/zone-aware-pod-disruption-budget-custom-resource-definition.yaml"
-find "$SCRIPT_DIR" -type f -name '*.yaml' -not -name 'namespace.yaml' -not -name 'zone-aware-pod-disruption-budget-custom-resource-definition.yaml' -exec kubectl apply --namespace=rollout-operator-development --wait -f {} \;
+kubectl apply --wait -f "$SCRIPT_DIR/replica-templates-custom-resource-definition.yaml"
+find "$SCRIPT_DIR" -type f -name '*.yaml' -not -name 'namespace.yaml' -not -name 'zone-aware-pod-disruption-budget-custom-resource-definition.yaml' -not name 'replica-templates-custom-resource-definition.yaml' -exec kubectl apply --namespace=rollout-operator-development --wait -f {} \;
