@@ -46,8 +46,8 @@
 
     // PromQL queries used to find clusters and namespaces.
     dashboard_variables: {
-      job_query: 'rollout_operator_group_reconciles_total', // Only used if singleBinary is true - used to show a list of distinct rollout-operator jobs.
-      cluster_query: 'cortex_build_info',   // Otherwise the graph variables are based on selecting the cluster + namespace
+      job_query: 'rollout_operator_group_reconciles_total',  // Only used if singleBinary is true - used to show a list of distinct rollout-operator jobs.
+      cluster_query: 'cortex_build_info',  // Otherwise the graph variables are based on selecting the cluster + namespace
       namespace_query: 'cortex_build_info{%s=~"$cluster"}' % $._config.per_cluster_label,
     },
 
