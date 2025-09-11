@@ -65,15 +65,22 @@ local utils = import 'mixin-utils/utils.libsonnet';
           ],
         };
 
-        d.addMultiTemplate('cluster', $._config.dashboard_variables.cluster_query, '%s' % $._config.per_cluster_label, sort=sortAscending)
-        .addMultiTemplate('namespace', $._config.dashboard_variables.namespace_query, '%s' % $._config.per_namespace_label, sort=sortAscending, includeAll=false),
+        if $._config.singleBinary
+          then d.addMultiTemplate('job', $._config.dashboard_variables.job_query, $._config.per_job_label, sort=sortAscending, includeAll=false)
+          else d
+               .addMultiTemplate('cluster', $._config.dashboard_variables.cluster_query, '%s' % $._config.per_cluster_label, sort=sortAscending)
+               .addMultiTemplate('namespace', $._config.dashboard_variables.namespace_query, '%s' % $._config.per_namespace_label, sort=sortAscending, includeAll=false)
     },
 
   jobMatcher()::
-    '%s=~"$cluster", %s=~"%s(%s)"' % [$._config.per_cluster_label, $._config.per_job_label, $._config.job_prefix, $._config.rollout_operator_container_name],
+     if $._config.singleBinary
+        then '%s=~"$job"' % $._config.per_job_label
+        else '%s=~"$cluster", %s=~"%s(%s)"' % [$._config.per_cluster_label, $._config.per_job_label, $._config.job_prefix, $._config.rollout_operator_container_name],
 
   namespaceMatcher()::
-    '%s=~"$cluster", %s=~"$namespace"' % [$._config.per_cluster_label, $._config.per_namespace_label],
+    if $._config.singleBinary
+        then '%s=~"$job"' % $._config.per_job_label
+        else '%s=~"$cluster", %s=~"$namespace"' % [$._config.per_cluster_label, $._config.per_namespace_label],
 
   units(units):: {
     fieldConfig+: {

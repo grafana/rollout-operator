@@ -17,6 +17,10 @@
     // The prefix including product name used when building dashboards.
     dashboard_prefix: '%(product)s / ' % $._config.product,
 
+    // If Mimir is deployed as a single binary, set to  to
+    // modify the job selectors in the dashboard queries.
+    singleBinary: false,
+
     // Shared crosshair, the crosshair will appear on all panels but the
     graph_tooltip: 1,
 
@@ -40,9 +44,10 @@
     job_prefix: '($namespace)/',
     cluster_labels: [$._config.per_cluster_label, $._config.per_namespace_label],
 
-    // PromQL queries used to find clusters and namespaces with Mimir.
+    // PromQL queries used to find clusters and namespaces.
     dashboard_variables: {
-      cluster_query: 'cortex_build_info',
+      job_query: 'rollout_operator_group_reconciles_total', // Only used if singleBinary is true - used to show a list of distinct rollout-operator jobs.
+      cluster_query: 'cortex_build_info',   // Otherwise the graph variables are based on selecting the cluster + namespace
       namespace_query: 'cortex_build_info{%s=~"$cluster"}' % $._config.per_cluster_label,
     },
 
