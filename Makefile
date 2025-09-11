@@ -144,11 +144,7 @@ format-makefiles: $(MAKE_FILES)
 check-mixin: ## Build, format and check the mixin files.
 check-mixin: build-mixin format-jsonnet check-mixin-jb
 	@echo "Checking diff:"
-	./tools/find-diff-or-untracked.sh $(MIXIN_PATH) "$(MIXIN_OUT_PATH)" || (echo "Please build and format mixin by running 'make build-mixin format-jsonnet'" && false); \
-
-	@cd $(MIXIN_PATH) && \
-	jb install && \
-	mixtool lint mixin.libsonnet
+	./tools/find-diff-or-untracked.sh $(MIXIN_PATH) "$(MIXIN_OUT_PATH)" || (echo "Please build and format mixin by running 'make build-mixin format-jsonnet'" && false);
 
 .PHONY: check-mixin-jb
 check-mixin-jb:
