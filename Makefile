@@ -101,6 +101,7 @@ fix-lint: ## Automatically fix linting issues where possible
 clean: ## Run go clean and remove the rollout-operator binary
 	rm -f rollout-operator
 	rm -rf integration/jsonnet-integration-tests
+	rm -rf $(MIXIN_OUT_PATH)
 	go clean ./...
 
 .PHONY: check-jsonnet-manifests
@@ -156,8 +157,9 @@ build-mixin: ## Generates the rollout-operator mixin zip file.
 build-mixin: check-mixin-jb
 	@# Empty the compiled mixin directories content, without removing the directories itself,
 	@# so that Grafana can refresh re-build dashboards when using "make mixin-serve".
-	@mkdir -p "$(MIXIN_OUT_PATH)" \
-	@find "$(MIXIN_OUT_PATH)" -type f -delete; \
+	@echo "Generating compiled dashboard:"
+	@mkdir -p "$(MIXIN_OUT_PATH)"
+	@find "$(MIXIN_OUT_PATH)" -type f -delete;
 	mixtool generate all --directory "$(MIXIN_OUT_PATH)/dashboards" "${MIXIN_PATH}/mixin.libsonnet";
 	@echo "sample rollout-operator dashboard generated to $(MIXIN_OUT_PATH)/dashboards"
 
