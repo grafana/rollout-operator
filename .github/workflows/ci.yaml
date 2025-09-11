@@ -113,9 +113,14 @@ jobs:
   lint-jsonnet:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
           persist-credentials: false
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
+        with:
+          go-version: '1.25'
+          check-latest: true
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - name: Install jsonnet
         run: |
           JSONNET_VERSION=0.21.0
@@ -136,6 +141,9 @@ jobs:
           JSONNET_BUNDLER_VERSION="0.6.0"
           sudo curl -sLo /usr/local/bin/jb https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64
           sudo chmod a+x /usr/local/bin/jb
+      - name: Install mixtool
+        run: |
+          go install github.com/monitoring-mixins/mixtool/cmd/mixtool@main
       - name: Check Jsonnet Manifests
         run: make check-jsonnet-manifests
       - name: Check Jsonnet Tests
