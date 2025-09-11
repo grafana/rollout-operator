@@ -140,6 +140,8 @@ jobs:
         run: make check-jsonnet-manifests
       - name: Check Jsonnet Tests
         run: make check-jsonnet-tests
+      - name: Check Dashboard Mixin
+        run: make check-mixin
 
   push-image:
     runs-on: ubuntu-latest

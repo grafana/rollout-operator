@@ -140,6 +140,16 @@ format-makefiles: ## Format all Makefiles.
 format-makefiles: $(MAKE_FILES)
 	$(SED) -i -e 's/^\(\t*\)  /\1\t/g' -e 's/^\(\t*\) /\1/' -- $?
 
+.PHONY: check-mixin
+check-mixin: ## Build, format and check the mixin files.
+check-mixin: build-mixin format-jsonnet check-mixin-jb
+	@echo "Checking diff:"
+	./tools/find-diff-or-untracked.sh $(MIXIN_PATH) "$(MIXIN_OUT_PATH)" || (echo "Please build and format mixin by running 'make build-mixin format-jsonnet'" && false); \
+
+	@cd $(MIXIN_PATH) && \
+	jb install && \
+	mixtool lint mixin.libsonnet
+
 .PHONY: check-mixin-jb
 check-mixin-jb:
 	@cd $(MIXIN_PATH) && \
@@ -154,3 +164,6 @@ build-mixin: check-mixin-jb
 	@find "$(MIXIN_OUT_PATH)" -type f -delete; \
 	mixtool generate all --directory "$(MIXIN_OUT_PATH)/dashboards" "${MIXIN_PATH}/mixin.libsonnet";
 	@echo "sample rollout-operator dashboard generated to $(MIXIN_OUT_PATH)/dashboards"
+
+mixin-serve: ## Runs Grafana loading the mixin dashboards.
+	@./operations/rollout-operator-mixin-tools/serve/run.sh -p $(MIXIN_OUT_PATH)
