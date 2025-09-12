@@ -189,12 +189,12 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 		t.Log("Try to create an invalid zpdb configuration.")
 		zpdb := zoneAwarePodDisruptionBudget(corev1.NamespaceDefault, "ingester-zpdb", "mock", -1)
 		_, err := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
-		require.Error(t, err)
+		require.ErrorContains(t, err, "ZoneAwarePodDisruptionBudget.rollout-operator.grafana.com \"ingester-zpdb\" is invalid", "Expected a ZoneAwarePodDisruptionBudget invalid configuration error")
 	}
 
 	{
 		t.Log("Create a valid zpdb configuration.")
-		_ = createZoneAwarePodDisruptionBudget(t, cluster, ctx, path+yamlZpdbConfig)
+		awaitZoneAwarePodDisruptionBudgetCreation(t, ctx, cluster, path+yamlZpdbConfig)
 	}
 
 	{
@@ -271,7 +271,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 
 	{
 		t.Log("Create a valid zpdb configuration.")
-		_ = createZoneAwarePodDisruptionBudget(t, cluster, ctx, path+yamlZpdbConfig)
+		awaitZoneAwarePodDisruptionBudgetCreation(t, ctx, cluster, path+yamlZpdbConfig)
 	}
 
 	{
@@ -332,7 +332,7 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 
 	{
 		t.Log("Create a valid zpdb configuration.")
-		_ = createZoneAwarePodDisruptionBudget(t, cluster, ctx, path+yamlZpdbConfig)
+		awaitZoneAwarePodDisruptionBudgetCreation(t, ctx, cluster, path+yamlZpdbConfig)
 	}
 
 	{
@@ -572,4 +572,14 @@ func awaitPodRunning(t *testing.T, ctx context.Context, api *kubernetes.Clientse
 		return util.IsPodRunningAndReady(pod)
 	}
 	require.Eventually(t, awaitReadyRunning, 30*time.Second, time.Millisecond*50)
+}
+
+func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context, cluster k3t.Cluster, configFile string) {
+	task := func() bool {
+		_, err := createZoneAwarePodDisruptionBudget(t, cluster, ctx, configFile)
+		return err != nil
+	}
+	// note - this retry should not be needed, as the rollout-operator pod should be ready and running
+	// however in the CI environments there have been intermittent errors which this retry is attempting to workaround
+	require.Eventually(t, task, time.Second*30, time.Millisecond*10, "Zpdb configuration create failed")
 }
