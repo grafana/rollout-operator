@@ -20,6 +20,10 @@ DONT_FIND := -name vendor -prune -o -name .git -prune -o -name .cache -prune -o 
 GO_FILES := $(shell find . $(DONT_FIND) -o -type f -name '*.go' -print)
 MAKE_FILES := $(shell find . $(DONT_FIND) -o -name 'Makefile' -print -o -name '*.mk' -print)
 
+MIXIN_PATH := operations/rollout-operator-mixin
+MIXIN_OUT_PATH ?= operations/rollout-operator-mixin-compiled
+
+
 .DEFAULT_GOAL := rollout-operator
 
 REGO_POLICIES_PATH=operations/policies
@@ -97,6 +101,7 @@ fix-lint: ## Automatically fix linting issues where possible
 clean: ## Run go clean and remove the rollout-operator binary
 	rm -f rollout-operator
 	rm -rf integration/jsonnet-integration-tests
+	rm -rf $(MIXIN_OUT_PATH)
 	go clean ./...
 
 .PHONY: check-jsonnet-manifests
@@ -135,3 +140,28 @@ check-makefiles:
 format-makefiles: ## Format all Makefiles.
 format-makefiles: $(MAKE_FILES)
 	$(SED) -i -e 's/^\(\t*\)  /\1\t/g' -e 's/^\(\t*\) /\1/' -- $?
+
+.PHONY: check-mixin
+check-mixin: ## Build, format and check the mixin files.
+check-mixin: build-mixin format-jsonnet check-mixin-jb
+	@echo "Checking diff:"
+	./tools/find-diff-or-untracked.sh $(MIXIN_PATH) "$(MIXIN_OUT_PATH)" || (echo "Please build and format mixin by running 'make build-mixin format-jsonnet'" && false);
+
+.PHONY: check-mixin-jb
+check-mixin-jb:
+	@cd $(MIXIN_PATH) && \
+	jb install
+
+.PHONY: build-mixin
+build-mixin: ## Generates the rollout-operator mixin zip file.
+build-mixin: check-mixin-jb
+	@# Empty the compiled mixin directories content, without removing the directories itself,
+	@# so that Grafana can refresh re-build dashboards when using "make mixin-serve".
+	@echo "Generating compiled dashboard:"
+	@mkdir -p "$(MIXIN_OUT_PATH)"
+	@find "$(MIXIN_OUT_PATH)" -type f -delete;
+	mixtool generate all --directory "$(MIXIN_OUT_PATH)/dashboards" "${MIXIN_PATH}/mixin.libsonnet";
+	@echo "sample rollout-operator dashboard generated to $(MIXIN_OUT_PATH)/dashboards"
+
+mixin-serve: ## Runs Grafana loading the mixin dashboards.
+	@./operations/rollout-operator-mixin-tools/serve/run.sh -p $(MIXIN_OUT_PATH)
