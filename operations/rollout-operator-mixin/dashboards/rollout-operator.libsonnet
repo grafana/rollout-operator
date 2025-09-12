@@ -2,13 +2,13 @@ function(cfg)
 
   local filename = std.asciiLower(cfg.product) + '-' + cfg.rollout_operator_name + '.json';
 
-  (import 'dashboard-utils.libsonnet') {
+  (import 'dashboard-utils.libsonnet') + { _config:: cfg } {
 
     local admissionWebhookRoutesMatcher = 'route=~"admission.*"',
 
     [filename]:
       assert std.md5(filename) == '6c62cd598d5e741954ca8ebb251c5852' : 'UID of the dashboard has changed, please update references to dashboard.';
-      ($.dashboard($._config.rollout_operator_name) + { uid: std.md5(filename) })
+      ($.dashboard(cfg.rollout_operator_name) + { uid: std.md5(filename) })
       .addClusterSelectorTemplates()
       .addRow(
         $.row('Incoming webhook requests')
