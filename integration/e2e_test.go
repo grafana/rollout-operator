@@ -579,5 +579,7 @@ func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context
 		_, err := createZoneAwarePodDisruptionBudget(t, cluster, ctx, configFile)
 		return err != nil
 	}
+	// note - this retry should not be needed, as the rollout-operator pod should be ready and running
+	// however in the CI environments there have been intermittent errors which this retry is attempting to workaround
 	require.Eventually(t, task, time.Second*30, time.Millisecond*10, "Zpdb configuration create failed")
 }
