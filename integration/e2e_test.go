@@ -189,7 +189,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 		t.Log("Try to create an invalid zpdb configuration.")
 		zpdb := zoneAwarePodDisruptionBudget(corev1.NamespaceDefault, "ingester-zpdb", "mock", -1)
 		_, err := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
-		require.Error(t, err)
+		require.ErrorContains(t, err, "ZoneAwarePodDisruptionBudget.rollout-operator.grafana.com \"ingester-zpdb\" is invalid", "Expected a ZoneAwarePodDisruptionBudget invalid configuration error")
 	}
 
 	{
@@ -576,8 +576,8 @@ func awaitPodRunning(t *testing.T, ctx context.Context, api *kubernetes.Clientse
 
 func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context, cluster k3t.Cluster, configFile string) {
 	task := func() bool {
-		_, error := createZoneAwarePodDisruptionBudget(t, cluster, ctx, configFile)
-		return error != nil
+		_, err := createZoneAwarePodDisruptionBudget(t, cluster, ctx, configFile)
+		return err != nil
 	}
-	require.Eventually(t, task, time.Second*30, time.Millisecond*10, "Zpdb configuration creation failed")
+	require.Eventually(t, task, time.Second*30, time.Millisecond*10, "Zpdb configuration create failed")
 }
