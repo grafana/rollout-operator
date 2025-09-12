@@ -18,9 +18,6 @@
     rollout_operator_instance_matcher:
       if $._config.helm == '' then $._config.rollout_operator_container_name + '.*' else '(.*%g-)?%g.*' % [$._config.helm, $._config.rollout_operator_container_name],
 
-    // The prefix including product name used when building dashboards.
-    dashboard_prefix: '%(product)s / ' % $._config.product,
-
     // Shared crosshair, the crosshair will appear on all panels but the
     graph_tooltip: 1,
 

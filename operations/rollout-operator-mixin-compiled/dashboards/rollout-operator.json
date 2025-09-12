@@ -14,18 +14,7 @@
       "gnetId": null,
       "graphTooltip": 1,
       "hideControls": false,
-      "links": [
-         {
-            "asDropdown": true,
-            "icon": "external link",
-            "includeVars": true,
-            "keepTime": true,
-            "tags": [ ],
-            "targetBlank": false,
-            "title": "rollout-operator dashboard",
-            "type": "dashboards"
-         }
-      ],
+      "links": [ ],
       "refresh": "5m",
       "rows": [
          {
@@ -1346,7 +1335,7 @@
          ]
       },
       "timezone": "utc",
-      "title": " / rollout-operator",
+      "title": "rollout-operator",
       "uid": "f40e8042a6be71a98444a29b2c4e9421",
       "version": 0
    }

@@ -32,7 +32,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
 
   dashboard(title)::
     super.dashboard(
-      title='%(prefix)s%(title)s' % { prefix: $._config.dashboard_prefix, title: title },
+      title=$._config.rollout_operator_name,
       datasource=$._config.dashboard_datasource,
       datasource_regex=$._config.datasource_regex
     ) + {
@@ -51,18 +51,6 @@ local utils = import 'mixin-utils/utils.libsonnet';
       addClusterSelectorTemplates()::
         local d = self {
           tags: $._config.tags,
-          links: [
-            {
-              asDropdown: true,
-              icon: 'external link',
-              includeVars: true,
-              keepTime: true,
-              tags: $._config.tags,
-              targetBlank: false,
-              title: if $._config.product == '' then $._config.rollout_operator_name + ' dashboard' else $._config.product + 's dashboards',
-              type: 'dashboards',
-            },
-          ],
         };
 
         d
