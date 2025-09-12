@@ -176,10 +176,12 @@ func createValidatingWebhookConfiguration(t *testing.T, api *kubernetes.Clientse
 	return obj
 }
 
-func createZoneAwarePodDisruptionBudget(t *testing.T, cluster k3t.Cluster, ctx context.Context, path string) *unstructured.Unstructured {
+func createZoneAwarePodDisruptionBudget(t *testing.T, cluster k3t.Cluster, ctx context.Context, path string) (*unstructured.Unstructured, error) {
 	obj := map[string]interface{}{}
 	err := loadToMapFromDisk(path, obj)
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
 
 	zpdb := &unstructured.Unstructured{
 		Object: obj,
@@ -189,7 +191,9 @@ func createZoneAwarePodDisruptionBudget(t *testing.T, cluster k3t.Cluster, ctx c
 	zpdb.SetGroupVersionKind(zoneAwarePodDisruptionBudgetSchemaKind())
 
 	ret, err := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
 
-	return ret
+	return ret, nil
 }

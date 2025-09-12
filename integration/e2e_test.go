@@ -194,7 +194,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 
 	{
 		t.Log("Create a valid zpdb configuration.")
-		_ = createZoneAwarePodDisruptionBudget(t, cluster, ctx, path+yamlZpdbConfig)
+		awaitZoneAwarePodDisruptionBudgetCreation(t, ctx, cluster, path+yamlZpdbConfig)
 	}
 
 	{
@@ -271,7 +271,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 
 	{
 		t.Log("Create a valid zpdb configuration.")
-		_ = createZoneAwarePodDisruptionBudget(t, cluster, ctx, path+yamlZpdbConfig)
+		awaitZoneAwarePodDisruptionBudgetCreation(t, ctx, cluster, path+yamlZpdbConfig)
 	}
 
 	{
@@ -332,7 +332,7 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 
 	{
 		t.Log("Create a valid zpdb configuration.")
-		_ = createZoneAwarePodDisruptionBudget(t, cluster, ctx, path+yamlZpdbConfig)
+		awaitZoneAwarePodDisruptionBudgetCreation(t, ctx, cluster, path+yamlZpdbConfig)
 	}
 
 	{
@@ -572,4 +572,12 @@ func awaitPodRunning(t *testing.T, ctx context.Context, api *kubernetes.Clientse
 		return util.IsPodRunningAndReady(pod)
 	}
 	require.Eventually(t, awaitReadyRunning, 30*time.Second, time.Millisecond*50)
+}
+
+func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context, cluster k3t.Cluster, configFile string) {
+	task := func() bool {
+		_, error := createZoneAwarePodDisruptionBudget(t, cluster, ctx, configFile)
+		return error != nil
+	}
+	require.Eventually(t, task, time.Second*30, time.Millisecond*10, "Zpdb configuration creation failed")
 }
