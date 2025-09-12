@@ -1,11 +1,15 @@
 {
-
-  assert std.get($._config, 'product', '') != '' : 'product must be set. ie Mimir',
-
   _config+:: {
 
     // set this to match a helm chart instance prefix. ie mimir
     helm: '',
+
+    // set this to the product which the rollout-operator is supporting. ie mimir
+    product: '',
+
+    // set this to an existing dashboard uid. eg. md5(filename)
+    // setting this will assert that the uid has not changed based off the generated filename
+    dashboard_uid: '',
 
     // the name for the rollout-operator. This is also used as the container name
     rollout_operator_name: 'rollout-operator',

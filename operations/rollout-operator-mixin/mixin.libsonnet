@@ -1,6 +1,2 @@
-(import 'config.libsonnet') + {
-  _config+: {
-    product: 'Mimir',
-  },
-} +
+(import 'config.libsonnet') +
 (import 'dashboards.libsonnet')

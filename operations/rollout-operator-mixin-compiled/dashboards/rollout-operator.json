@@ -22,7 +22,7 @@
             "keepTime": true,
             "tags": [ ],
             "targetBlank": false,
-            "title": "Mimir dashboards",
+            "title": "rollout-operator dashboard",
             "type": "dashboards"
          }
       ],
@@ -1346,7 +1346,7 @@
          ]
       },
       "timezone": "utc",
-      "title": "Mimir / rollout-operator",
-      "uid": "6c62cd598d5e741954ca8ebb251c5852",
+      "title": " / rollout-operator",
+      "uid": "f40e8042a6be71a98444a29b2c4e9421",
       "version": 0
    }

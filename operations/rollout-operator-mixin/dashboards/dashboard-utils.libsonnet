@@ -59,7 +59,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
               keepTime: true,
               tags: $._config.tags,
               targetBlank: false,
-              title: '%(product)s dashboards' % $._config,
+              title: if $._config.product == '' then $._config.rollout_operator_name + ' dashboard' else $._config.product + 's dashboards',
               type: 'dashboards',
             },
           ],
