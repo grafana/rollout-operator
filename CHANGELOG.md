@@ -4,7 +4,7 @@
 
 * [ENHANCEMENT] Add rollout-operator libsonnet into this repository. Enable rollout-operator and its webhooks by default. #282
 * [ENHANCEMENT] Add rollout-operator dashboard mixin into this repository. #288
-* [ENHANCEMENT] Updated dependencies, including: #280 #285
+* [ENHANCEMENT] Updated dependencies, including: #280 #285 #291
   * `github.com/prometheus/client_golang` from `v1.23.0` to `v1.23.2`
   * `github.com/prometheus/common` from `v0.65.0` to `v0.66.1`
   * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.62.0` to `v0.63.0`
@@ -12,11 +12,11 @@
   * `go.opentelemetry.io/otel/trace` from `v1.37.0` to `v1.38.0`
   * `go.opentelemetry.io/otel` from `v1.37.0` to `v1.38.0`
   * `golang.org/x/sync` from `v0.16.0` to `v0.17.0`
-  * `k8s.io/api` from `v0.33.3` to `v0.34.0`
-  * `k8s.io/apiextensions-apiserver` from `v0.33.0` to `v0.34.0`
-  * `k8s.io/apimachinery` from `v0.33.3` to `v0.34.0`
-  * `k8s.io/client-go` from `v0.33.3` to `v0.34.0`
-  * `sigs.k8s.io/controller-runtime` from `v0.21.0` to `v0.22.0`
+  * `k8s.io/api` from `v0.33.3` to `v0.34.1`
+  * `k8s.io/apiextensions-apiserver` from `v0.33.0` to `v0.34.1`
+  * `k8s.io/apimachinery` from `v0.33.3` to `v0.34.1`
+  * `k8s.io/client-go` from `v0.33.3` to `v0.34.1`
+  * `sigs.k8s.io/controller-runtime` from `v0.21.0` to `v0.22.1`
 
 ## v0.29.0
 
