@@ -32,7 +32,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
 
   dashboard(title)::
     super.dashboard(
-      title=$._config.rollout_operator_name,
+      title=if std.get($._config, 'dashboard_prefix') == null then title else '%(prefix)s%(title)s' % { prefix: $._config.dashboard_prefix, title: title },
       datasource=$._config.dashboard_datasource,
       datasource_regex=$._config.datasource_regex
     ) + {
@@ -141,7 +141,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
     [resourceName, 'limit', 'request'],
 
   resourceUtilizationQuery(metric)::
-    $._config.resources_panel_queries['%s_usage' % metric] % {
+    $._config.rollout_operator_resources_panel_queries['%s_usage' % metric] % {
       instanceLabel: $._config.per_instance_label,
       namespace: $.namespaceMatcher(),
       instanceName: $._config.rollout_operator_instance_matcher,
@@ -151,11 +151,11 @@ local utils = import 'mixin-utils/utils.libsonnet';
   resourceUtilizationAndLimitQueries(metric)::
     [
       $.resourceUtilizationQuery(metric),
-      $._config.resources_panel_queries['%s_limit' % metric] % {
+      $._config.rollout_operator_resources_panel_queries['%s_limit' % metric] % {
         namespace: $.namespaceMatcher(),
         containerName: $._config.rollout_operator_container_name,
       },
-      $._config.resources_panel_queries['%s_request' % metric] % {
+      $._config.rollout_operator_resources_panel_queries['%s_request' % metric] % {
         namespace: $.namespaceMatcher(),
         containerName: $._config.rollout_operator_container_name,
       },

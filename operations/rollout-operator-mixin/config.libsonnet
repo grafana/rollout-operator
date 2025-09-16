@@ -9,11 +9,11 @@
 
     // set this to an existing dashboard uid. eg. md5(filename)
     // setting this will assert that the uid has not changed based off the generated filename
-    dashboard_uid: '',
+    rollout_operator_dashboard_uid: '',
 
     // the name for the rollout-operator. This is also used as the container name
     rollout_operator_name: 'rollout-operator',
-
+    rollout_operator_dashoard_title: 'Rollout operator',
     rollout_operator_container_name: $._config.rollout_operator_name,
     rollout_operator_instance_matcher:
       if $._config.helm == '' then $._config.rollout_operator_container_name + '.*' else '(.*%g-)?%g.*' % [$._config.helm, $._config.rollout_operator_container_name],
@@ -47,7 +47,7 @@
       namespace_query: 'cortex_build_info{%s=~"$cluster"}' % $._config.per_cluster_label,
     },
 
-    resources_panel_queries: {
+    rollout_operator_resources_panel_queries: {
       cpu_usage: 'sum by(%(instanceLabel)s) (rate(container_cpu_usage_seconds_total{%(namespace)s,container=~"%(containerName)s"}[$__rate_interval]))',
       cpu_limit: 'min(container_spec_cpu_quota{%(namespace)s,container=~"%(containerName)s"} / container_spec_cpu_period{%(namespace)s,container=~"%(containerName)s"})',
       cpu_request: 'min(kube_pod_container_resource_requests{%(namespace)s,container=~"%(containerName)s",resource="cpu"})',
