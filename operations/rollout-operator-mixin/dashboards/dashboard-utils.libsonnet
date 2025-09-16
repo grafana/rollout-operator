@@ -32,7 +32,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
 
   dashboard(title)::
     super.dashboard(
-      title= if std.get($._config,'dashboard_prefix') == null then title else '%(prefix)s%(title)s' % { prefix: $._config.dashboard_prefix, title: title },
+      title=if std.get($._config, 'dashboard_prefix') == null then title else '%(prefix)s%(title)s' % { prefix: $._config.dashboard_prefix, title: title },
       datasource=$._config.dashboard_datasource,
       datasource_regex=$._config.datasource_regex
     ) + {

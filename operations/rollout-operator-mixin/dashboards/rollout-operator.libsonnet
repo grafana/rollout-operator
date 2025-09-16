@@ -9,7 +9,7 @@ function(cfg)
     local admissionWebhookRoutesMatcher = 'route=~"admission.*"',
 
     [filename]:
-      assert cfg.rollout_operator_dashboard_uid == '' || std.md5(filename) == cfg.rollout_operator_dashboard_uid : 'UID of the dashboard has changed, please update references to dashboard. filename is now '+filename+'. Set rollout_operator_dashboard_uid=' + std.md5(filename) ;
+      assert cfg.rollout_operator_dashboard_uid == '' || std.md5(filename) == cfg.rollout_operator_dashboard_uid : 'UID of the dashboard has changed, please update references to dashboard. filename is now ' + filename + '. Set rollout_operator_dashboard_uid=' + std.md5(filename);
       (utils.dashboard(cfg.rollout_operator_dashoard_title) + { uid: std.md5(filename) })
       .addClusterSelectorTemplates()
       .addRow(
