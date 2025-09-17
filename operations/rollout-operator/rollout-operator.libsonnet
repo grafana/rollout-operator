@@ -77,7 +77,7 @@
     'use-zone-tracker': true,
     'zone-tracker.config-map-name': 'rollout-operator-zone-tracker',
   } + if enableWebhooks then {
-    '-server-tls.enabled': 'true',
+    'server-tls.enabled': 'true',
   } else {},
 
   rollout_operator_node_affinity_matchers:: [],
