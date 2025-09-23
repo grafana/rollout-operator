@@ -51,6 +51,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
       addClusterSelectorTemplates()::
         local d = self {
           tags: $._config.tags,
+          links: std.get($._config, 'rollout_operator_dashboard_links', []),
         };
 
         d
