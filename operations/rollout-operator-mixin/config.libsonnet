@@ -13,7 +13,7 @@
 
     // the name for the rollout-operator. This is also used as the container name
     rollout_operator_name: 'rollout-operator',
-    rollout_operator_dashboard_title: 'Rollout operator',
+    rollout_operator_dashboard_title: 'rollout-operator',
     rollout_operator_dashboard_links: [],
     rollout_operator_container_name: $._config.rollout_operator_name,
     rollout_operator_instance_matcher:
