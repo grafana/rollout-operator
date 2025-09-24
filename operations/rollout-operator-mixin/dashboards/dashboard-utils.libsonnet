@@ -2,7 +2,9 @@ local utils = import 'mixin-utils/utils.libsonnet';
 
 // This is a modified version of the mimir-mixin/dashboard-utils.libsonnet
 
-(import 'grafana-builder/grafana.libsonnet') {
+local builder = import 'grafana-builder/grafana.libsonnet';
+
+builder {
   _colors:: {
     resourceRequest: '#FFC000',
     resourceLimit: '#E02F44',
