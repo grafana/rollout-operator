@@ -27,8 +27,6 @@ builder {
 
   local sortAscending = 1,
 
-  _config:: error 'must provide _config',
-
   row(title)::
     super.row(title),
 

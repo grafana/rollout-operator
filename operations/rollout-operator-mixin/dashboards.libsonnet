@@ -1,4 +1,4 @@
 {
   grafanaDashboards+:
-    (import 'dashboards/rollout-operator.libsonnet')($._config),
+    (import 'dashboards/rollout-operator.libsonnet'),
 }
