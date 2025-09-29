@@ -108,10 +108,7 @@ func StatefulSetPodFQDN(namespace, statefulSetName string, ordinal int, serviceN
 	// The DNS entry for a pod of a stateful set is
 	// $(statefulset name)-(ordinal).$(service name).$(namespace).svc.$(cluster domain)
 	// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
-	//
-	// Ending that with a trailing "." to signify an absolute domain name
-	// https://datatracker.ietf.org/doc/html/rfc1034#section-3.1
-	return fmt.Sprintf("%v-%v.%v.%v.svc.%s.",
+	return fmt.Sprintf("%v-%v.%v.%v.svc.%s",
 		statefulSetName,
 		ordinal,
 		serviceName,

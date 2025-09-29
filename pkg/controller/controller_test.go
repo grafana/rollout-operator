@@ -36,7 +36,7 @@ import (
 )
 
 const (
-	testClusterDomain    = "cluster.local"
+	testClusterDomain    = "cluster.local."
 	testNamespace        = "test"
 	testMaxUnavailable   = 2
 	testPrevRevisionHash = "prev-hash"

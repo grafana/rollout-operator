@@ -323,7 +323,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 			}, nil
 		})
 
-	admissionResponse := prepareDownscale(ctx, logger, ar, api, f, "cluster.local")
+	admissionResponse := prepareDownscale(ctx, logger, ar, api, f, "cluster.local.")
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
 	if params.stsAnnotated {
@@ -708,7 +708,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 	oldRawObject, err := statefulSetTemplate(oldParams)
 	require.NoError(t, err)
 
-	clusterDomain := "cluster.local"
+	clusterDomain := "cluster.local."
 	namespace := "test"
 	stsName := "my-statefulset"
 	ar := admissionv1.AdmissionReview{
@@ -961,7 +961,7 @@ func TestCreateEndpoints(t *testing.T) {
 			port:          "8080",
 			path:          "prepare-downscale",
 			serviceName:   "service-name",
-			clusterDomain: "cluster.local",
+			clusterDomain: "cluster.local.",
 			expected: []endpoint{
 				{
 					url:   "test-4.service-name.default.svc.cluster.local.:8080/prepare-downscale",
