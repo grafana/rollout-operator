@@ -24,6 +24,7 @@ type zoneTracker struct {
 	mu            sync.Mutex
 	zones         map[string]zoneInfo
 	client        kubernetes.Interface
+	clusterDomain string
 	namespace     string
 	configMapName string
 
@@ -169,7 +170,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 	}
 
 	// It's a downscale, so we need to prepare the pods that are going away for shutdown.
-	eps := createEndpoints(ar, oldInfo, newInfo, stsPrepareInfo.port, stsPrepareInfo.path, stsPrepareInfo.serviceName)
+	eps := createEndpoints(ar, oldInfo, newInfo, stsPrepareInfo.port, stsPrepareInfo.path, stsPrepareInfo.serviceName, zt.clusterDomain)
 
 	err = sendPrepareShutdownRequests(ctx, logger, client, eps)
 	if err != nil {
@@ -401,10 +402,11 @@ func (zt *zoneTracker) findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetL
 	return nil, nil
 }
 
-func newZoneTracker(api kubernetes.Interface, namespace string, configMapName string) *zoneTracker {
+func newZoneTracker(api kubernetes.Interface, clusterDomain, namespace, configMapName string) *zoneTracker {
 	return &zoneTracker{
 		zones:         make(map[string]zoneInfo),
 		client:        api,
+		clusterDomain: clusterDomain,
 		namespace:     namespace,
 		configMapName: configMapName,
 	}

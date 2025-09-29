@@ -104,17 +104,15 @@ func Now() *metav1.Time {
 	return &ts
 }
 
-func StatefulSetPodFQDN(namespace, statefulSetName string, ordinal int, serviceName string) string {
+func StatefulSetPodFQDN(namespace, statefulSetName string, ordinal int, serviceName, clusterDomain string) string {
 	// The DNS entry for a pod of a stateful set is
-	// $(statefulset name)-(ordinal).$(service name).$(namespace).svc.cluster.local
+	// $(statefulset name)-(ordinal).$(service name).$(namespace).svc.$(cluster domain)
 	// https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#stable-network-id
-	//
-	// Ending that with a trailing "." to signify an absolute domain name
-	// https://datatracker.ietf.org/doc/html/rfc1034#section-3.1
-	return fmt.Sprintf("%v-%v.%v.%v.svc.cluster.local.",
+	return fmt.Sprintf("%v-%v.%v.%v.svc.%s",
 		statefulSetName,
 		ordinal,
 		serviceName,
 		namespace,
+		clusterDomain,
 	)
 }

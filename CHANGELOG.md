@@ -4,6 +4,7 @@
 
 * [ENHANCEMENT] Add rollout-operator libsonnet into this repository. Enable rollout-operator and its webhooks by default. #282
 * [ENHANCEMENT] Add rollout-operator dashboard mixin into this repository. #288
+* [ENHANCEMENT] Add a `kubernetes.cluster-domain` flag for configuring a Kubernetes cluster domain. The default cluster domain `cluster.local.` is unchanged. #266
 * [ENHANCEMENT] Updated dependencies, including: #280 #285 #291
   * `github.com/prometheus/client_golang` from `v1.23.0` to `v1.23.2`
   * `github.com/prometheus/common` from `v0.65.0` to `v0.66.1`

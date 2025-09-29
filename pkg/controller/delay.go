@@ -21,7 +21,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/util"
 )
 
-func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, replicas int32) {
+func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, clusterDomain string, httpClient httpClient, replicas int32) {
 	delay, prepareURL, err := parseDelayedDownscaleAnnotations(sts.GetAnnotations())
 	if delay == 0 || prepareURL == nil {
 		return
@@ -32,7 +32,7 @@ func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, 
 		return
 	}
 
-	endpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, 0, int(replicas), prepareURL)
+	endpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, clusterDomain, 0, int(replicas), prepareURL)
 
 	callCancelDelayedDownscale(ctx, logger, httpClient, endpoints)
 }
@@ -40,7 +40,7 @@ func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, 
 // Checks if downscale delay has been reached on replicas in [desiredReplicas, currentReplicas) range.
 // If there is a range of replicas at the end of statefulset for which delay has been reached, this function
 // returns updated desired replicas that statefulset can be scaled to.
-func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, httpClient httpClient, currentReplicas, desiredReplicas int32) (updatedDesiredReplicas int32, _ error) {
+func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, clusterDomain string, httpClient httpClient, currentReplicas, desiredReplicas int32) (updatedDesiredReplicas int32, _ error) {
 	if currentReplicas == desiredReplicas {
 		// should not happen
 		return currentReplicas, nil
@@ -55,19 +55,19 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	}
 
 	if desiredReplicas >= currentReplicas {
-		callCancelDelayedDownscale(ctx, logger, httpClient, createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, 0, int(currentReplicas), prepareURL))
+		callCancelDelayedDownscale(ctx, logger, httpClient, createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, clusterDomain, 0, int(currentReplicas), prepareURL))
 		// Proceed even if calling cancel of delayed downscale fails. We call cancellation repeatedly, so it will happen during next reconcile.
 		return desiredReplicas, nil
 	}
 
 	{
 		// Replicas in [0, desired) interval should cancel any delayed downscale, if they have any.
-		cancelEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, 0, int(desiredReplicas), prepareURL)
+		cancelEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, clusterDomain, 0, int(desiredReplicas), prepareURL)
 		callCancelDelayedDownscale(ctx, logger, httpClient, cancelEndpoints)
 	}
 
 	// Replicas in [desired, current) interval are going to be stopped.
-	downscaleEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, int(desiredReplicas), int(currentReplicas), prepareURL)
+	downscaleEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, clusterDomain, int(desiredReplicas), int(currentReplicas), prepareURL)
 	elapsedTimeSinceDownscaleInitiated, err := callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx, logger, httpClient, downscaleEndpoints)
 	if err != nil {
 		return currentReplicas, fmt.Errorf("failed prepare pods for delayed downscale: %v", err)
@@ -132,7 +132,7 @@ type endpoint struct {
 }
 
 // Create prepare-downscale endpoints for pods with index in [from, to) range. URL is fully reused except for host, which is replaced with pod's FQDN.
-func createPrepareDownscaleEndpoints(namespace, statefulSetName, serviceName string, from, to int, url *url.URL) []endpoint {
+func createPrepareDownscaleEndpoints(namespace, statefulSetName, serviceName, clusterDomain string, from, to int, url *url.URL) []endpoint {
 	eps := make([]endpoint, 0, to-from)
 
 	for index := from; index < to; index++ {
@@ -143,7 +143,7 @@ func createPrepareDownscaleEndpoints(namespace, statefulSetName, serviceName str
 		}
 
 		ep.url = *url
-		newHost := util.StatefulSetPodFQDN(namespace, statefulSetName, index, serviceName)
+		newHost := util.StatefulSetPodFQDN(namespace, statefulSetName, index, serviceName, clusterDomain)
 		if url.Port() != "" {
 			newHost = fmt.Sprintf("%s:%s", newHost, url.Port())
 		}

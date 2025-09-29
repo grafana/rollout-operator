@@ -48,6 +48,7 @@ type httpClient interface {
 
 type RolloutController struct {
 	kubeClient           kubernetes.Interface
+	clusterDomain        string
 	namespace            string
 	reconcileInterval    time.Duration
 	statefulSetsFactory  informers.SharedInformerFactory
@@ -79,7 +80,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -96,6 +97,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 
 	c := &RolloutController{
 		kubeClient:           kubeClient,
+		clusterDomain:        clusterDomain,
 		namespace:            namespace,
 		reconcileInterval:    reconcileInterval,
 		statefulSetsFactory:  statefulSetsFactory,
@@ -376,7 +378,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 		return updated, err
 	}
 
-	return c.adjustStatefulSetsGroupReplicasToMirrorResource(ctx, groupName, sets, c.httpClient)
+	return c.adjustStatefulSetsGroupReplicasToMirrorResource(ctx, groupName, sets, c.clusterDomain, c.httpClient)
 }
 
 // adjustStatefulSetsGroupReplicasToFollowLeader examines each StatefulSet and adjusts the number of replicas if desired,
