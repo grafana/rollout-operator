@@ -4,20 +4,20 @@ local filename = 'rollout-operator.json';
 
   [filename]:
     assert $._config.rollout_operator_dashboard_uid == '' || std.md5(filename) == $._config.rollout_operator_dashboard_uid : 'UID of the dashboard has changed, please update references to dashboard. filename is now ' + filename + '. Set rollout_operator_dashboard_uid=' + std.md5(filename);
-    ($.rop_dashboard($._config.rollout_operator_dashboard_title) + { uid: std.md5(filename) })
+    ($.rolloutOperator_dashboard($._config.rollout_operator_dashboard_title) + { uid: std.md5(filename) })
     .addClusterSelectorTemplates()
     .addRow(
       $.row('Incoming webhook requests')
       .addPanel(
         $.timeseriesPanel('Throughput by status') +
-        $.qpsPanel('rollout_operator_request_duration_seconds_count{%s, %s}' % [$.rop_jobMatcher(), admissionWebhookRoutesMatcher]) +
+        $.qpsPanel('rollout_operator_request_duration_seconds_count{%s, %s}' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher]) +
         $.units('reqps') +
         $.showAllSeriesInTooltip
       )
       .addPanel(
         $.timeseriesPanel('Throughput by webhook') +
         $.queryPanel(
-          'sum by (route) (rate(rollout_operator_request_duration_seconds_count{%s, %s}[$__rate_interval]))' % [$.rop_jobMatcher(), admissionWebhookRoutesMatcher],
+          'sum by (route) (rate(rollout_operator_request_duration_seconds_count{%s, %s}[$__rate_interval]))' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher],
           '__auto',
         ) +
         $.units('reqps') +
@@ -25,13 +25,13 @@ local filename = 'rollout-operator.json';
       )
       .addPanel(
         $.timeseriesPanel('Latency (all webhooks)') +
-        $.latencyPanel('rollout_operator_request_duration_seconds', '{%s, %s}' % [$.rop_jobMatcher(), admissionWebhookRoutesMatcher]) +
+        $.latencyPanel('rollout_operator_request_duration_seconds', '{%s, %s}' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher]) +
         $.showAllSeriesInTooltip
       )
       .addPanel(
         $.timeseriesPanel('p99 latency by webhook') +
         $.queryPanel(
-          'histogram_quantile(0.99, sum by (le, route) (rate(rollout_operator_request_duration_seconds_bucket{%s, %s}[$__rate_interval]))) * 1e3' % [$.rop_jobMatcher(), admissionWebhookRoutesMatcher],
+          'histogram_quantile(0.99, sum by (le, route) (rate(rollout_operator_request_duration_seconds_bucket{%s, %s}[$__rate_interval]))) * 1e3' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher],
           '__auto',
         ) +
         $.units('ms') +
@@ -46,7 +46,7 @@ local filename = 'rollout-operator.json';
         $.timeseriesPanel(title) +
         $.panelDescription(title, 'This panel includes both successful and failed reconciliation attempts.') +
         $.queryPanel(
-          'sum by (namespace, rollout_group) (rate(rollout_operator_group_reconciles_total{%s}[$__rate_interval]))' % [$.rop_jobMatcher()],
+          'sum by (namespace, rollout_group) (rate(rollout_operator_group_reconciles_total{%s}[$__rate_interval]))' % [$.rolloutOperator_jobMatcher()],
           '{{namespace}}/{{rollout_group}}',
         ) +
         $.units('reqps') +
@@ -55,7 +55,7 @@ local filename = 'rollout-operator.json';
       .addPanel(
         $.timeseriesPanel('Reconciliation failures by rollout group') +
         $.queryPanel(
-          'sum by (namespace, rollout_group) (rate(rollout_operator_group_reconciles_failed_total{%s}[$__rate_interval]))' % [$.rop_jobMatcher()],
+          'sum by (namespace, rollout_group) (rate(rollout_operator_group_reconciles_failed_total{%s}[$__rate_interval]))' % [$.rolloutOperator_jobMatcher()],
           '{{namespace}}/{{rollout_group}}',
         ) +
         $.units('reqps') +
@@ -64,7 +64,7 @@ local filename = 'rollout-operator.json';
       .addPanel(
         $.timeseriesPanel('Average reconcile duration by rollout group') +
         $.queryPanel(
-          '1e3 * sum by (namespace, rollout_group) (rate(rollout_operator_group_reconcile_duration_seconds_sum{%s}[$__rate_interval])) / sum by (namespace, rollout_group) (rate(rollout_operator_group_reconcile_duration_seconds_count{%s}[$__rate_interval]))' % [$.rop_jobMatcher(), $.rop_jobMatcher()],
+          '1e3 * sum by (namespace, rollout_group) (rate(rollout_operator_group_reconcile_duration_seconds_sum{%s}[$__rate_interval])) / sum by (namespace, rollout_group) (rate(rollout_operator_group_reconcile_duration_seconds_count{%s}[$__rate_interval]))' % [$.rolloutOperator_jobMatcher(), $.rolloutOperator_jobMatcher()],
           '{{namespace}}/{{rollout_group}}',
         ) +
         $.units('ms') +
@@ -73,7 +73,7 @@ local filename = 'rollout-operator.json';
       .addPanel(
         $.timeseriesPanel('Time since last successful reconcile') +
         $.queryPanel(
-          'time() - max by (namespace, rollout_group) (rollout_operator_last_successful_group_reconcile_timestamp_seconds{%s})' % [$.rop_jobMatcher()],
+          'time() - max by (namespace, rollout_group) (rollout_operator_last_successful_group_reconcile_timestamp_seconds{%s})' % [$.rolloutOperator_jobMatcher()],
           '{{namespace}}/{{rollout_group}}',
         ) +
         $.units('s') +
@@ -84,14 +84,14 @@ local filename = 'rollout-operator.json';
       $.row('Outgoing Kubernetes control plane API requests')
       .addPanel(
         $.timeseriesPanel('Throughput by status') +
-        $.qpsPanel('rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}' % $.rop_jobMatcher()) +
+        $.qpsPanel('rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}' % $.rolloutOperator_jobMatcher()) +
         $.units('reqps') +
         $.showAllSeriesInTooltip
       )
       .addPanel(
         $.timeseriesPanel('Throughput by route') +
         $.queryPanel(
-          'sum by (method, path) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval]))' % $.rop_jobMatcher(),
+          'sum by (method, path) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval]))' % $.rolloutOperator_jobMatcher(),
           '{{method}} {{path}}',
         ) +
         $.units('reqps') +
@@ -101,8 +101,8 @@ local filename = 'rollout-operator.json';
         $.timeseriesPanel('Average latency (by route)') +
         $.queryPanel(
           [
-            'sum by (method, path) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_sum{%s}[$__rate_interval])) / sum by (method, path) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval])) * 1e3' % [$.rop_jobMatcher(), $.rop_jobMatcher()],
-            'sum(rate(rollout_operator_kubernetes_api_client_request_duration_seconds_sum{%s}[$__rate_interval])) / sum(rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval])) * 1e3' % [$.rop_jobMatcher(), $.rop_jobMatcher()],
+            'sum by (method, path) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_sum{%s}[$__rate_interval])) / sum by (method, path) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval])) * 1e3' % [$.rolloutOperator_jobMatcher(), $.rolloutOperator_jobMatcher()],
+            'sum(rate(rollout_operator_kubernetes_api_client_request_duration_seconds_sum{%s}[$__rate_interval])) / sum(rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval])) * 1e3' % [$.rolloutOperator_jobMatcher(), $.rolloutOperator_jobMatcher()],
           ],
           [
             '{{method}} {{path}}',
@@ -126,15 +126,15 @@ local filename = 'rollout-operator.json';
     .addRow(
       $.row('Resources')
       .addPanel(
-        $.rop_containerCPUUsagePanel,
+        $.rolloutOperator_containerCPUUsagePanel,
       )
       .addPanel(
-        $.rop_containerMemoryWorkingSetPanel,
+        $.rolloutOperator_containerMemoryWorkingSetPanel,
       )
       .addPanel(
         $.timeseriesPanel('Running instances') +
         $.queryPanel(
-          'sum(up{%s})' % [$.rop_jobMatcher()],
+          'sum(up{%s})' % [$.rolloutOperator_jobMatcher()],
           'Instances'
         ) +
         $.units('instance') +

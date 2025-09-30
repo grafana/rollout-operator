@@ -1,7 +1,7 @@
 local utils = import 'mixin-utils/utils.libsonnet';
 
 // This is a modified version of the mimir-mixin/dashboard-utils.libsonnet.
-// Note that some fields/functions have a rop_ prefix. This has been added when the same name exists in other dashboard utils with a different signature.
+// Note that some fields/functions have a rolloutOperator_ prefix. This has been added when the same name exists in other dashboard utils with a different signature.
 // Adding this prefix avoids namespace clashes when the rollout-operator is being vendored into another project.
 
 (import 'grafana-builder/grafana.libsonnet') {
@@ -45,7 +45,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
         },
     },
 
-  rop_dashboard(title)::
+  rolloutOperator_dashboard(title)::
     super.dashboard(
       title=if std.get($._config, 'dashboard_prefix') == null then title else '%(prefix)s%(title)s' % { prefix: $._config.dashboard_prefix, title: title },
       datasource=$._config.dashboard_datasource,
@@ -78,7 +78,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
     '%s=~"$cluster", %s=~"$namespace"' % [$._config.per_cluster_label, $._config.per_namespace_label],
 
   // this prefix has been added to avoid a conflict when rollout-operator dashboards are vendored into upstream components which use dashboard utils defining this function name with a different signature.
-  rop_jobMatcher()::
+  rolloutOperator_jobMatcher()::
     '%s=~"$cluster", %s=~"%s(%s)"' % [$._config.per_cluster_label, $._config.per_job_label, $._config.job_prefix, $._config.rollout_operator_container_name],
 
   units(units):: {
@@ -157,7 +157,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
   resourceUtilizationAndLimitLegend(resourceName)::
     [resourceName, 'limit', 'request'],
 
-  rop_resourceUtilizationQuery(metric)::
+  rolloutOperator_resourceUtilizationQuery(metric)::
     $._config.rollout_operator_resources_panel_queries['%s_usage' % metric] % {
       instanceLabel: $._config.per_instance_label,
       namespace: $.namespaceMatcher(),
@@ -165,9 +165,9 @@ local utils = import 'mixin-utils/utils.libsonnet';
       containerName: $._config.rollout_operator_container_name,
     },
 
-  rop_resourceUtilizationAndLimitQueries(metric)::
+  rolloutOperator_resourceUtilizationAndLimitQueries(metric)::
     [
-      $.rop_resourceUtilizationQuery(metric),
+      $.rolloutOperator_resourceUtilizationQuery(metric),
       $._config.rollout_operator_resources_panel_queries['%s_limit' % metric] % {
         namespace: $.namespaceMatcher(),
         containerName: $._config.rollout_operator_container_name,
@@ -178,9 +178,9 @@ local utils = import 'mixin-utils/utils.libsonnet';
       },
     ],
 
-  rop_containerCPUUsagePanel::
+  rolloutOperator_containerCPUUsagePanel::
     $.timeseriesPanel('CPU') +
-    $.queryPanel($.rop_resourceUtilizationAndLimitQueries('cpu'), $.resourceUtilizationAndLimitLegend('{{%s}}' % $._config.per_instance_label)) +
+    $.queryPanel($.rolloutOperator_resourceUtilizationAndLimitQueries('cpu'), $.resourceUtilizationAndLimitLegend('{{%s}}' % $._config.per_instance_label)) +
     $.showAllTooltip +
     {
       fieldConfig+: {
@@ -197,9 +197,9 @@ local utils = import 'mixin-utils/utils.libsonnet';
       },
     },
 
-  rop_containerMemoryWorkingSetPanel::
+  rolloutOperator_containerMemoryWorkingSetPanel::
     $.timeseriesPanel('Memory (workingset)') +
-    $.queryPanel($.rop_resourceUtilizationAndLimitQueries('memory_working'), $.resourceUtilizationAndLimitLegend('{{%s}}' % $._config.per_instance_label)) +
+    $.queryPanel($.rolloutOperator_resourceUtilizationAndLimitQueries('memory_working'), $.resourceUtilizationAndLimitLegend('{{%s}}' % $._config.per_instance_label)) +
     $.showAllTooltip +
     {
       fieldConfig+: {
