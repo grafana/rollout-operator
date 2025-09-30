@@ -1,10 +1,10 @@
 local utils = import 'mixin-utils/utils.libsonnet';
 
-// This is a modified version of the mimir-mixin/dashboard-utils.libsonnet
+// This is a modified version of the mimir-mixin/dashboard-utils.libsonnet.
+// Note that some fields/functions have a rolloutOperator_ prefix. This has been added when the same name exists in other dashboard utils with a different signature.
+// Adding this prefix avoids namespace clashes when the rollout-operator is being vendored into another project.
 
-local builder = import 'grafana-builder/grafana.libsonnet';
-
-builder {
+(import 'grafana-builder/grafana.libsonnet') {
   _colors:: {
     resourceRequest: '#FFC000',
     resourceLimit: '#E02F44',
@@ -30,9 +30,22 @@ builder {
   _config:: error 'must provide _config',
 
   row(title)::
-    super.row(title),
+    super.row(title) + {
 
-  dashboard(title)::
+      // justifyPanels make sure that the panels span the whole row.
+      // It is useful when the number of panels is not a divisor of 12.
+      justifyPanels()::
+        self + {
+          local n = std.length(super.panels),
+          local span = std.floor(12 / n),
+          panels: [
+            super.panels[i] { span: span + if i < (12 % n) then 1 else 0 }
+            for i in std.range(0, n - 1)
+          ],
+        },
+    },
+
+  rolloutOperator_dashboard(title)::
     super.dashboard(
       title=if std.get($._config, 'dashboard_prefix') == null then title else '%(prefix)s%(title)s' % { prefix: $._config.dashboard_prefix, title: title },
       datasource=$._config.dashboard_datasource,
@@ -53,7 +66,7 @@ builder {
       addClusterSelectorTemplates()::
         local d = self {
           tags: $._config.tags,
-          links: $._config.rollout_operator_dashboard_links,
+          links: $._config.rollout_operator_links,
         };
 
         d
@@ -61,11 +74,12 @@ builder {
         .addMultiTemplate('namespace', $._config.dashboard_variables.namespace_query, '%s' % $._config.per_namespace_label, sort=sortAscending, includeAll=false),
     },
 
-  jobMatcher()::
-    '%s=~"$cluster", %s=~"%s(%s)"' % [$._config.per_cluster_label, $._config.per_job_label, $._config.job_prefix, $._config.rollout_operator_container_name],
-
   namespaceMatcher()::
     '%s=~"$cluster", %s=~"$namespace"' % [$._config.per_cluster_label, $._config.per_namespace_label],
+
+  // this prefix has been added to avoid a conflict when rollout-operator dashboards are vendored into upstream components which use dashboard utils defining this function name with a different signature.
+  rolloutOperator_jobMatcher()::
+    '%s=~"$cluster", %s=~"%s(%s)"' % [$._config.per_cluster_label, $._config.per_job_label, $._config.job_prefix, $._config.rollout_operator_container_name],
 
   units(units):: {
     fieldConfig+: {
@@ -78,7 +92,7 @@ builder {
   min(value):: {
     fieldConfig+: {
       defaults+: {
-        min: 0,
+        min: value,
       },
     },
   },
@@ -143,7 +157,7 @@ builder {
   resourceUtilizationAndLimitLegend(resourceName)::
     [resourceName, 'limit', 'request'],
 
-  resourceUtilizationQuery(metric)::
+  rolloutOperator_resourceUtilizationQuery(metric)::
     $._config.rollout_operator_resources_panel_queries['%s_usage' % metric] % {
       instanceLabel: $._config.per_instance_label,
       namespace: $.namespaceMatcher(),
@@ -151,9 +165,9 @@ builder {
       containerName: $._config.rollout_operator_container_name,
     },
 
-  resourceUtilizationAndLimitQueries(metric)::
+  rolloutOperator_resourceUtilizationAndLimitQueries(metric)::
     [
-      $.resourceUtilizationQuery(metric),
+      $.rolloutOperator_resourceUtilizationQuery(metric),
       $._config.rollout_operator_resources_panel_queries['%s_limit' % metric] % {
         namespace: $.namespaceMatcher(),
         containerName: $._config.rollout_operator_container_name,
@@ -164,9 +178,9 @@ builder {
       },
     ],
 
-  containerCPUUsagePanel::
+  rolloutOperator_containerCPUUsagePanel::
     $.timeseriesPanel('CPU') +
-    $.queryPanel($.resourceUtilizationAndLimitQueries('cpu'), $.resourceUtilizationAndLimitLegend('{{%s}}' % $._config.per_instance_label)) +
+    $.queryPanel($.rolloutOperator_resourceUtilizationAndLimitQueries('cpu'), $.resourceUtilizationAndLimitLegend('{{%s}}' % $._config.per_instance_label)) +
     $.showAllTooltip +
     {
       fieldConfig+: {
@@ -183,9 +197,9 @@ builder {
       },
     },
 
-  containerMemoryWorkingSetPanel::
+  rolloutOperator_containerMemoryWorkingSetPanel::
     $.timeseriesPanel('Memory (workingset)') +
-    $.queryPanel($.resourceUtilizationAndLimitQueries('memory_working'), $.resourceUtilizationAndLimitLegend('{{%s}}' % $._config.per_instance_label)) +
+    $.queryPanel($.rolloutOperator_resourceUtilizationAndLimitQueries('memory_working'), $.resourceUtilizationAndLimitLegend('{{%s}}' % $._config.per_instance_label)) +
     $.showAllTooltip +
     {
       fieldConfig+: {
