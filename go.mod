@@ -5,10 +5,10 @@ go 1.25.0
 require (
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/go-kit/log v0.2.1
-	github.com/go-logfmt/logfmt v0.6.0
+	github.com/go-logfmt/logfmt v0.6.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
-	github.com/grafana/dskit v0.0.0-20250917065751-798f5a8fa154
+	github.com/grafana/dskit v0.0.0-20250930144810-d6a51ec2b8c9
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/k3d-io/k3d/v5 v5.8.3
 	github.com/pkg/errors v0.9.1
