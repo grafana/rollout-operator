@@ -163,8 +163,8 @@ github.com/fxamacker/cbor/v2
 ## explicit; go 1.17
 github.com/go-kit/log
 github.com/go-kit/log/level
-# github.com/go-logfmt/logfmt v0.6.0
-## explicit; go 1.17
+# github.com/go-logfmt/logfmt v0.6.1
+## explicit; go 1.21
 github.com/go-logfmt/logfmt
 # github.com/go-logr/logr v1.4.3
 ## explicit; go 1.18
@@ -256,7 +256,7 @@ github.com/google/uuid
 # github.com/gorilla/mux v1.8.1
 ## explicit; go 1.20
 github.com/gorilla/mux
-# github.com/grafana/dskit v0.0.0-20250917065751-798f5a8fa154
+# github.com/grafana/dskit v0.0.0-20250930144810-d6a51ec2b8c9
 ## explicit; go 1.23.0
 github.com/grafana/dskit/clusterutil
 github.com/grafana/dskit/flagext
