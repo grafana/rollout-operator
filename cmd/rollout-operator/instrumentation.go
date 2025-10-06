@@ -67,7 +67,7 @@ func newInstrumentedRouter(metrics *metrics, cfg config, logger log.Logger) (*mu
 	if cfg.clusterValidationCfg.Enabled {
 		// HTTP server side cluster validation.
 		httpMiddleware = append(httpMiddleware, middleware.ClusterValidationMiddleware(
-			cfg.kubeNamespace,
+			[]string{cfg.kubeNamespace},
 			cfg.clusterValidationCfg,
 			metrics.ServerInvalidClusterValidaionLabelRequests,
 			logger,
