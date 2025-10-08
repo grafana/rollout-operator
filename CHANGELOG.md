@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.30.0
+
 * [ENHANCEMENT] Add rollout-operator libsonnet into this repository. Enable rollout-operator and its webhooks by default. #282
 * [ENHANCEMENT] Add rollout-operator dashboard mixin into this repository. #288
 * [ENHANCEMENT] Add a `kubernetes.cluster-domain` flag for configuring a Kubernetes cluster domain. The default cluster domain `cluster.local.` is unchanged. #266
