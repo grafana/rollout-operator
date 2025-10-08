@@ -3,6 +3,7 @@
 1. Open and merge a PR
    - Update `CHANGELOG.md` as required 
    - Update [images.libsonnet](operations/rollout-operator/images.libsonnet) - set the version based off what the following tag will be
+   - Run `make build-jsonnet-tests` to update the jsonnet tests to include the new image version
 
 2. Create a new tag that follows semantic versioning:
     ```bash
