@@ -23,7 +23,6 @@ MAKE_FILES := $(shell find . $(DONT_FIND) -o -name 'Makefile' -print -o -name '*
 MIXIN_PATH := operations/rollout-operator-mixin
 MIXIN_OUT_PATH ?= operations/rollout-operator-mixin-compiled
 
-
 .DEFAULT_GOAL := rollout-operator
 
 REGO_POLICIES_PATH=operations/policies
@@ -101,7 +100,6 @@ fix-lint: ## Automatically fix linting issues where possible
 clean: ## Run go clean and remove the rollout-operator binary
 	rm -f rollout-operator
 	rm -rf integration/jsonnet-integration-tests
-	rm -rf $(MIXIN_OUT_PATH)
 	go clean ./...
 
 .PHONY: check-jsonnet-manifests
@@ -160,7 +158,7 @@ build-mixin: check-mixin-jb
 	@echo "Generating compiled dashboard:"
 	@mkdir -p "$(MIXIN_OUT_PATH)"
 	@find "$(MIXIN_OUT_PATH)" -type f -delete;
-	mixtool generate all --directory "$(MIXIN_OUT_PATH)/dashboards" "${MIXIN_PATH}/mixin.libsonnet";
+	mixtool generate dashboards --directory "$(MIXIN_OUT_PATH)/dashboards" "${MIXIN_PATH}/mixin.libsonnet";
 	@echo "sample rollout-operator dashboard generated to $(MIXIN_OUT_PATH)/dashboards"
 
 mixin-serve: ## Runs Grafana loading the mixin dashboards.
