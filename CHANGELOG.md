@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Add further information to debug logs emitted when processing ZonedPodDisruptionBudget-related requests. #311 
+
 ## v0.30.0
 
 * [ENHANCEMENT] Add rollout-operator libsonnet into this repository. Enable rollout-operator and its webhooks by default. #282
