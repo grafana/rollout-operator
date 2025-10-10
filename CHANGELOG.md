@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.31.0
+
 * [ENHANCEMENT] Add further information to debug logs emitted when processing ZonedPodDisruptionBudget-related requests. #311 
 * [BUGFIX] Keep evicted pod in eviction cache until its phase changes from running, rather than evicting on a pod ContainerStatuses change. Increase pod eviction cache TTL. #312
 
