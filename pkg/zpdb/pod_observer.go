@@ -66,7 +66,7 @@ func (c *podObserver) start() error {
 	return nil
 }
 
-func (c *podObserver) invalidatePodEvictionCache(obj interface{}) {
+func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string) {
 	pod, isPod := obj.(*corev1.Pod)
 	if !isPod {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
@@ -91,6 +91,8 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}) {
 			"generation-observed", pod.Generation,
 			"reason", pod.Status.Reason,
 			"phase", pod.Status.Phase,
+			"creation-timestamp", pod.CreationTimestamp,
+			"observed-action", action,
 		)
 		return
 	}
@@ -102,20 +104,22 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}) {
 		"generation-observed", pod.Generation,
 		"reason", pod.Status.Reason,
 		"phase", pod.Status.Phase,
+		"creation-timestamp", pod.CreationTimestamp,
+		"observed-action", action,
 	)
 	c.podEvictCache.delete(pod)
 }
 
 func (c *podObserver) onPodAdded(obj interface{}) {
-	c.invalidatePodEvictionCache(obj)
+	c.invalidatePodEvictionCache(obj, "added")
 }
 
 func (c *podObserver) onPodUpdated(_, new interface{}) {
-	c.invalidatePodEvictionCache(new)
+	c.invalidatePodEvictionCache(new, "updated")
 }
 
 func (c *podObserver) onPodDeleted(obj interface{}) {
-	c.invalidatePodEvictionCache(obj)
+	c.invalidatePodEvictionCache(obj, "deleted")
 }
 
 func (c *podObserver) stop() {
