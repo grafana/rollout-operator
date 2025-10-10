@@ -51,7 +51,7 @@ func TestObserver_NewPodObserver(t *testing.T) {
 	}
 }
 
-// TestObserver_PodEvents validates the pod eviction configCache is invalidated on pod changes
+// TestObserver_PodEvents validates the pod eviction cache is invalidated on pod changes
 func TestObserver_PodEvents(t *testing.T) {
 	client, observer := newPodObserverTestCase()
 	require.NoError(t, observer.start())
@@ -60,21 +60,21 @@ func TestObserver_PodEvents(t *testing.T) {
 	// This pod will not pass a ready & running test.
 	pod := createTestPod("test-pod", testNamespace)
 
-	// Add pod to fake client - this should trigger the informer and invalidate the configCache
+	// Add pod to fake client - this should trigger the informer and invalidate the cache
 	observer.podEvictCache.recordEviction(pod)
 	require.True(t, observer.podEvictCache.hasPendingEviction(pod))
 	_, err := client.CoreV1().Pods(testNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
 	require.NoError(t, err)
 	awaitEviction(t, pod, observer)
 
-	// Update pod to fake client - this should trigger the informer and invalidate the configCache
+	// Update pod to fake client - this should trigger the informer and invalidate the cache
 	observer.podEvictCache.recordEviction(pod)
 	require.True(t, observer.podEvictCache.hasPendingEviction(pod))
 	_, err = client.CoreV1().Pods(testNamespace).Update(context.Background(), pod, metav1.UpdateOptions{})
 	require.NoError(t, err)
 	awaitEviction(t, pod, observer)
 
-	// Delete pod to fake client - this should trigger the informer and invalidate the configCache
+	// Delete pod to fake client - this should trigger the informer and invalidate the cache
 	observer.podEvictCache.recordEviction(pod)
 	require.True(t, observer.podEvictCache.hasPendingEviction(pod))
 	err = client.CoreV1().Pods(testNamespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
@@ -94,6 +94,27 @@ func TestPodObserver_InvalidObject(t *testing.T) {
 	observer.onPodAdded(invalidObj)
 	observer.onPodUpdated(invalidObj, invalidObj)
 	observer.onPodDeleted(invalidObj)
+}
+
+// TestObserver_IgnorePodEvents validates the pod eviction cache is not invalidated until the pod phase changes
+func TestObserver_IgnorePodEvents(t *testing.T) {
+	_, observer := newPodObserverTestCase()
+	require.NoError(t, observer.start())
+	defer observer.stop()
+
+	pod := createTestPod("test-pod", testNamespace)
+	pod.Status.Phase = corev1.PodRunning
+
+	observer.podEvictCache.recordEviction(pod)
+	require.True(t, observer.podEvictCache.hasPendingEviction(pod))
+	observer.onPodAdded(pod)
+	require.True(t, observer.podEvictCache.hasPendingEviction(pod))
+	observer.onPodUpdated(pod, pod)
+	require.True(t, observer.podEvictCache.hasPendingEviction(pod))
+
+	pod.Status.Phase = corev1.PodFailed
+	observer.onPodUpdated(pod, pod)
+	require.False(t, observer.podEvictCache.hasPendingEviction(pod))
 }
 
 // awaitEviction awaits a pod to be evicted from the cache
