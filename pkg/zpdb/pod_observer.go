@@ -92,6 +92,7 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 			"reason", pod.Status.Reason,
 			"phase", pod.Status.Phase,
 			"creation-timestamp", pod.CreationTimestamp,
+			"deletion-timestamp", pod.DeletionTimestamp,
 			"observed-action", action,
 		)
 		return
@@ -105,6 +106,7 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 		"reason", pod.Status.Reason,
 		"phase", pod.Status.Phase,
 		"creation-timestamp", pod.CreationTimestamp,
+		"deletion-timestamp", pod.DeletionTimestamp,
 		"observed-action", action,
 	)
 	c.podEvictCache.delete(pod)
