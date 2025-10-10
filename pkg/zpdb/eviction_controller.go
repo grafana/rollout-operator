@@ -118,6 +118,15 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		return request.denyWithReason(err.Error(), http.StatusBadRequest)
 	}
 
+	level.Debug(request.log).Log(
+		"msg", "found pod",
+		"generation-observed", pod.Generation,
+		"reason", pod.Status.Reason,
+		"phase", pod.Status.Phase,
+		"creation-timestamp", pod.CreationTimestamp,
+		"deletion-timestamp", pod.DeletionTimestamp,
+	)
+
 	// evicting a terminal pod should result in direct deletion of pod as it already caused disruption by the time we are evicting.
 	if request.canIgnorePDBForPod(pod) {
 		level.Info(request.log).Log("msg", logAllowMesg, "reason", "pod is not ready")

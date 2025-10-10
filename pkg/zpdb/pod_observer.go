@@ -64,7 +64,7 @@ func (c *podObserver) start() error {
 	return nil
 }
 
-func (c *podObserver) invalidatePodEvictionCache(obj interface{}) {
+func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string) {
 	pod, isPod := obj.(*corev1.Pod)
 	if !isPod {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
@@ -83,24 +83,44 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}) {
 	// if another pod eviction request comes in before the first eviction takes effect this can incorrectly allow this later eviction request to proceed
 	// keep the cached eviction until we observe a non-running phase or the record is expired
 	if pod.Status.Phase == corev1.PodRunning {
-		level.Info(c.logger).Log("msg", "ignorning pod informer update - pod is still reporting as running", "name", pod.GetName(), "generation-at-eviction", generationAtEviction, "generation-observed", pod.Generation, "reason", pod.Status.Reason, "phase", pod.Status.Phase)
+		level.Info(c.logger).Log(
+			"msg", "ignoring pod informer update - pod is still reporting as ready and running",
+			"name", pod.GetName(),
+			"generation-at-eviction", generationAtEviction,
+			"generation-observed", pod.Generation,
+			"reason", pod.Status.Reason,
+			"phase", pod.Status.Phase,
+			"creation-timestamp", pod.CreationTimestamp,
+			"deletion-timestamp", pod.DeletionTimestamp,
+			"observed-action", action,
+		)
 		return
 	}
 
-	level.Info(c.logger).Log("msg", "accepting pod informer update - invaliding pod eviction configCache", "name", pod.GetName(), "generation-at-eviction", generationAtEviction, "generation-observed", pod.Generation, "reason", pod.Status.Reason, "phase", pod.Status.Phase)
+	level.Info(c.logger).Log(
+		"msg", "accepting pod informer update - invaliding pod eviction configCache",
+		"name", pod.GetName(),
+		"generation-at-eviction", generationAtEviction,
+		"generation-observed", pod.Generation,
+		"reason", pod.Status.Reason,
+		"phase", pod.Status.Phase,
+		"creation-timestamp", pod.CreationTimestamp,
+		"deletion-timestamp", pod.DeletionTimestamp,
+		"observed-action", action,
+	)
 	c.podEvictCache.delete(pod)
 }
 
 func (c *podObserver) onPodAdded(obj interface{}) {
-	c.invalidatePodEvictionCache(obj)
+	c.invalidatePodEvictionCache(obj, "added")
 }
 
 func (c *podObserver) onPodUpdated(_, new interface{}) {
-	c.invalidatePodEvictionCache(new)
+	c.invalidatePodEvictionCache(new, "updated")
 }
 
 func (c *podObserver) onPodDeleted(obj interface{}) {
-	c.invalidatePodEvictionCache(obj)
+	c.invalidatePodEvictionCache(obj, "deleted")
 }
 
 func (c *podObserver) stop() {
