@@ -8,8 +8,10 @@ import (
 )
 
 const (
-	// ms the eviction is cached for. This only needs to be long enough for an eviction webhook response to have triggered a pod state change.
-	cacheExpiry = 5000 * time.Millisecond
+	// duration the eviction is cached for. This only needs to be long enough for an eviction webhook response to have triggered a pod state change.
+	// note that kubernetes's own implementation use a 2 minute DeletionTimeout for their DisruptedPods map. Their commentary suggests 1-2 sec
+	// should be sufficient. See https://github.com/kubernetes/kubernetes/blob/master/pkg/controller/disruption/disruption.go
+	cacheExpiry = 2 * time.Minute
 )
 
 type podEvictionCacheValue struct {
