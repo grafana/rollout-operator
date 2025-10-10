@@ -84,11 +84,25 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}) {
 	// after an eviction request is allowed, the informer observes a pod update which can show it still ready/running
 	// if another pod eviction request comes in before the first eviction takes effect this can incorrectly allow this later eviction request to proceed
 	if util.IsPodRunningAndReady(pod) {
-		level.Info(c.logger).Log("msg", "ignoring pod informer update - pod is still reporting as ready and running", "name", pod.GetName(), "generation-at-eviction", generationAtEviction, "generation-observed", pod.Generation, "reason", pod.Status.Reason, "phase", pod.Status.Phase)
+		level.Info(c.logger).Log(
+			"msg", "ignoring pod informer update - pod is still reporting as ready and running",
+			"name", pod.GetName(),
+			"generation-at-eviction", generationAtEviction,
+			"generation-observed", pod.Generation,
+			"reason", pod.Status.Reason,
+			"phase", pod.Status.Phase,
+		)
 		return
 	}
 
-	level.Info(c.logger).Log("msg", "accepting pod informer update - invaliding pod eviction configCache", "name", pod.GetName(), "generation-at-eviction", generationAtEviction, "generation-observed", pod.Generation, "reason", pod.Status.Reason, "phase", pod.Status.Phase)
+	level.Info(c.logger).Log(
+		"msg", "accepting pod informer update - invaliding pod eviction configCache",
+		"name", pod.GetName(),
+		"generation-at-eviction", generationAtEviction,
+		"generation-observed", pod.Generation,
+		"reason", pod.Status.Reason,
+		"phase", pod.Status.Phase,
+	)
 	c.podEvictCache.delete(pod)
 }
 
