@@ -11,8 +11,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	k8cache "k8s.io/client-go/tools/cache"
-
-	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 // An podObserver listens for pod changes, invalidating the pod eviction cache on a pod state change.
@@ -81,11 +79,12 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 		return
 	}
 
-	// after an eviction request is allowed, the informer observes a pod update which can show it still ready/running
+	// after an eviction request is allowed, the informer observes one or more pod updates which can show it still running
 	// if another pod eviction request comes in before the first eviction takes effect this can incorrectly allow this later eviction request to proceed
-	if util.IsPodRunningAndReady(pod) {
+	// keep the cached eviction until we observe a non-running phase or the record is expired
+	if pod.Status.Phase == corev1.PodRunning {
 		level.Info(c.logger).Log(
-			"msg", "ignoring pod informer update - pod is still reporting as ready and running",
+			"msg", "ignoring pod informer update - pod is still reporting as running",
 			"name", pod.GetName(),
 			"generation-at-eviction", generationAtEviction,
 			"generation-observed", pod.Generation,
