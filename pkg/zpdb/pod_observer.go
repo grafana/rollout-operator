@@ -2,6 +2,7 @@ package zpdb
 
 import (
 	"errors"
+	"github.com/grafana/rollout-operator/pkg/util"
 	"reflect"
 	"time"
 
@@ -92,7 +93,7 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 		return
 	}
 
-	if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning || previousPhase == corev1.PodRunning {
+	if !util.IsPodRunningAndReady(pod) || previousPhase == corev1.PodRunning {
 		// ignore this eviction
 		level.Info(c.logger).Log(
 			"msg", "ignoring pod informer update",
@@ -101,7 +102,7 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 			"generation-observed", pod.Generation,
 			"reason", pod.Status.Reason,
 			"phase", pod.Status.Phase,
-			"previousPhase", previousPhase,
+			"previous-phase", previousPhase,
 			"creation-timestamp", pod.CreationTimestamp,
 			"deletion-timestamp", pod.DeletionTimestamp,
 			"observed-action", action,
@@ -116,7 +117,7 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 		"generation-observed", pod.Generation,
 		"reason", pod.Status.Reason,
 		"phase", pod.Status.Phase,
-		"previousPhase", previousPhase,
+		"previous-phase", previousPhase,
 		"creation-timestamp", pod.CreationTimestamp,
 		"deletion-timestamp", pod.DeletionTimestamp,
 		"observed-action", action,
