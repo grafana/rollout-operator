@@ -72,42 +72,56 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 		return
 	}
 
+	// TODO - delete me
+	level.Info(c.logger).Log(
+		"msg", "pod observed",
+		"name", pod.GetName(),
+		"generation-observed", pod.Generation,
+		"reason", pod.Status.Reason,
+		"phase", pod.Status.Phase,
+		"creation-timestamp", pod.CreationTimestamp,
+		"deletion-timestamp", pod.DeletionTimestamp,
+		"observed-action", action,
+	)
+
 	// reduce logging noise as this code path will be run on any pod update
 	// this is cheaper than finding the zpdb config for a pod
 	// and worst case if we miss an eviction configCache removal it self-expires
-	hasPendingEviction, _ := c.podEvictCache.hasPendingEvictionWithGeneration(pod)
+	hasPendingEviction, generationAtEviction, previousPhase := c.podEvictCache.hasPendingEvictionWithGeneration(pod)
 	if !hasPendingEviction {
 		return
 	}
-	/*
-		if pod.Status.Phase != corev1.PodRunning || previousPhase == corev1.PodRunning {
-			// ignore this eviction
-			level.Info(c.logger).Log(
-				"msg", "ignoring pod informer update - pod is still reporting as running",
-				"name", pod.GetName(),
-				"generation-at-eviction", generationAtEviction,
-				"generation-observed", pod.Generation,
-				"reason", pod.Status.Reason,
-				"phase", pod.Status.Phase,
-				"creation-timestamp", pod.CreationTimestamp,
-				"deletion-timestamp", pod.DeletionTimestamp,
-				"observed-action", action,
-			)
-			return
-		}
 
+	if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning || previousPhase == corev1.PodRunning {
+		// ignore this eviction
 		level.Info(c.logger).Log(
-			"msg", "accepting pod informer update - invaliding pod eviction configCache",
+			"msg", "ignoring pod informer update",
 			"name", pod.GetName(),
 			"generation-at-eviction", generationAtEviction,
 			"generation-observed", pod.Generation,
 			"reason", pod.Status.Reason,
 			"phase", pod.Status.Phase,
+			"previousPhase", previousPhase,
 			"creation-timestamp", pod.CreationTimestamp,
 			"deletion-timestamp", pod.DeletionTimestamp,
 			"observed-action", action,
 		)
-		c.podEvictCache.delete(pod) */
+		return
+	}
+
+	level.Info(c.logger).Log(
+		"msg", "accepting pod informer update - invaliding pod eviction cache",
+		"name", pod.GetName(),
+		"generation-at-eviction", generationAtEviction,
+		"generation-observed", pod.Generation,
+		"reason", pod.Status.Reason,
+		"phase", pod.Status.Phase,
+		"previousPhase", previousPhase,
+		"creation-timestamp", pod.CreationTimestamp,
+		"deletion-timestamp", pod.DeletionTimestamp,
+		"observed-action", action,
+	)
+	c.podEvictCache.delete(pod)
 }
 
 func (c *podObserver) onPodAdded(obj interface{}) {

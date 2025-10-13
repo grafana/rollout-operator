@@ -19,6 +19,8 @@ type podEvictionCacheValue struct {
 	expires time.Time
 	// the generation of the pod when added
 	generation int64
+	// the last sampled phase
+	phase corev1.PodPhase
 }
 
 type podEvictionCache struct {
@@ -52,6 +54,7 @@ func (c *podEvictionCache) recordEviction(pod *corev1.Pod) {
 	c.entries[pod.Name] = podEvictionCacheValue{
 		expires:    expiresAt,
 		generation: pod.Generation,
+		phase:      pod.Status.Phase,
 	}
 }
 
@@ -65,15 +68,18 @@ func (c *podEvictionCache) hasPendingEviction(pod *corev1.Pod) bool {
 }
 
 // hasPendingEvictionWithGeneration returns true if this pod is in the cache and not expired. It also returns the generation of the pod which was cached.
-func (c *podEvictionCache) hasPendingEvictionWithGeneration(pod *corev1.Pod) (bool, int64) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+func (c *podEvictionCache) hasPendingEvictionWithGeneration(pod *corev1.Pod) (bool, int64, corev1.PodPhase) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	rec, exists := c.entries[pod.Name]
 	if !exists || time.Now().Equal(rec.expires) || time.Now().After(rec.expires) {
-		return false, 0
+		return false, 0, ""
 	}
 
-	return exists, rec.generation
+	previousPhase := rec.phase
+	rec.phase = pod.Status.Phase
+	c.entries[pod.Name] = rec
+	return exists, rec.generation, previousPhase
 }
 
 // delete removes this pod from the cache
