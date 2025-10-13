@@ -582,6 +582,15 @@ func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context
 }
 
 func evictPodWithDebug(t *testing.T, ctx context.Context, api *kubernetes.Clientset, podToEvict string, expectedError string, relatedPods []string) {
+
+	t.Logf("Pre-eviction reporting on related pods. pod=%s", podToEvict)
+	for _, relatedPod := range relatedPods {
+		pod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, relatedPod, metav1.GetOptions{})
+		require.NoError(t, err)
+		t.Logf("Pod %s. phase=%s, readyRunning=%v", pod.Name, pod.Status.Phase, util.IsPodRunningAndReady(pod))
+	}
+
+	t.Logf("Evicting pod. pod=%s", podToEvict)
 	ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: podToEvict, Namespace: corev1.NamespaceDefault}}
 	err := api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev)
 	if err != nil {
