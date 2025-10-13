@@ -25,6 +25,7 @@ type podEvictionCache struct {
 	// pod name --> [ expiry time, generation ]
 	entries map[string]podEvictionCacheValue
 	lock    sync.RWMutex
+	ttl     time.Duration
 }
 
 // newPodEvictionCache returns a new podEvictionCache
@@ -32,11 +33,12 @@ type podEvictionCache struct {
 // It is expected that the pod will be deleted from this cache once the pod status has been updated after the eviction response.
 // This cache can be used to imply that a pod is not ready to cover the time between being marked for eviction until
 // the time the pod status is changed and reported to the rollout-operator / pod observer.
-func newPodEvictionCache() *podEvictionCache {
+func newPodEvictionCache(ttl time.Duration) *podEvictionCache {
 	return &podEvictionCache{
 		// no pre-allocation as this will not grow significantly
 		entries: map[string]podEvictionCacheValue{},
 		lock:    sync.RWMutex{},
+		ttl:     ttl,
 	}
 }
 
@@ -44,7 +46,7 @@ func newPodEvictionCache() *podEvictionCache {
 // The entry will remain valid for either the expiry period or until the pod entry is deleted.
 func (c *podEvictionCache) recordEviction(pod *corev1.Pod) {
 	// note also that the pod.Name is used as the key rather than pod.UID, as the UID will change if the pod is deleted or recreated
-	expiresAt := time.Now().Add(cacheExpiry)
+	expiresAt := time.Now().Add(c.ttl)
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.entries[pod.Name] = podEvictionCacheValue{
@@ -67,9 +69,10 @@ func (c *podEvictionCache) hasPendingEvictionWithGeneration(pod *corev1.Pod) (bo
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	rec, exists := c.entries[pod.Name]
-	if !exists {
+	if !exists || time.Now().Equal(rec.expires) || time.Now().After(rec.expires) {
 		return false, 0
 	}
+
 	return exists, rec.generation
 }
 

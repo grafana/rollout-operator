@@ -16,7 +16,7 @@ import (
 
 func newPodObserverTestCase() (*k8sfake.Clientset, *podObserver) {
 	client := k8sfake.NewClientset()
-	observer := newPodObserver(client, testNamespace, log.NewNopLogger())
+	observer := newPodObserver(client, testNamespace, log.NewNopLogger(), time.Second*5)
 	return client, observer
 }
 
@@ -63,6 +63,8 @@ func TestObserver_PodEvents(t *testing.T) {
 	// Add pod to fake client - this should trigger the informer and invalidate the cache
 	observer.podEvictCache.recordEviction(pod)
 	require.True(t, observer.podEvictCache.hasPendingEviction(pod))
+
+	pod.Status.Phase = corev1.PodRunning
 	_, err := client.CoreV1().Pods(testNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
 	require.NoError(t, err)
 	awaitEviction(t, pod, observer)
@@ -77,6 +79,7 @@ func TestObserver_PodEvents(t *testing.T) {
 	// Delete pod to fake client - this should trigger the informer and invalidate the cache
 	observer.podEvictCache.recordEviction(pod)
 	require.True(t, observer.podEvictCache.hasPendingEviction(pod))
+
 	err = client.CoreV1().Pods(testNamespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
 	require.NoError(t, err)
 	awaitEviction(t, pod, observer)
