@@ -138,7 +138,7 @@ func mockServiceStatefulSet(name, version string, ready bool, replicas int) *app
 										Port: intstr.FromInt(8080),
 									},
 								},
-								InitialDelaySeconds: 2,
+								InitialDelaySeconds: 1,
 								PeriodSeconds:       1,
 							},
 							ReadinessProbe: &corev1.Probe{
@@ -148,7 +148,7 @@ func mockServiceStatefulSet(name, version string, ready bool, replicas int) *app
 										Port: intstr.FromInt(8080),
 									},
 								},
-								InitialDelaySeconds: 1,
+								InitialDelaySeconds: 2,
 								PeriodSeconds:       1,
 							},
 							ImagePullPolicy: corev1.PullNever,
