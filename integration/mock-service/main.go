@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -34,6 +35,7 @@ func main() {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, syscall.SIGINT, syscall.SIGTERM)
 		log.Printf("Received shutdown signal: %d", <-sigint)
+		time.Sleep(1 * time.Second)
 		if err := srv.Shutdown(context.Background()); err != nil {
 			log.Printf("Can't shutdown HTTP server: %v", err)
 		}
