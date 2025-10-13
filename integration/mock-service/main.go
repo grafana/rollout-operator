@@ -35,7 +35,9 @@ func main() {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, syscall.SIGINT, syscall.SIGTERM)
 		log.Printf("Received shutdown signal: %d", <-sigint)
-		time.Sleep(1 * time.Second)
+		// delay the termination of these pods.
+		// without this, the zpdb integration tests can fail because the pod is evicted and terminated too quickly.
+		time.Sleep(100 * time.Millisecond)
 		if err := srv.Shutdown(context.Background()); err != nil {
 			log.Printf("Can't shutdown HTTP server: %v", err)
 		}
