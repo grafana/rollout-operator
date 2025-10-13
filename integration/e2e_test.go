@@ -220,14 +220,12 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 
 	{
 		t.Log("Deny a pod eviction in the same zone.")
-		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-1", Namespace: corev1.NamespaceDefault}}
-		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
+		evictPodWithDebug(t, ctx, api, "mock-zone-a-1", "denied the request: 1 pod not ready in mock-zone-a", []string{"mock-zone-a-0"})
 	}
 
 	{
 		t.Log("Deny a pod eviction in another zone.")
-		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
-		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
+		evictPodWithDebug(t, ctx, api, "mock-zone-b-0", "denied the request: 1 pod not ready in mock-zone-a", []string{"mock-zone-a-0"})
 	}
 
 	{
@@ -297,8 +295,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 
 	{
 		t.Log("Deny a pod eviction in another zone.")
-		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
-		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
+		evictPodWithDebug(t, ctx, api, "mock-zone-b-0", "denied the request: 1 pod not ready in mock-zone-a", []string{"mock-zone-a-0"})
 	}
 
 	{
@@ -582,4 +579,22 @@ func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context
 	// note - this retry should not be needed, as the rollout-operator pod should be ready and running
 	// however in the CI environments there have been intermittent errors which this retry is attempting to workaround
 	require.Eventually(t, task, time.Second*30, time.Millisecond*10, "Zpdb configuration create failed")
+}
+
+func evictPodWithDebug(t *testing.T, ctx context.Context, api *kubernetes.Clientset, podToEvict string, expectedError string, relatedPods []string) {
+	ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: podToEvict, Namespace: corev1.NamespaceDefault}}
+	err := api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev)
+	if err != nil {
+		require.ErrorContainsf(t, err, expectedError, "Eviction denied")
+	} else {
+		// we should not be here!
+		t.Logf("We should not be here! Eviction was allowed for %s", podToEvict)
+		for _, relatedPod := range relatedPods {
+			pod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, relatedPod, metav1.GetOptions{})
+			require.NoError(t, err)
+			t.Logf("Pod %s. phase=%s, readyRunning=%v", pod.Name, pod.Status.Phase, util.IsPodRunningAndReady(pod))
+		}
+		require.Fail(t, "Eviction should have been rejected")
+	}
+
 }
