@@ -82,7 +82,7 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 	// after an eviction request is allowed, the informer observes one or more pod updates which can show it still running
 	// if another pod eviction request comes in before the first eviction takes effect this can incorrectly allow this later eviction request to proceed
 	// keep the cached eviction until we observe a non-running phase or the record is expired
-	if pod.Status.Phase == corev1.PodRunning {
+	if pod.Status.Phase == corev1.PodRunning || generationAtEviction == pod.Generation {
 		level.Info(c.logger).Log(
 			"msg", "ignoring pod informer update - pod is still reporting as running",
 			"name", pod.GetName(),
