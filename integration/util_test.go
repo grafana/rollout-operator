@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"github.com/grafana/rollout-operator/pkg/util"
 	"net/http"
 	"testing"
 	"time"
@@ -74,6 +75,12 @@ func expectVersion(expectedVersion string) func(t *testing.T, pod *corev1.Pod) b
 		}
 		t.Logf("No container had VERSION env var for pod %s", pod.Name)
 		return false
+	}
+}
+
+func expectedPodRunningAndReady() func(t *testing.T, pod *corev1.Pod) bool {
+	return func(t *testing.T, pod *corev1.Pod) bool {
+		return util.IsPodRunningAndReady(pod)
 	}
 }
 

@@ -2,7 +2,6 @@ package zpdb
 
 import (
 	"errors"
-	"github.com/grafana/rollout-operator/pkg/util"
 	"reflect"
 	"time"
 
@@ -93,10 +92,10 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 		return
 	}
 
-	if !util.IsPodRunningAndReady(pod) || previousPhase == corev1.PodRunning {
-		// ignore this eviction
+	// only evict once the pod resumes running
+	if pod.Status.Phase == corev1.PodRunning && previousPhase != corev1.PodRunning {
 		level.Info(c.logger).Log(
-			"msg", "ignoring pod informer update",
+			"msg", "accepting pod informer update - invaliding pod eviction cache",
 			"name", pod.GetName(),
 			"generation-at-eviction", generationAtEviction,
 			"generation-observed", pod.Generation,
@@ -107,11 +106,12 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 			"deletion-timestamp", pod.DeletionTimestamp,
 			"observed-action", action,
 		)
-		return
+		c.podEvictCache.delete(pod)
 	}
 
+	// ignore this eviction
 	level.Info(c.logger).Log(
-		"msg", "accepting pod informer update - invaliding pod eviction cache",
+		"msg", "ignoring pod informer update",
 		"name", pod.GetName(),
 		"generation-at-eviction", generationAtEviction,
 		"generation-observed", pod.Generation,
@@ -122,7 +122,6 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 		"deletion-timestamp", pod.DeletionTimestamp,
 		"observed-action", action,
 	)
-	c.podEvictCache.delete(pod)
 }
 
 func (c *podObserver) onPodAdded(obj interface{}) {

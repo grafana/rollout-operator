@@ -336,10 +336,10 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 		t.Log("Create 2 zones each with 2 pods. There are 2 partitions across 2 zones")
 		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", 2)
 		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b", 2)
-		requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
-		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
-		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
-		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectedPodRunningAndReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectedPodRunningAndReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectedPodRunningAndReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectedPodRunningAndReady(), expectVersion("1"))
 	}
 
 	{
@@ -361,8 +361,7 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 
 	{
 		t.Log("Allow a pod eviction in another partition.")
-		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-1", Namespace: corev1.NamespaceDefault}}
-		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+		evictPodEventually(t, ctx, api, "mock-zone-b-1", []string{"mock-zone-a-0", "mock-zone-b-0", "mock-zone-a-1"})
 	}
 
 	{
@@ -383,8 +382,7 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 
 	{
 		t.Log("Allow a different pod in same partition to now be deleted.")
-		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
-		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+		evictPodEventually(t, ctx, api, "mock-zone-b-0", []string{"mock-zone-a-0", "mock-zone-a-1", "mock-zone-b-1"})
 	}
 
 }
@@ -579,6 +577,29 @@ func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context
 	// note - this retry should not be needed, as the rollout-operator pod should be ready and running
 	// however in the CI environments there have been intermittent errors which this retry is attempting to workaround
 	require.Eventually(t, task, time.Second*30, time.Millisecond*10, "Zpdb configuration create failed")
+}
+
+func evictPodEventually(t *testing.T, ctx context.Context, api *kubernetes.Clientset, podToEvict string, relatedPods []string) {
+	task := func() bool {
+		t.Log("Attempting to evicting pod ", podToEvict)
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: podToEvict, Namespace: corev1.NamespaceDefault}}
+		err := api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev)
+
+		if err != nil {
+			t.Logf("Eviction failed for %s. %v", podToEvict, err)
+			for _, relatedPod := range relatedPods {
+				pod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, relatedPod, metav1.GetOptions{})
+				if err != nil {
+					t.Logf("Pod %s. error=%v", pod.Name, err)
+				} else {
+					t.Logf("Pod %s. phase=%s, readyRunning=%v", pod.Name, pod.Status.Phase, util.IsPodRunningAndReady(pod))
+				}
+			}
+		}
+
+		return err == nil
+	}
+	require.Eventually(t, task, time.Second*10, time.Millisecond*50, "Unable to evict pod %s", podToEvict)
 }
 
 func evictPodWithDebug(t *testing.T, ctx context.Context, api *kubernetes.Clientset, podToEvict string, expectedError string, relatedPods []string) {
