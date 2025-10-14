@@ -5,6 +5,9 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	appsv1 "k8s.io/api/apps/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"testing"
 	"time"
 
@@ -220,12 +223,12 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 
 	{
 		t.Log("Deny a pod eviction in the same zone.")
-		evictPodWithDebug(t, ctx, api, "mock-zone-a-1", "denied the request: 1 pod not ready in mock-zone-a", []string{"mock-zone-a-0"})
+		evictPodWithDebug(t, ctx, api, "mock-zone-a-1", "mock-zone-a", "denied the request: 1 pod not ready in mock-zone-a", []string{"mock-zone-a-0"})
 	}
 
 	{
 		t.Log("Deny a pod eviction in another zone.")
-		evictPodWithDebug(t, ctx, api, "mock-zone-b-0", "denied the request: 1 pod not ready in mock-zone-a", []string{"mock-zone-a-0"})
+		evictPodWithDebug(t, ctx, api, "mock-zone-b-0", "mock-zone-b", "denied the request: 1 pod not ready in mock-zone-a", []string{"mock-zone-a-0"})
 	}
 
 	{
@@ -295,7 +298,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 
 	{
 		t.Log("Deny a pod eviction in another zone.")
-		evictPodWithDebug(t, ctx, api, "mock-zone-b-0", "denied the request: 1 pod not ready in mock-zone-a", []string{"mock-zone-a-0"})
+		evictPodWithDebug(t, ctx, api, "mock-zone-b-0", "mock-zone-b", "denied the request: 1 pod not ready in mock-zone-a", []string{"mock-zone-a-0"})
 	}
 
 	{
@@ -602,29 +605,85 @@ func evictPodEventually(t *testing.T, ctx context.Context, api *kubernetes.Clien
 	require.Eventually(t, task, time.Second*10, time.Millisecond*50, "Unable to evict pod %s", podToEvict)
 }
 
-func evictPodWithDebug(t *testing.T, ctx context.Context, api *kubernetes.Clientset, podToEvict string, expectedError string, relatedPods []string) {
+func evictPodWithDebug(t *testing.T, ctx context.Context, api *kubernetes.Clientset, podToEvict string, podSts string, expectedError string, relatedPods []string) {
 
-	t.Logf("Pre-eviction reporting on related pods. pod=%s", podToEvict)
+	pod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, podToEvict, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	sts, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Get(ctx, podSts, metav1.GetOptions{})
+	require.NoError(t, err)
+
+	tested, notReady, unknown, err := podsNotRunningAndReady(t, ctx, api, sts, pod)
+	t.Logf("Pre-eviction reporting on related pods. pod=%s, sts=%s, tested=%d, notReady=%d, unknown=%d", pod.Name, sts.Name, tested, notReady, unknown)
+
 	for _, relatedPod := range relatedPods {
-		pod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, relatedPod, metav1.GetOptions{})
+		relatedPod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, relatedPod, metav1.GetOptions{})
 		require.NoError(t, err)
-		t.Logf("Pod %s. phase=%s, readyRunning=%v", pod.Name, pod.Status.Phase, util.IsPodRunningAndReady(pod))
+		t.Logf("Pod %s. phase=%s, readyRunning=%v", relatedPod.Name, relatedPod.Status.Phase, util.IsPodRunningAndReady(relatedPod))
 	}
 
-	t.Logf("Evicting pod. pod=%s", podToEvict)
-	ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: podToEvict, Namespace: corev1.NamespaceDefault}}
-	err := api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev)
+	t.Logf("Evicting pod. pod=%s", pod.Name)
+	ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: corev1.NamespaceDefault}}
+	err = api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev)
 	if err != nil {
+		// happy path
 		require.ErrorContainsf(t, err, expectedError, "Eviction denied")
-	} else {
-		// we should not be here!
-		t.Logf("We should not be here! Eviction was allowed for %s", podToEvict)
-		for _, relatedPod := range relatedPods {
-			pod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, relatedPod, metav1.GetOptions{})
-			require.NoError(t, err)
-			t.Logf("Pod %s. phase=%s, readyRunning=%v", pod.Name, pod.Status.Phase, util.IsPodRunningAndReady(pod))
-		}
-		require.Fail(t, "Eviction should have been rejected")
+		return
+	}
+	// we should not be here!
+	t.Logf("We should not be here! Eviction was allowed for %s", pod.Name)
+
+	tested, notReady, unknown, err = podsNotRunningAndReady(t, ctx, api, sts, pod)
+	t.Logf("Pst-eviction reporting on related pods. pod=%s, sts=%s, tested=%d, notReady=%d, unknown=%d", pod.Name, sts.Name, tested, notReady, unknown)
+
+	for _, relatedPod := range relatedPods {
+		relatedPod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, relatedPod, metav1.GetOptions{})
+		require.NoError(t, err)
+		t.Logf("Pod %s. phase=%s, readyRunning=%v", relatedPod.Name, relatedPod.Status.Phase, util.IsPodRunningAndReady(relatedPod))
+	}
+	require.Fail(t, "Eviction should have been rejected")
+
+}
+
+// tested: 0, notReady: 0, unknown
+func podsNotRunningAndReady(t *testing.T, ctx context.Context, api *kubernetes.Clientset, sts *appsv1.StatefulSet, pod *corev1.Pod) (int, int, int, error) {
+	podsSelector := labels.NewSelector().Add(
+		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
+	)
+
+	list, err := api.CoreV1().Pods(sts.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: podsSelector.String(),
+	})
+
+	if err != nil {
+		return 0, 0, 0, err
 	}
 
+	var replicas int
+	if sts.Spec.Replicas == nil {
+		replicas = int(sts.Status.Replicas)
+	} else {
+		replicas = max(int(sts.Status.Replicas), int(*sts.Spec.Replicas))
+	}
+
+	notReady := 0
+	tested := 0
+	unknown := 0
+
+	for _, pd := range list.Items {
+
+		if pod.UID != pd.UID && !util.IsPodRunningAndReady(&pd) {
+			notReady++
+		}
+
+		tested++
+	}
+
+	// we consider the pod as not ready if there should be a given replica count but it is not yet being found in the pods query
+	// note that the effect here is that we do not know which partition these other pods will be in, so we have to attribute them to this partition to be safe
+	if len(list.Items) < replicas {
+		unknown = replicas - len(list.Items)
+	}
+
+	return tested, notReady, unknown, nil
 }
