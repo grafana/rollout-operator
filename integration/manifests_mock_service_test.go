@@ -205,7 +205,6 @@ func zoneAwarePodDisruptionBudget(namespace, name, rolloutGroup string, maxUnava
 
 	// because this is an unstructured object we must explicitly set this so the dynamic client can find this resource
 	zpdb.SetGroupVersionKind(zoneAwarePodDisruptionBudgetSchemaKind())
-
 	return zpdb
 }
 

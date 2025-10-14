@@ -3,6 +3,7 @@ package zpdb
 import (
 	"errors"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -16,7 +17,7 @@ import (
 
 const (
 	// How frequently informers should resync
-	informerSyncInterval = 5 * time.Minute
+	informerSyncInterval = 5 * time.Second
 )
 
 // An configObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the configCache.
@@ -27,6 +28,9 @@ type configObserver struct {
 
 	dynamicClient dynamic.Interface
 	logger        log.Logger
+
+	mux    *sync.RWMutex
+	synced bool
 
 	// Used to signal when the controller should stop.
 	stopCh chan struct{}
@@ -53,6 +57,8 @@ func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 		dynamicClient: dynamic,
 		logger:        logger,
 		stopCh:        make(chan struct{}),
+		mux:           &sync.RWMutex{},
+		synced:        false,
 	}
 
 	return c
@@ -75,6 +81,11 @@ func (c *configObserver) start() error {
 	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbInformer.HasSynced); !ok {
 		return errors.New("zpdb config informer caches failed to sync")
 	}
+
+	c.mux.Lock()
+	c.synced = true
+	c.mux.Unlock()
+
 	level.Info(c.logger).Log("msg", "zpdb config informer caches have synced")
 
 	return nil
@@ -92,6 +103,13 @@ func (c *configObserver) addOrUpdate(obj *unstructured.Unstructured) {
 }
 
 func (c *configObserver) onPdbAdded(obj interface{}) {
+	c.mux.RLock()
+	defer c.mux.RUnlock()
+	if !c.synced {
+		level.Error(c.logger).Log("msg", "discarding zpdb added - informer has not finished syncing")
+		return
+	}
+
 	unstructuredObj, isUnstructured := obj.(*unstructured.Unstructured)
 	if !isUnstructured {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
@@ -102,6 +120,13 @@ func (c *configObserver) onPdbAdded(obj interface{}) {
 }
 
 func (c *configObserver) onPdbUpdated(old, new interface{}) {
+	c.mux.RLock()
+	defer c.mux.RUnlock()
+	if !c.synced {
+		level.Error(c.logger).Log("msg", "discarding zpdb update - informer has not finished syncing")
+		return
+	}
+
 	_, oldIsUnstructured := old.(*unstructured.Unstructured)
 	newCfg, newIsUnstructured := new.(*unstructured.Unstructured)
 
@@ -114,6 +139,13 @@ func (c *configObserver) onPdbUpdated(old, new interface{}) {
 }
 
 func (c *configObserver) onPdbDeleted(obj interface{}) {
+	c.mux.RLock()
+	defer c.mux.RUnlock()
+	if !c.synced {
+		level.Error(c.logger).Log("msg", "discarding zpdb delete - informer has not finished syncing")
+		return
+	}
+
 	oldCfg, oldIsUnstructured := obj.(*unstructured.Unstructured)
 	if !oldIsUnstructured {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))

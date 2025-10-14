@@ -192,6 +192,8 @@ func createZoneAwarePodDisruptionBudget(t *testing.T, cluster k3t.Cluster, ctx c
 	// because this is an unstructured object we must explicitly set this so the dynamic client can find this resource
 	zpdb.SetGroupVersionKind(zoneAwarePodDisruptionBudgetSchemaKind())
 
+	t.Logf("Creating zpdb from disk. path=%s, data=%v", path, zpdb)
+
 	ret, err := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).Create(ctx, zpdb, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
