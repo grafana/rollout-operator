@@ -577,7 +577,7 @@ func awaitPodRunning(t *testing.T, ctx context.Context, api *kubernetes.Clientse
 func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context, cluster k3t.Cluster, configFile string) {
 	task := func() bool {
 		_, err := createZoneAwarePodDisruptionBudget(t, cluster, ctx, configFile)
-		return err != nil
+		return err == nil
 	}
 	// note - this retry should not be needed, as the rollout-operator pod should be ready and running
 	// however in the CI environments there have been intermittent errors which this retry is attempting to workaround
