@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #314, #315
+  * `github.com/prometheus/common` from `v0.66.1` to `v0.67.1`
+  * `sigs.k8s.io/controller-runtime` from `v0.22.0` to `v0.22.3`
+
 ## v0.31.0
 
 * [ENHANCEMENT] Add further information to debug logs emitted when processing ZonedPodDisruptionBudget-related requests. #311 
