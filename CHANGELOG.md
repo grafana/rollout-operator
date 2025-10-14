@@ -2,6 +2,20 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #314, #315
+  * `github.com/alecthomas/units` from `v0.0.0-20211218093645-b94a6e3cc137` to `v0.0.0-20240927000941-0f3dac36c52b`
+  * `go.yaml.in/yaml/v2` from `v2.4.2` to `v2.4.3`
+  * `golang.org/x/crypto` from `v0.41.0` to `v0.42.0`
+  * `golang.org/x/net` from `v0.43.0` to `v0.44.0`
+  * `golang.org/x/oauth2` from `v0.30.0` to `v0.31.0`
+  * `golang.org/x/sys` from `v0.35.0` to `v0.36.0`
+  * `golang.org/x/term` from `v0.34.0` to `v0.35.0`
+  * `golang.org/x/text` from `v0.28.0` to `v0.29.0`
+  * `google.golang.org/genproto/googleapis/api` from `v0.0.0-20250519155744-55703ea1f237` to `v0.0.0-20250707201910-8d1bb00bc6a7`
+  * `google.golang.org/genproto/googleapis/rpc` from `v0.0.0-20250519155744-55703ea1f237` to `v0.0.0-20250707201910-8d1bb00bc6a7`
+  * `google.golang.org/grpc` from `v1.72.1` to `v1.75.0`
+  * `google.golang.org/protobuf` from `v1.36.8` to `v1.36.10`
+
 ## v0.31.0
 
 * [ENHANCEMENT] Add further information to debug logs emitted when processing ZonedPodDisruptionBudget-related requests. #311 
