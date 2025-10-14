@@ -65,6 +65,8 @@ func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Cl
 	createRolloutOperatorDependencies(t, ctx, api, extApi, directory, webhook)
 
 	deployment := loadFromDisk[appsv1.Deployment](t, directory+yamlDeployment, &appsv1.Deployment{})
+	deployment.Spec.Template.Spec.Containers[0].Image = "rollout-operator:latest"
+
 	_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Create(ctx, deployment, metav1.CreateOptions{})
 	require.NoError(t, err)
 }
