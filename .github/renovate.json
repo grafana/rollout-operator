@@ -9,29 +9,35 @@
         "gomodTidy"
     ],
     "branchPrefix": "grafanarenovatebot/",
-    "platformCommit": true,
+    "platformCommit": "enabled",
     "dependencyDashboard": false,
     "rebaseWhen": "behind-base-branch",
     "packageRules": [
-         {
-             "description": "Group all go dependencies together to reduce noise",
-             "matchDatasources": ["go"],
-             "groupName": "go dependencies"
-         },
-         {
-             "description": "Group all github action dependencies together to reduce noise",
-             "matchManagers": ["github-actions"],
-             "groupName": "github actions"
-         },
-         {
-             "description": "Disable Docker updates",
-             "matchManagers": ["dockerfile"],
-             "enabled": false
-         }
-     ],
-     "separateMajorMinor": false,
-     "vulnerabilityAlerts": {
-         "enabled": true
-     },
+        {
+            "description": "Group all go dependencies together to reduce noise",
+            "matchDatasources": [
+                "go"
+            ],
+            "groupName": "go dependencies"
+        },
+        {
+            "description": "Group all github action dependencies together to reduce noise",
+            "matchManagers": [
+                "github-actions"
+            ],
+            "groupName": "github actions"
+        },
+        {
+            "description": "Disable Docker updates",
+            "matchManagers": [
+                "dockerfile"
+            ],
+            "enabled": false
+        }
+    ],
+    "separateMajorMinor": false,
+    "vulnerabilityAlerts": {
+        "enabled": true
+    },
     "osvVulnerabilityAlerts": true
 }
