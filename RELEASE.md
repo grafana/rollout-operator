@@ -34,7 +34,7 @@ Due to this [issue#42](https://github.com/jsonnet-bundler/jsonnet-bundler/issues
 As such, the following workaround is required in Mimir;
 
 - `cd operations/mimir`
-- edit `jsonnetfile.json` and set the `rollout-operator` version to `main`
+- edit `jsonnetfile.json` and set the `rollout-operator` version to the new tag (as set in step 2)
 
 ```
 {
@@ -44,13 +44,11 @@ As such, the following workaround is required in Mimir;
           "subdir": "operations/rollout-operator"
         }
       },
-      "version": "4d563316583fdc8120c6ee7dfb393bb59a537bae" <-- set this to "main"
+      "version": "v0.31.1" <-- set this to the new tag
     }
 
 ```
 
-- `jb update github.com/grafana/rollout-operator/operations/rollout-operator@main`
-- obtain the new version hash - `grep -A 5 "rollout-operator.git" jsonnetfile.lock.json | grep version`
-- edit `jsonnetfile.json` and set the `rollout-operator` version to the hash obtained above
+- `jb update github.com/grafana/rollout-operator/operations/rollout-operator@<new_tag>`
 - jsonnet tests may need to be refreshed. See [Makefile](https://github.com/grafana/mimir/blob/main/Makefile)
 
