@@ -19,6 +19,10 @@
    - Repository https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator
    - [Example PR](https://github.com/grafana/helm-charts/pull/3177/files)
 
-5. Update the mimir-distributed Helm Chart:
-   - Repository https://github.com/grafana/mimir/tree/main/operations/helm/charts/mimir-distributed/
-   - [Example PR](https://github.com/grafana/mimir/pull/12591/files)
+5. Update the mimir-distributed Helm Chart and Mimir jsonnet vendoring
+   - Edit `operations/helm/charts/mimir-distributed/Chart.yaml` and update the rollout-operator chart version. Add a corresponding changelog entry to `operations/helm/charts/mimir-distributed/CHANGELOG.md`.
+   - Edit `operations/mimir/jsonnetfile.json` and update the rollout-operator library version. Add a corresponding changelog entry to the Jsonnet section in `CHANGELOG.md`.
+   - Run `jb update github.com/grafana/rollout-operator/operations/rollout-operator@<new version>` from the `operations/mimir` directory to update `jsonnetfile.lock.json`.
+   - Run `make doc` from the root of the Mimir repo to regenerate the Helm documentation.
+   - Run `make build-jsonnet-tests build-helm-tests` to regenerate the Jsonnet and Helm test files.
+   - [Example PR](https://github.com/grafana/mimir/pull/12996)
