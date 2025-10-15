@@ -19,7 +19,7 @@
    - Repository https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator
    - [Example PR](https://github.com/grafana/helm-charts/pull/3177/files)
 
-5. Update the mimir-distributed Helm Chart and mimir jsonnet vendoring
+5. Update the mimir-distributed Helm Chart and Mimir jsonnet vendoring
    - Repository https://github.com/grafana/mimir/tree/main/operations/helm/charts/mimir-distributed/
    - [Example PR](https://github.com/grafana/mimir/pull/12996)
    
