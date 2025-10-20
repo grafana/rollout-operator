@@ -8,7 +8,7 @@ require (
 	github.com/go-logfmt/logfmt v0.6.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
-	github.com/grafana/dskit v0.0.0-20251010193112-965b207c61b8
+	github.com/grafana/dskit v0.0.0-20251015215217-e2f07d67006a
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/k3d-io/k3d/v5 v5.8.3
 	github.com/pkg/errors v0.9.1
