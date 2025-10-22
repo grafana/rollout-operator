@@ -32,6 +32,7 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
+	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const (
@@ -63,6 +64,8 @@ type RolloutController struct {
 	httpClient           httpClient
 	logger               log.Logger
 
+	zpdbController *zpdb.EvictionController
+
 	// This bool is true if we should trigger a reconcile.
 	shouldReconcile atomic.Bool
 
@@ -80,7 +83,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController *zpdb.EvictionController) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -110,6 +113,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		scaleClient:          scaleClient,
 		dynamicClient:        dynamic,
 		httpClient:           client,
+		zpdbController:       zpdbController,
 		logger:               logger,
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
@@ -575,9 +579,32 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 				continue
 			}
 
-			level.Info(c.logger).Log("msg", fmt.Sprintf("terminating pod %s", pod.Name))
-			if err := c.kubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
-				return false, errors.Wrapf(err, "failed to delete pod %s", pod.Name)
+			if c.zpdbController != nil && c.zpdbController.Running() {
+				// Use the ZPDB to determine if this pod delete is allowed.
+				// The ZPDB serializes requests from this controller and from any incoming voluntary evictions.
+				// For each request, a full set of tests is performed to confirm the state of all pods in the ZPDB scope.
+				// This ensures that if any voluntary evictions have been allowed since this reconcile loop commenced that
+				// the latest information is used to determine the zone/partition disruption level.
+				// If this request returns without error, the pod will be placed into the ZPDB pod eviction cache and will
+				// be considered as not ready until it either restarts or is expired from the cache.
+				err := c.zpdbController.AllowPodEvictionRequest(ctx, pod.Namespace, pod.Name, "rollout-controller")
+				if err != nil {
+					// Skip this pod. The reconcile loop regularly runs and this pod will have an opportunity to be re-tried.
+					// Rather than returning false here and abandoning the rest of the updates until the next reconcile,
+					// we allow this update loop to continue. For configurations which have a partition awareness ZPDB it is valid
+					// to have multiple disruptions as long as there is at least one health pod per partition.
+					level.Debug(c.logger).Log("msg", fmt.Sprintf("zpdb denied pod deletion. pod=%s, reason=%s", pod.Name, err.Error()))
+					continue
+				}
+				level.Info(c.logger).Log("msg", fmt.Sprintf("terminating pod %s. zpdb allowed", pod.Name))
+				if err := c.kubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
+					return false, errors.Wrapf(err, "failed to delete pod %s", pod.Name)
+				}
+			} else {
+				level.Info(c.logger).Log("msg", fmt.Sprintf("terminating pod %s", pod.Name))
+				if err := c.kubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
+					return false, errors.Wrapf(err, "failed to delete pod %s", pod.Name)
+				}
 			}
 		}
 

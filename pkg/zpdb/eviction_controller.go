@@ -2,6 +2,7 @@ package zpdb
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -11,7 +12,11 @@ import (
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
@@ -35,6 +40,7 @@ type EvictionController struct {
 
 	cfgObserver *configObserver
 	podObserver *podObserver
+	running     bool
 
 	resolver spanlogger.TenantResolver
 }
@@ -65,10 +71,17 @@ func (c *EvictionController) Start() error {
 	if err := c.podObserver.start(); err != nil {
 		return errors.Wrap(err, "failed to start zpdb pod observer")
 	}
+	c.running = true
 	return nil
 }
 
+// Running returns true if this controller has been successfully started and not yet stopped
+func (c *EvictionController) Running() bool {
+	return c.running
+}
+
 func (c *EvictionController) Stop() {
+	c.running = false
 	c.cfgObserver.stop()
 	c.podObserver.stop()
 }
@@ -91,6 +104,51 @@ func (c *EvictionController) findLock(name string) *sync.Mutex {
 
 	c.locks[name] = &sync.Mutex{}
 	return c.locks[name]
+}
+
+// AllowPodEvictionRequest allows for a programmatic pod eviction request. It returns an error if the pod eviction is denied.
+// Note that if this func returns without an error, the pod will be marked as pending eviction within the zpdb eviction cache.
+// Note also that this func does not actually evict or delete the pod from kubernetes.
+func (c *EvictionController) AllowPodEvictionRequest(ctx context.Context, namespace string, podname string, source string) error {
+	request := v1.AdmissionReview{
+		Request: &v1.AdmissionRequest{
+			// not a real uid. The eviction_controller only uses this for logging purposes
+			UID: types.UID(fmt.Sprintf("request-pod-eviction-%s", podname)),
+			Kind: metav1.GroupVersionKind{
+				Group:   "policy",
+				Version: "v1",
+				Kind:    "Eviction",
+			},
+			Resource: metav1.GroupVersionResource{
+				Group:    "policy",
+				Version:  "v1",
+				Resource: "evictions",
+			},
+			Name:      podname,
+			Namespace: namespace,
+			Operation: v1.Create,
+			UserInfo: authenticationv1.UserInfo{
+				Username: source,
+			},
+			SubResource: "eviction",
+			Object: runtime.RawExtension{
+				Raw: []byte(fmt.Sprintf(`{
+					"apiVersion": "policy/v1",
+					"kind": "Eviction",
+					"metadata": {
+						"name": "%s",
+						"namespace": "%s"
+					}
+				}`, podname, namespace)),
+			},
+		},
+	}
+
+	response := c.HandlePodEvictionRequest(ctx, request)
+	if !response.Allowed {
+		return errors.New(response.Result.Message)
+	}
+	return nil
 }
 
 func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1.AdmissionReview) *v1.AdmissionResponse {

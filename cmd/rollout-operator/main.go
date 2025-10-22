@@ -216,12 +216,13 @@ func main() {
 	webhookObserver := tlscert.NewWebhookObserver(kubeClient, cfg.kubeNamespace, logger)
 
 	// controller for pod eviction - this is only started if the TLS server is started
+	// even though we pass this into the main controller the main controller can determine if this eviction controller is running or not
 	evictionController := zpdb.NewEvictionController(kubeClient, dynamicClient, cfg.kubeNamespace, logger)
 
 	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, evictionController, webhookObserver)
 
 	// Init the controller
-	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
+	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger, evictionController)
 	check(errors.Wrap(c.Init(), "failed to init controller"))
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).

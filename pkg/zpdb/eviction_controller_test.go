@@ -99,7 +99,25 @@ func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawCon
 	}
 
 	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, testCtx.logs)
+	require.False(t, testCtx.controller.Running())
 	require.NoError(t, testCtx.controller.Start())
+	require.True(t, testCtx.controller.Running())
+
+	if pdbRawConfig != nil {
+		_, _, _ = testCtx.controller.cfgObserver.pdbCache.addOrUpdateRaw(pdbRawConfig)
+	}
+	return testCtx
+}
+
+func newTestContextWithoutAdmissionReview(t *testing.T, pdbRawConfig *unstructured.Unstructured, objects ...runtime.Object) *testContext {
+	testCtx := &testContext{
+		ctx:  context.Background(),
+		logs: newDummyLogger(),
+	}
+
+	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, testCtx.logs)
+	require.NoError(t, testCtx.controller.Start())
+	require.True(t, testCtx.controller.Running())
 
 	if pdbRawConfig != nil {
 		_, _, _ = testCtx.controller.cfgObserver.pdbCache.addOrUpdateRaw(pdbRawConfig)
@@ -118,6 +136,19 @@ func (c *testContext) assertDenyResponse(t *testing.T, reason string, statusCode
 	require.Equal(t, reason, response.Result.Message)
 	require.Equal(t, int32(statusCode), response.Result.Code)
 	c.stop()
+	require.False(t, c.controller.Running())
+}
+
+func (c *testContext) assertDenyResponseViaAllowPodEviction(t *testing.T, pod string, reason string) {
+	response := c.controller.AllowPodEvictionRequest(c.ctx, testNamespace, pod, "eviction-controller-test")
+	require.ErrorContains(t, response, reason)
+	c.stop()
+	require.False(t, c.controller.Running())
+}
+
+func (c *testContext) assertAllowResponseViaAllowPodEviction_noStop(t *testing.T, pod string) {
+	response := c.controller.AllowPodEvictionRequest(t.Context(), testNamespace, pod, "eviction-controller-test")
+	require.NoError(t, response)
 }
 
 func (c *testContext) assertAllowResponse(t *testing.T) {
@@ -125,6 +156,7 @@ func (c *testContext) assertAllowResponse(t *testing.T) {
 	require.NotNil(t, response.UID)
 	require.True(t, response.Allowed)
 	c.stop()
+	require.False(t, c.controller.Running())
 }
 
 func (c *testContext) assertAllowResponseWithWarning(t *testing.T, warning string) {
@@ -133,6 +165,7 @@ func (c *testContext) assertAllowResponseWithWarning(t *testing.T, warning strin
 	require.True(t, response.Allowed)
 	require.Equal(t, warning, response.Warnings[0])
 	c.stop()
+	require.False(t, c.controller.Running())
 }
 
 func TestPodEviction_NotCreateEvent(t *testing.T) {
@@ -201,6 +234,42 @@ func TestPodEviction_MaxUnavailableEq0(t *testing.T) {
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(0, rolloutGroupValue), pod, sts)
 	testCtx.assertDenyResponse(t, "max unavailable = 0", 403)
 	testCtx.logs.assertHasLog(t, []string{`reason="max unavailable = 0"`})
+}
+
+func TestPodEviction_MaxUnavailableEq0_ViaAllowPodEviction(t *testing.T) {
+	sts := newEvictionControllerSts(statefulSetZoneA)
+	pod := newPod(testPodZoneA0, sts)
+	testCtx := newTestContextWithoutAdmissionReview(t, newPDBMaxUnavailable(0, rolloutGroupValue), pod, sts)
+	testCtx.assertDenyResponseViaAllowPodEviction(t, testPodZoneA0, "max unavailable = 0")
+	testCtx.logs.assertHasLog(t, []string{`reason="max unavailable = 0"`})
+}
+
+func TestPodEviction_Allowed_ViaAllowPodEviction(t *testing.T) {
+	objs := make([]runtime.Object, 0, 12)
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneC))
+
+	for _, p := range []string{testPodZoneA0, testPodZoneA1, testPodZoneA2} {
+		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
+	}
+	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
+		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
+	}
+	for _, p := range []string{testPodZoneC0, testPodZoneC1, testPodZoneC2} {
+		objs = append(objs, newPod(p, objs[2].(*appsv1.StatefulSet)))
+	}
+
+	zoneAPod0 := objs[3].(*corev1.Pod)
+	zoneAPod2 := objs[5].(*corev1.Pod)
+
+	testCtx := newTestContextWithoutAdmissionReview(t, newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
+
+	require.False(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
+	// note that we do not stop the controller after this test
+	testCtx.assertAllowResponseViaAllowPodEviction_noStop(t, zoneAPod0.Name)
+	require.True(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
+	testCtx.assertDenyResponseViaAllowPodEviction(t, zoneAPod2.Name, "1 pod not ready in ingester-zone-a")
 }
 
 func TestPodEviction_MaxUnavailablePercentageEq0(t *testing.T) {
