@@ -199,6 +199,7 @@ jobs:
             make publish-standard-image
           fi
         env:
+          REF_TYPE: ${{ github.ref_type }}
           IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
       - name: Publish release
         if: github.ref_type == 'tag'
