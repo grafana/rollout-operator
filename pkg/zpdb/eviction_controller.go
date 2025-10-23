@@ -118,7 +118,7 @@ func (c *EvictionController) findLock(name string) *sync.Mutex {
 // MarkPodAsDeleted allows for a programmatic pod eviction request. It returns an error if the pod eviction is denied.
 // Note that if this func returns without an error, the pod will be marked as pending eviction within the zpdb eviction cache.
 // Note also that this func does not actually evict or delete the pod from kubernetes.
-func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace string, podname string, source string) error {
+func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error {
 	request := v1.AdmissionReview{
 		Request: &v1.AdmissionRequest{
 			// not a real uid. The eviction_controller only uses this for logging purposes
