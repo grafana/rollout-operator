@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	zpdb "github.com/grafana/rollout-operator/pkg/zpdb"
 	"io"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"net/http"
 	"path"
 	"regexp"
@@ -26,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta/testrestmapper"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
+	zpdb "github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const (
@@ -623,14 +623,15 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			zpdb := zpdb.NewEvictionController(kubeClient, createFakeDynamicClientForZpdb(), testNamespace, log.NewNopLogger())
 			require.NoError(t, zpdb.Start())
 			defer zpdb.Stop()
-			zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
+			_, _, err := zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
+			require.NoError(t, err)
 
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), *zpdb)
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), zpdb)
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
 			// Run a reconcile.
-			err := c.reconcile(context.Background())
+			err = c.reconcile(context.Background())
 			if testData.expectedErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), testData.expectedErr)
@@ -935,11 +936,12 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			zpdb := zpdb.NewEvictionController(kubeClient, createFakeDynamicClientForZpdb(), testNamespace, log.NewNopLogger())
 			require.NoError(t, zpdb.Start())
 			defer zpdb.Stop()
-			zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
+			_, _, err := zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
+			require.NoError(t, err)
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, httpClient, 5*time.Second, reg, log.NewNopLogger(), *zpdb)
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, httpClient, 5*time.Second, reg, log.NewNopLogger(), zpdb)
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -1061,11 +1063,12 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 	zpdb := zpdb.NewEvictionController(kubeClient, createFakeDynamicClientForZpdb(), testNamespace, log.NewNopLogger())
 	require.NoError(t, zpdb.Start())
 	defer zpdb.Stop()
-	zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
+	_, _, err := zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
+	require.NoError(t, err)
 
 	// Create the controller and start informers.
 	reg := prometheus.NewPedanticRegistry()
-	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), *zpdb)
+	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), zpdb)
 	require.NoError(t, c.Init())
 	defer c.Stop()
 

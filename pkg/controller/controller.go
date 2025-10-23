@@ -64,7 +64,7 @@ type RolloutController struct {
 	httpClient           httpClient
 	logger               log.Logger
 
-	zpdbController zpdb.EvictionController
+	zpdbController *zpdb.EvictionController
 
 	// This bool is true if we should trigger a reconcile.
 	shouldReconcile atomic.Bool
@@ -83,7 +83,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController zpdb.EvictionController) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController *zpdb.EvictionController) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
