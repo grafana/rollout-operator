@@ -591,7 +591,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 				// Skip this pod. The reconcile loop regularly runs and this pod will have an opportunity to be re-tried.
 				// Rather than returning false here and abandoning the rest of the updates until the next reconcile,
 				// we allow this update loop to continue. For configurations which have a partition aware ZPDB it is valid
-				// to have multiple disruptions as long as there is at least one health pod per partition.
+				// to have multiple disruptions as long as there is at least one healthy pod per partition.
 				level.Debug(c.logger).Log("msg", fmt.Sprintf("zpdb denied pod deletion. pod=%s, reason=%s", pod.Name, err.Error()))
 				continue
 			}
