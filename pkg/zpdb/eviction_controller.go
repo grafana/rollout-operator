@@ -3,6 +3,7 @@ package zpdb
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"net/http"
 	"sync"
 
@@ -64,6 +65,14 @@ func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynami
 	}
 }
 
+// AddOrUpdateConfig attempts to parse and apply the given unstructured object as a zpdb Config
+// An error is returned if the given object can not be parsed into a valid config.
+// The bool response indicates if the config was accepted into the configCache, with the int64 reflecting the generation of the config in the configCache.
+// It will return false if this given object is an older generation of what is already in the configCache.
+func (c *EvictionController) AddOrUpdateConfig(pdbRawConfig *unstructured.Unstructured) (bool, int64, error) {
+	return c.cfgObserver.pdbCache.addOrUpdateRaw(pdbRawConfig)
+}
+
 func (c *EvictionController) Start() error {
 	if err := c.cfgObserver.start(); err != nil {
 		return errors.Wrap(err, "failed to start zpdb config observer")
@@ -106,10 +115,10 @@ func (c *EvictionController) findLock(name string) *sync.Mutex {
 	return c.locks[name]
 }
 
-// AllowPodEvictionRequest allows for a programmatic pod eviction request. It returns an error if the pod eviction is denied.
+// MarkPodAsDeleted allows for a programmatic pod eviction request. It returns an error if the pod eviction is denied.
 // Note that if this func returns without an error, the pod will be marked as pending eviction within the zpdb eviction cache.
 // Note also that this func does not actually evict or delete the pod from kubernetes.
-func (c *EvictionController) AllowPodEvictionRequest(ctx context.Context, namespace string, podname string, source string) error {
+func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace string, podname string, source string) error {
 	request := v1.AdmissionReview{
 		Request: &v1.AdmissionRequest{
 			// not a real uid. The eviction_controller only uses this for logging purposes

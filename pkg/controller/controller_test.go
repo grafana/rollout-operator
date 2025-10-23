@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	zpdb "github.com/grafana/rollout-operator/pkg/zpdb"
 	"io"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"net/http"
 	"path"
 	"regexp"
@@ -617,7 +619,13 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), nil)
+
+			zpdb := zpdb.NewEvictionController(kubeClient, createFakeDynamicClientForZpdb(), testNamespace, log.NewNopLogger())
+			require.NoError(t, zpdb.Start())
+			defer zpdb.Stop()
+			zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
+
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), *zpdb)
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -924,9 +932,14 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 				defaultResponse: internalErrorResponse,
 			}
 
+			zpdb := zpdb.NewEvictionController(kubeClient, createFakeDynamicClientForZpdb(), testNamespace, log.NewNopLogger())
+			require.NoError(t, zpdb.Start())
+			defer zpdb.Stop()
+			zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
+
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, httpClient, 5*time.Second, reg, log.NewNopLogger(), nil)
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, httpClient, 5*time.Second, reg, log.NewNopLogger(), *zpdb)
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -940,9 +953,27 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 	}
 }
 
+func createFakeDynamicClientForZpdb() *fakedynamic.FakeDynamicClient {
+	// The zpdb config observer needs this configuration to list the custom kinds.
+	// If we attempt to merge the createFakeDynamicClient() functionality into the same client requests will fail.
+	// The incompatibility arises that the zpdb needs this static custom list seeded at creation, but if this is
+	// done on the createFakeDynamicClient() dynamic client, having this list will break the calls to patch and the
+	// patch reactor is never reached.
+	// Having 2 different dynamic clients does not affect the integrity of these tests.
+	return fakedynamic.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{
+			{
+				Group:    zpdb.ZoneAwarePodDisruptionBudgetsSpecGroup,
+				Version:  zpdb.ZoneAwarePodDisruptionBudgetsVersion,
+				Resource: zpdb.ZoneAwarePodDisruptionBudgetsNamePlural,
+			}: zpdb.ZoneAwarePodDisruptionBudgetName + "List",
+		},
+	)
+}
+
 func createFakeDynamicClient() (*fakedynamic.FakeDynamicClient, map[string][]string) {
 	dynamicClient := &fakedynamic.FakeDynamicClient{}
-
 	patchedStatuses := map[string][]string{}
 	dynamicClient.AddReactor("patch", "*", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
 		patchAction := action.(ktesting.PatchAction)
@@ -1027,9 +1058,14 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 
 	kubeClient := fake.NewSimpleClientset(append(append([]runtime.Object{}, ingesters...), storeGateways...)...)
 
+	zpdb := zpdb.NewEvictionController(kubeClient, createFakeDynamicClientForZpdb(), testNamespace, log.NewNopLogger())
+	require.NoError(t, zpdb.Start())
+	defer zpdb.Stop()
+	zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
+
 	// Create the controller and start informers.
 	reg := prometheus.NewPedanticRegistry()
-	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), nil)
+	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), *zpdb)
 	require.NoError(t, c.Init())
 	defer c.Stop()
 
@@ -1253,4 +1289,27 @@ func (f *fakeHttpClient) requests() []string {
 	defer f.recordedRequestsMu.Unlock()
 
 	return f.recordedRequests
+}
+
+// newPDBMaxUnavailable returns a raw custom resource configuration which can be used with the Config
+// This configuration has maxUnavailable=X and has a name of the given rollout-group
+func newPDBMaxUnavailable(maxUnavailable int, rolloutGroup string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": fmt.Sprintf("%s/%s", zpdb.ZoneAwarePodDisruptionBudgetsSpecGroup, zpdb.ZoneAwarePodDisruptionBudgetsVersion),
+			"kind":       zpdb.ZoneAwarePodDisruptionBudgetName,
+			"metadata": map[string]interface{}{
+				"name":      rolloutGroup + "-rollout",
+				"namespace": testNamespace,
+			},
+			"spec": map[string]interface{}{
+				zpdb.FieldMaxUnavailable: int64(maxUnavailable),
+				zpdb.FieldSelector: map[string]interface{}{
+					zpdb.FieldMatchLabels: map[string]interface{}{
+						config.RolloutGroupLabelKey: rolloutGroup,
+					},
+				},
+			},
+		},
+	}
 }

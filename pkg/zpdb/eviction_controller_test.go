@@ -139,15 +139,15 @@ func (c *testContext) assertDenyResponse(t *testing.T, reason string, statusCode
 	require.False(t, c.controller.Running())
 }
 
-func (c *testContext) assertDenyResponseViaAllowPodEviction(t *testing.T, pod string, reason string) {
-	response := c.controller.AllowPodEvictionRequest(c.ctx, testNamespace, pod, "eviction-controller-test")
+func (c *testContext) assertDenyResponseViaMarkPodAsDeleted(t *testing.T, pod string, reason string) {
+	response := c.controller.MarkPodAsDeleted(c.ctx, testNamespace, pod, "eviction-controller-test")
 	require.ErrorContains(t, response, reason)
 	c.stop()
 	require.False(t, c.controller.Running())
 }
 
-func (c *testContext) assertAllowResponseViaAllowPodEviction_noStop(t *testing.T, pod string) {
-	response := c.controller.AllowPodEvictionRequest(t.Context(), testNamespace, pod, "eviction-controller-test")
+func (c *testContext) assertAllowResponseViaMarkPodAsDeleted_noStop(t *testing.T, pod string) {
+	response := c.controller.MarkPodAsDeleted(t.Context(), testNamespace, pod, "eviction-controller-test")
 	require.NoError(t, response)
 }
 
@@ -240,7 +240,7 @@ func TestPodEviction_MaxUnavailableEq0_ViaAllowPodEviction(t *testing.T) {
 	sts := newEvictionControllerSts(statefulSetZoneA)
 	pod := newPod(testPodZoneA0, sts)
 	testCtx := newTestContextWithoutAdmissionReview(t, newPDBMaxUnavailable(0, rolloutGroupValue), pod, sts)
-	testCtx.assertDenyResponseViaAllowPodEviction(t, testPodZoneA0, "max unavailable = 0")
+	testCtx.assertDenyResponseViaMarkPodAsDeleted(t, testPodZoneA0, "max unavailable = 0")
 	testCtx.logs.assertHasLog(t, []string{`reason="max unavailable = 0"`})
 }
 
@@ -267,9 +267,9 @@ func TestPodEviction_Allowed_ViaAllowPodEviction(t *testing.T) {
 
 	require.False(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
 	// note that we do not stop the controller after this test
-	testCtx.assertAllowResponseViaAllowPodEviction_noStop(t, zoneAPod0.Name)
+	testCtx.assertAllowResponseViaMarkPodAsDeleted_noStop(t, zoneAPod0.Name)
 	require.True(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
-	testCtx.assertDenyResponseViaAllowPodEviction(t, zoneAPod2.Name, "1 pod not ready in ingester-zone-a")
+	testCtx.assertDenyResponseViaMarkPodAsDeleted(t, zoneAPod2.Name, "1 pod not ready in ingester-zone-a")
 }
 
 func TestPodEviction_MaxUnavailablePercentageEq0(t *testing.T) {
