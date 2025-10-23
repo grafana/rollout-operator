@@ -133,9 +133,6 @@
         policyRule.withApiGroups('') +
         policyRule.withResources(['configmaps']) +
         policyRule.withVerbs(['get', 'update', 'create']),
-        policyRule.withApiGroups($.zpdb_template.spec.group) +
-        policyRule.withResources([$.zpdb_template.spec.names.plural]) +
-        policyRule.withVerbs(['get', 'list', 'watch']),
       ] +
       (
         if $._config.rollout_operator_replica_template_access_enabled then [
@@ -143,7 +140,13 @@
           policyRule.withResources(['%s/scale' % $.replica_template.spec.names.plural, '%s/status' % $.replica_template.spec.names.plural]) +
           policyRule.withVerbs(['get', 'patch']),
         ] else []
-      )
+      ) +
+      [
+        policyRule.withApiGroups($.zpdb_template.spec.group) +
+        policyRule.withResources([$.zpdb_template.spec.names.plural]) +
+        policyRule.withVerbs(['get', 'list', 'watch']),
+      ]
+
     ),
 
   rollout_operator_rolebinding: if !$._config.rollout_operator_enabled then null else

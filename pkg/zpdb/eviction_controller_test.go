@@ -99,9 +99,7 @@ func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawCon
 	}
 
 	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, testCtx.logs)
-	require.False(t, testCtx.controller.Running())
 	require.NoError(t, testCtx.controller.Start())
-	require.True(t, testCtx.controller.Running())
 
 	if pdbRawConfig != nil {
 		_, _, _ = testCtx.controller.cfgObserver.pdbCache.addOrUpdateRaw(pdbRawConfig)
@@ -117,7 +115,6 @@ func newTestContextWithoutAdmissionReview(t *testing.T, pdbRawConfig *unstructur
 
 	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, testCtx.logs)
 	require.NoError(t, testCtx.controller.Start())
-	require.True(t, testCtx.controller.Running())
 
 	if pdbRawConfig != nil {
 		_, _, _ = testCtx.controller.cfgObserver.pdbCache.addOrUpdateRaw(pdbRawConfig)
@@ -136,14 +133,12 @@ func (c *testContext) assertDenyResponse(t *testing.T, reason string, statusCode
 	require.Equal(t, reason, response.Result.Message)
 	require.Equal(t, int32(statusCode), response.Result.Code)
 	c.stop()
-	require.False(t, c.controller.Running())
 }
 
 func (c *testContext) assertDenyResponseViaMarkPodAsDeleted(t *testing.T, pod string, reason string) {
 	response := c.controller.MarkPodAsDeleted(c.ctx, testNamespace, pod, "eviction-controller-test")
 	require.ErrorContains(t, response, reason)
 	c.stop()
-	require.False(t, c.controller.Running())
 }
 
 func (c *testContext) assertAllowResponseViaMarkPodAsDeleted_noStop(t *testing.T, pod string) {
@@ -156,7 +151,6 @@ func (c *testContext) assertAllowResponse(t *testing.T) {
 	require.NotNil(t, response.UID)
 	require.True(t, response.Allowed)
 	c.stop()
-	require.False(t, c.controller.Running())
 }
 
 func (c *testContext) assertAllowResponseWithWarning(t *testing.T, warning string) {
@@ -165,7 +159,6 @@ func (c *testContext) assertAllowResponseWithWarning(t *testing.T, warning strin
 	require.True(t, response.Allowed)
 	require.Equal(t, warning, response.Warnings[0])
 	c.stop()
-	require.False(t, c.controller.Running())
 }
 
 func TestPodEviction_NotCreateEvent(t *testing.T) {

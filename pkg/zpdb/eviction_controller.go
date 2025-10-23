@@ -15,7 +15,6 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
@@ -29,6 +28,12 @@ const (
 	logAllowMesg = "pod eviction allowed"
 )
 
+type IEvictionController interface {
+	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error
+}
+
+var _ IEvictionController = (*EvictionController)(nil)
+
 type EvictionController struct {
 	// a lock used to control finding a specific named lock
 	lock sync.RWMutex
@@ -41,7 +46,6 @@ type EvictionController struct {
 
 	cfgObserver *configObserver
 	podObserver *podObserver
-	running     bool
 
 	resolver spanlogger.TenantResolver
 }
@@ -65,14 +69,6 @@ func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynami
 	}
 }
 
-// AddOrUpdateConfig attempts to parse and apply the given unstructured object as a zpdb Config
-// An error is returned if the given object can not be parsed into a valid config.
-// The bool response indicates if the config was accepted into the configCache, with the int64 reflecting the generation of the config in the configCache.
-// It will return false if this given object is an older generation of what is already in the configCache.
-func (c *EvictionController) AddOrUpdateConfig(pdbRawConfig *unstructured.Unstructured) (bool, int64, error) {
-	return c.cfgObserver.pdbCache.addOrUpdateRaw(pdbRawConfig)
-}
-
 func (c *EvictionController) Start() error {
 	if err := c.cfgObserver.start(); err != nil {
 		return errors.Wrap(err, "failed to start zpdb config observer")
@@ -80,17 +76,10 @@ func (c *EvictionController) Start() error {
 	if err := c.podObserver.start(); err != nil {
 		return errors.Wrap(err, "failed to start zpdb pod observer")
 	}
-	c.running = true
 	return nil
 }
 
-// Running returns true if this controller has been successfully started and not yet stopped
-func (c *EvictionController) Running() bool {
-	return c.running
-}
-
 func (c *EvictionController) Stop() {
-	c.running = false
 	c.cfgObserver.stop()
 	c.podObserver.stop()
 }
@@ -122,7 +111,7 @@ func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace str
 	request := v1.AdmissionReview{
 		Request: &v1.AdmissionRequest{
 			// not a real uid. The eviction_controller only uses this for logging purposes
-			UID: types.UID(fmt.Sprintf("request-pod-eviction-%s", podname)),
+			UID: types.UID(fmt.Sprintf("internal-request-pod-eviction-%s-for-rolling-update", podName)),
 			Kind: metav1.GroupVersionKind{
 				Group:   "policy",
 				Version: "v1",
@@ -133,7 +122,7 @@ func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace str
 				Version:  "v1",
 				Resource: "evictions",
 			},
-			Name:      podname,
+			Name:      podName,
 			Namespace: namespace,
 			Operation: v1.Create,
 			UserInfo: authenticationv1.UserInfo{
@@ -148,7 +137,7 @@ func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace str
 						"name": "%s",
 						"namespace": "%s"
 					}
-				}`, podname, namespace)),
+				}`, podName, namespace)),
 			},
 		},
 	}

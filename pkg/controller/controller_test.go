@@ -24,7 +24,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta/testrestmapper"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
@@ -62,6 +61,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		expectedPatchedSets               map[string][]string
 		expectedPatchedResources          map[string][]string
 		expectedErr                       string
+		zpdbErrors                        []error
 	}{
 		"should return error if some StatefulSet don't have OnDelete update strategy": {
 			statefulSets: []runtime.Object{
@@ -148,6 +148,38 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
 			},
 			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
+		},
+		"should delete pods that needs to be updated - zpdb allows first delete but denies the second": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a"),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-b-0"},
+			zpdbErrors:          []error{nil, errors.New("zpdb denies eviction request")},
+		},
+		"should delete pods that needs to be updated - zpdb denies first delete but allows the second": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a"),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-b-1"},
+			zpdbErrors:          []error{errors.New("zpdb denies eviction request")},
 		},
 		"should default max unavailable to 1 if set to an invalid value": {
 			statefulSets: []runtime.Object{
@@ -620,18 +652,15 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
 
-			zpdb := zpdb.NewEvictionController(kubeClient, createFakeDynamicClientForZpdb(), testNamespace, log.NewNopLogger())
-			require.NoError(t, zpdb.Start())
-			defer zpdb.Stop()
-			_, _, err := zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
-			require.NoError(t, err)
+			// Pass in a slice of errors. Each eviction request takes and removes from the head and uses this as the eviction response. Once exhausted no evictions will return an error.
+			zpdb := &mockEvictionController{nextErrorsIfAny: testData.zpdbErrors}
 
 			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), zpdb)
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
 			// Run a reconcile.
-			err = c.reconcile(context.Background())
+			err := c.reconcile(context.Background())
 			if testData.expectedErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), testData.expectedErr)
@@ -933,15 +962,9 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 				defaultResponse: internalErrorResponse,
 			}
 
-			zpdb := zpdb.NewEvictionController(kubeClient, createFakeDynamicClientForZpdb(), testNamespace, log.NewNopLogger())
-			require.NoError(t, zpdb.Start())
-			defer zpdb.Stop()
-			_, _, err := zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
-			require.NoError(t, err)
-
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, httpClient, 5*time.Second, reg, log.NewNopLogger(), zpdb)
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, httpClient, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -953,25 +976,6 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			assert.ElementsMatch(t, testData.expectedHttpRequests, httpClient.requests())
 		})
 	}
-}
-
-func createFakeDynamicClientForZpdb() *fakedynamic.FakeDynamicClient {
-	// The zpdb config observer needs this configuration to list the custom kinds.
-	// If we attempt to merge the createFakeDynamicClient() functionality into the same client requests will fail.
-	// The incompatibility arises that the zpdb needs this static custom list seeded at creation, but if this is
-	// done on the createFakeDynamicClient() dynamic client, having this list will break the calls to patch and the
-	// patch reactor is never reached.
-	// Having 2 different dynamic clients does not affect the integrity of these tests.
-	return fakedynamic.NewSimpleDynamicClientWithCustomListKinds(
-		runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{
-			{
-				Group:    zpdb.ZoneAwarePodDisruptionBudgetsSpecGroup,
-				Version:  zpdb.ZoneAwarePodDisruptionBudgetsVersion,
-				Resource: zpdb.ZoneAwarePodDisruptionBudgetsNamePlural,
-			}: zpdb.ZoneAwarePodDisruptionBudgetName + "List",
-		},
-	)
 }
 
 func createFakeDynamicClient() (*fakedynamic.FakeDynamicClient, map[string][]string) {
@@ -1060,15 +1064,9 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 
 	kubeClient := fake.NewSimpleClientset(append(append([]runtime.Object{}, ingesters...), storeGateways...)...)
 
-	zpdb := zpdb.NewEvictionController(kubeClient, createFakeDynamicClientForZpdb(), testNamespace, log.NewNopLogger())
-	require.NoError(t, zpdb.Start())
-	defer zpdb.Stop()
-	_, _, err := zpdb.AddOrUpdateConfig(newPDBMaxUnavailable(1, "ingester"))
-	require.NoError(t, err)
-
 	// Create the controller and start informers.
 	reg := prometheus.NewPedanticRegistry()
-	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), zpdb)
+	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
 	require.NoError(t, c.Init())
 	defer c.Stop()
 
@@ -1294,25 +1292,17 @@ func (f *fakeHttpClient) requests() []string {
 	return f.recordedRequests
 }
 
-// newPDBMaxUnavailable returns a raw custom resource configuration which can be used with the Config
-// This configuration has maxUnavailable=X and has a name of the given rollout-group
-func newPDBMaxUnavailable(maxUnavailable int, rolloutGroup string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": fmt.Sprintf("%s/%s", zpdb.ZoneAwarePodDisruptionBudgetsSpecGroup, zpdb.ZoneAwarePodDisruptionBudgetsVersion),
-			"kind":       zpdb.ZoneAwarePodDisruptionBudgetName,
-			"metadata": map[string]interface{}{
-				"name":      rolloutGroup + "-rollout",
-				"namespace": testNamespace,
-			},
-			"spec": map[string]interface{}{
-				zpdb.FieldMaxUnavailable: int64(maxUnavailable),
-				zpdb.FieldSelector: map[string]interface{}{
-					zpdb.FieldMatchLabels: map[string]interface{}{
-						config.RolloutGroupLabelKey: rolloutGroup,
-					},
-				},
-			},
-		},
+var _ zpdb.IEvictionController = (*mockEvictionController)(nil)
+
+type mockEvictionController struct {
+	nextErrorsIfAny []error
+}
+
+func (m *mockEvictionController) MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error {
+	var response error
+	if len(m.nextErrorsIfAny) > 0 {
+		response = m.nextErrorsIfAny[0]
+		m.nextErrorsIfAny = m.nextErrorsIfAny[1:]
 	}
+	return response
 }
