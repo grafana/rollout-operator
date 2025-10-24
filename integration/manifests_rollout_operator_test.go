@@ -85,8 +85,9 @@ func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *k
 	_, err = api.RbacV1().RoleBindings(corev1.NamespaceDefault).Create(ctx, roleBinding, metav1.CreateOptions{})
 	require.NoError(t, err)
 
+	_ = createZoneAwarePodDistruptionBudgetCustomResourceDefinition(t, extApi)
+
 	if webhook {
-		_ = createZoneAwarePodDistruptionBudgetCustomResourceDefinition(t, extApi)
 		_ = createReplicaTemplateCustomResourceDefinition(t, extApi)
 
 		operatorRole := loadFromDisk[rbacv1.Role](t, directory+yamlRoleSecret, &rbacv1.Role{})

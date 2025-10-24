@@ -60,6 +60,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		expectedPatchedSets               map[string][]string
 		expectedPatchedResources          map[string][]string
 		expectedErr                       string
+		zpdbErrors                        []error
 	}{
 		"should return error if some StatefulSet don't have OnDelete update strategy": {
 			statefulSets: []runtime.Object{
@@ -146,6 +147,38 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
 			},
 			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
+		},
+		"should delete pods that needs to be updated - zpdb allows first delete but denies the second": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a"),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-b-0"},
+			zpdbErrors:          []error{nil, errors.New("zpdb denies eviction request")},
+		},
+		"should delete pods that needs to be updated - zpdb denies first delete but allows the second": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a"),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-b-1"},
+			zpdbErrors:          []error{errors.New("zpdb denies eviction request")},
 		},
 		"should default max unavailable to 1 if set to an invalid value": {
 			statefulSets: []runtime.Object{
@@ -617,7 +650,11 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger())
+
+			// Pass in a slice of errors. Each eviction request takes and removes from the head and uses this as the eviction response. Once exhausted no evictions will return an error.
+			zpdb := &mockEvictionController{nextErrorsIfAny: testData.zpdbErrors}
+
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), zpdb)
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -926,7 +963,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, httpClient, 5*time.Second, reg, log.NewNopLogger())
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, httpClient, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -942,7 +979,6 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 func createFakeDynamicClient() (*fakedynamic.FakeDynamicClient, map[string][]string) {
 	dynamicClient := &fakedynamic.FakeDynamicClient{}
-
 	patchedStatuses := map[string][]string{}
 	dynamicClient.AddReactor("patch", "*", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
 		patchAction := action.(ktesting.PatchAction)
@@ -1029,7 +1065,7 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 
 	// Create the controller and start informers.
 	reg := prometheus.NewPedanticRegistry()
-	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger())
+	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
 	require.NoError(t, c.Init())
 	defer c.Stop()
 
@@ -1253,4 +1289,17 @@ func (f *fakeHttpClient) requests() []string {
 	defer f.recordedRequestsMu.Unlock()
 
 	return f.recordedRequests
+}
+
+type mockEvictionController struct {
+	nextErrorsIfAny []error
+}
+
+func (m *mockEvictionController) MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error {
+	var response error
+	if len(m.nextErrorsIfAny) > 0 {
+		response = m.nextErrorsIfAny[0]
+		m.nextErrorsIfAny = m.nextErrorsIfAny[1:]
+	}
+	return response
 }

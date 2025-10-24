@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Check zone-aware PodDisruptionBudget compliance before deleting Pods during rolling updates. #324
+
 ## v0.31.1
 
 * [ENHANCEMENT] Updated dependencies, including: #314, #315

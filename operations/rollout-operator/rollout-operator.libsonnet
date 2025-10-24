@@ -61,7 +61,6 @@
   assert !$._config.ignore_rollout_operator_prepare_downscale_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_prepare_downscale_webhook_failures requires rollout_operator_webhooks_enabled=true',
   assert !$._config.ignore_rollout_operator_zpdb_eviction_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_zpdb_eviction_webhook_failures requires rollout_operator_webhooks_enabled=true',
   assert !$._config.ignore_rollout_operator_zpdb_validation_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_zpdb_validation_webhook_failures requires rollout_operator_webhooks_enabled=true',
-  assert !$._config.zpdb_custom_resource_definition_enabled || $._config.rollout_operator_webhooks_enabled : 'zpdb_custom_resource_definition_enabled requires rollout_operator_webhooks_enabled=true',
   assert !$._config.replica_template_custom_resource_definition_enabled || $._config.rollout_operator_webhooks_enabled : 'replica_template_custom_resource_definition_enabled requires rollout_operator_webhooks_enabled=true',
 
   local enableWebhooks = $._config.rollout_operator_replica_template_access_enabled || $._config.rollout_operator_webhooks_enabled,
@@ -141,13 +140,13 @@
           policyRule.withResources(['%s/scale' % $.replica_template.spec.names.plural, '%s/status' % $.replica_template.spec.names.plural]) +
           policyRule.withVerbs(['get', 'patch']),
         ] else []
-      ) + (
-        if enableWebhooks then [
-          policyRule.withApiGroups($.zpdb_template.spec.group) +
-          policyRule.withResources([$.zpdb_template.spec.names.plural]) +
-          policyRule.withVerbs(['get', 'list', 'watch']),
-        ] else []
-      )
+      ) +
+      [
+        policyRule.withApiGroups($.zpdb_template.spec.group) +
+        policyRule.withResources([$.zpdb_template.spec.names.plural]) +
+        policyRule.withVerbs(['get', 'list', 'watch']),
+      ]
+
     ),
 
   rollout_operator_rolebinding: if !$._config.rollout_operator_enabled then null else
