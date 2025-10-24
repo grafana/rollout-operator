@@ -33,7 +33,6 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
-	zpdb "github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const (
@@ -1291,8 +1290,6 @@ func (f *fakeHttpClient) requests() []string {
 
 	return f.recordedRequests
 }
-
-var _ zpdb.IEvictionController = (*mockEvictionController)(nil)
 
 type mockEvictionController struct {
 	nextErrorsIfAny []error

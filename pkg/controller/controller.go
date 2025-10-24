@@ -32,7 +32,6 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
-	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const (
@@ -45,6 +44,10 @@ var tracer = otel.Tracer("pkg/controller")
 
 type httpClient interface {
 	Do(req *http.Request) (*http.Response, error)
+}
+
+type ZPDBEvictionController interface {
+	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error
 }
 
 type RolloutController struct {
@@ -64,7 +67,7 @@ type RolloutController struct {
 	httpClient           httpClient
 	logger               log.Logger
 
-	zpdbController zpdb.IEvictionController
+	zpdbController ZPDBEvictionController
 
 	// This bool is true if we should trigger a reconcile.
 	shouldReconcile atomic.Bool
@@ -83,7 +86,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController zpdb.IEvictionController) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController ZPDBEvictionController) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones

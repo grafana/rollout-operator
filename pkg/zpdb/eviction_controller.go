@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/util"
 )
 
@@ -28,11 +29,7 @@ const (
 	logAllowMesg = "pod eviction allowed"
 )
 
-type IEvictionController interface {
-	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error
-}
-
-var _ IEvictionController = (*EvictionController)(nil)
+var _ controller.ZPDBEvictionController = (*EvictionController)(nil)
 
 type EvictionController struct {
 	// a lock used to control finding a specific named lock
