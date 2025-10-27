@@ -46,6 +46,10 @@ type httpClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+type ZPDBEvictionController interface {
+	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error
+}
+
 type RolloutController struct {
 	kubeClient           kubernetes.Interface
 	clusterDomain        string
@@ -62,6 +66,8 @@ type RolloutController struct {
 	dynamicClient        dynamic.Interface
 	httpClient           httpClient
 	logger               log.Logger
+
+	zpdbController ZPDBEvictionController
 
 	// This bool is true if we should trigger a reconcile.
 	shouldReconcile atomic.Bool
@@ -80,7 +86,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController ZPDBEvictionController) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -110,6 +116,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		scaleClient:          scaleClient,
 		dynamicClient:        dynamic,
 		httpClient:           client,
+		zpdbController:       zpdbController,
 		logger:               logger,
 		stopCh:               make(chan struct{}),
 		discoveredGroups:     map[string]struct{}{},
@@ -575,7 +582,24 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 				continue
 			}
 
-			level.Info(c.logger).Log("msg", fmt.Sprintf("terminating pod %s", pod.Name))
+			// Use the ZPDB to determine if this pod delete is allowed.
+			// The ZPDB serializes requests from this controller and from any incoming voluntary evictions.
+			// For each request, a full set of tests is performed to confirm the state of all pods in the ZPDB scope.
+			// This ensures that if any voluntary evictions have been allowed since this reconcile loop commenced that
+			// the latest information is used to determine the zone/partition disruption level.
+			// If this request returns without error, the pod will be placed into the ZPDB pod eviction cache and will
+			// be considered as not ready until it either restarts or is expired from the cache.
+			err := c.zpdbController.MarkPodAsDeleted(ctx, pod.Namespace, pod.Name, "rollout-controller")
+			if err != nil {
+				// Skip this pod. The reconcile loop regularly runs and this pod will have an opportunity to be re-tried.
+				// Rather than returning false here and abandoning the rest of the updates until the next reconcile,
+				// we allow this update loop to continue. For configurations which have a partition aware ZPDB it is valid
+				// to have multiple disruptions as long as there is at least one healthy pod per partition.
+				level.Debug(c.logger).Log("msg", "zpdb denied pod deletion", "pod", pod.Name, "reason", err)
+				continue
+			}
+
+			level.Info(c.logger).Log("msg", "terminating pod (does not violate any relevant ZPDBs)", "pod", pod.Name)
 			if err := c.kubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
 				return false, errors.Wrapf(err, "failed to delete pod %s", pod.Name)
 			}

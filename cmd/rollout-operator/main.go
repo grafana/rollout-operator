@@ -215,13 +215,17 @@ func main() {
 	// watches for validating webhooks being added - this is only started if the TLS server is started
 	webhookObserver := tlscert.NewWebhookObserver(kubeClient, cfg.kubeNamespace, logger)
 
-	// controller for pod eviction - this is only started if the TLS server is started
+	// Controller for pod eviction.
+	// If the TLS server is started below (webhooks registered), then this controller will handle the validating webhook requests
+	// for pod evictions and zpdb configuration changes. If the webhooks are not enabled, this controller is still started
+	// and will be used by the main controller to assist in validating pod deletion requests.
 	evictionController := zpdb.NewEvictionController(kubeClient, dynamicClient, cfg.kubeNamespace, logger)
+	check(evictionController.Start())
 
 	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, evictionController, webhookObserver)
 
 	// Init the controller
-	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger)
+	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger, evictionController)
 	check(errors.Wrap(c.Init(), "failed to init controller"))
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).
@@ -293,9 +297,6 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 		// Start monitoring for validating webhook configurations and patch if required
 		check(webhookObserver.Init(webHookListener))
 	}
-
-	// Start monitoring for zpdb configurations and pods
-	check(evictionController.Start())
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
 		return admission.PrepareDownscale(ctx, rt, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName, cfg.kubeClusterDomain)
