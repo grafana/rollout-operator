@@ -2,6 +2,9 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #329
+  * `github.com/prometheus/common` from `v0.67.1` to `v0.67.2`
+
 ## v0.32.0
 
 * [ENHANCEMENT] Check zone-aware PodDisruptionBudget compliance before deleting Pods during rolling updates. #324
