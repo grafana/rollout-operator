@@ -4,6 +4,8 @@
 
 * [ENHANCEMENT] Updated dependencies, including: #329
   * `github.com/prometheus/common` from `v0.67.1` to `v0.67.2`
+  * `golang.org/x/sync` from `v0.17.0` to `v0.18.0`
+  * `sigs.k8s.io/controller-runtime` from `v0.22.3` to `v0.22.4`
 
 ## v0.32.0
 
