@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+## v0.28.1
+
+* [ENHANCEMENT] No code changes, building a new image with Go `1.24.10`
+
 ## v0.28.0
 
 * [ENHANCEMENT] Updated dependencies, including: #227 #231
