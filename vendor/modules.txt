@@ -256,7 +256,7 @@ github.com/google/uuid
 # github.com/gorilla/mux v1.8.1
 ## explicit; go 1.20
 github.com/gorilla/mux
-# github.com/grafana/dskit v0.0.0-20251031165806-a6f15387939b
+# github.com/grafana/dskit v0.0.0-20251110073413-c0cc1b939a4a
 ## explicit; go 1.24.0
 github.com/grafana/dskit/clusterutil
 github.com/grafana/dskit/flagext
@@ -762,7 +762,7 @@ golang.org/x/net/trace
 ## explicit; go 1.24.0
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sync v0.17.0
+# golang.org/x/sync v0.18.0
 ## explicit; go 1.24.0
 golang.org/x/sync/errgroup
 # golang.org/x/sys v0.37.0
@@ -1416,7 +1416,7 @@ k8s.io/utils/net
 k8s.io/utils/ptr
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# sigs.k8s.io/controller-runtime v0.22.3
+# sigs.k8s.io/controller-runtime v0.22.4
 ## explicit; go 1.24.0
 sigs.k8s.io/controller-runtime/pkg/client/apiutil
 # sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8
