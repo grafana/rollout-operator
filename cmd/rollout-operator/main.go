@@ -145,7 +145,7 @@ func main() {
 	reg := prometheus.NewRegistry()
 	metrics := newMetrics(reg)
 	zpdbMetrics := zpdb.NewMetrics(reg)
-	
+
 	ready := atomic.NewBool(false)
 	restart := make(chan string)
 
