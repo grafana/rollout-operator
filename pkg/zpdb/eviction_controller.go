@@ -40,14 +40,15 @@ type EvictionController struct {
 
 	cfgObserver *configObserver
 	podObserver *podObserver
+	metrics     *Metrics
 
 	resolver spanlogger.TenantResolver
 }
 
-func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, logger log.Logger) *EvictionController {
+func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, logger log.Logger, metrics *Metrics) *EvictionController {
 
 	// watches for ZoneAwarePodDisruptionBudget configurations being applied and maintains a zpdb configuration configCache
-	cfgObserver := newConfigObserver(dynamicClient, namespace, logger)
+	cfgObserver := newConfigObserver(dynamicClient, namespace, logger, metrics)
 
 	// watches for Pod changes which are reflected into the pod eviction configCache
 	podObserver := newPodObserver(kubeClient, namespace, logger)
@@ -58,6 +59,7 @@ func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynami
 		cfgObserver: cfgObserver,
 		podObserver: podObserver,
 		kubeClient:  kubeClient,
+		metrics:     metrics,
 		logger:      logger,
 		resolver:    util.NoTenantResolver{},
 	}
@@ -147,6 +149,9 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	logger, _ := spanlogger.New(ctx, c.logger, "admission.PodEviction()", c.resolver)
 	defer logger.Finish()
 
+	c.metrics.InFlightRequests.WithLabelValues(ar.Request.Name).Inc()
+	defer c.metrics.InFlightRequests.WithLabelValues(ar.Request.Name).Dec()
+
 	request := admissionReviewRequest{req: ar, log: logger, client: k8sClient{ctx: ctx, kubeClient: c.kubeClient}}
 
 	// set up key=value pairs we include on all logs within this context
@@ -157,6 +162,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	// validate that this is a valid pod eviction create request
 	if err := request.validate(); err != nil {
 		level.Warn(request.log).Log("msg", logDenyMesg, "reason", "not a valid create pod eviction request", "err", err)
+		c.metrics.EvictionRequests.WithLabelValues("invalid-request", ar.Request.Name, fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusBadRequest)
 	}
 
@@ -165,6 +171,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	var err error
 	if pod, err = request.client.podByName(request.req.Request.Namespace, request.req.Request.Name); err != nil {
 		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find pod by name", "err", err)
+		c.metrics.EvictionRequests.WithLabelValues("pod-not-found", ar.Request.Name, fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusBadRequest)
 	}
 
@@ -180,6 +187,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	// evicting a terminal pod should result in direct deletion of pod as it already caused disruption by the time we are evicting.
 	if request.canIgnorePDBForPod(pod) {
 		level.Info(request.log).Log("msg", logAllowMesg, "reason", "pod is not ready")
+		c.metrics.EvictionRequests.WithLabelValues("pod-not-ready", ar.Request.Name, fmt.Sprintf("%d", http.StatusOK)).Inc()
 		return request.allowWithWarning("pod is not ready")
 	}
 
@@ -188,9 +196,11 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	pdbConfig, err := c.cfgObserver.pdbCache.find(pod)
 	if err != nil {
 		level.Error(request.log).Log("msg", logDenyMesg, "err", err)
+		c.metrics.EvictionRequests.WithLabelValues("cfg-not-found", ar.Request.Name, fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusBadRequest)
 	} else if pdbConfig == nil {
 		level.Debug(request.log).Log("msg", logAllowMesg, "reason", "pod is not within a zpdb scope")
+		c.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", ar.Request.Name, fmt.Sprintf("%d", http.StatusOK)).Inc()
 		return request.allow()
 	}
 
@@ -198,6 +208,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	var sts *appsv1.StatefulSet
 	if sts, err = request.client.owner(pod); err != nil {
 		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find pod owner", "err", err)
+		c.metrics.EvictionRequests.WithLabelValues("sts-no-found", ar.Request.Name, fmt.Sprintf("%d", http.StatusInternalServerError)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusInternalServerError)
 	}
 
@@ -212,6 +223,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	maxUnavailable := pdbConfig.maxUnavailablePods(sts)
 	if maxUnavailable == 0 {
 		level.Info(request.log).Log("msg", logDenyMesg, "reason", "max unavailable = 0")
+		c.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", ar.Request.Name, fmt.Sprintf("%d", http.StatusForbidden)).Inc()
 		return request.denyWithReason("max unavailable = 0", http.StatusForbidden)
 	}
 
@@ -225,7 +237,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		} else {
 			level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find related stateful sets - a minimum of 2 StatefulSets is required")
 		}
-
+		c.metrics.EvictionRequests.WithLabelValues("min-sts-not-found", ar.Request.Name, fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
 		return request.denyWithReason("minimum number of StatefulSets not found", http.StatusBadRequest)
 	}
 
@@ -233,6 +245,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	partition, err := pdbConfig.podPartition(pod)
 	if err != nil {
 		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to determine partition for pod", "err", err)
+		c.metrics.EvictionRequests.WithLabelValues("partition-not-identified", ar.Request.Name, fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusBadRequest)
 	}
 
@@ -263,12 +276,14 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		result, err := request.client.podsNotRunningAndReady(&otherSts, pod, pdb.considerPod(), c.podObserver.podEvictCache)
 		if err != nil {
 			level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to determine pod status in related StatefulSet", "sts", otherSts.Name)
+			c.metrics.EvictionRequests.WithLabelValues("err: sts-pod-status-not-determined", ar.Request.Name, fmt.Sprintf("%d", http.StatusInternalServerError)).Inc()
 			return request.denyWithReason("unable to determine pod status in related StatefulSet", http.StatusInternalServerError)
 		}
 
 		if err = pdb.accumulateResult(&otherSts, result); err != nil {
 			// opportunity to fail fast
 			level.Info(request.log).Log("msg", logDenyMesg, "err", err, "sts", otherSts.Name)
+			c.metrics.EvictionRequests.WithLabelValues("denied", ar.Request.Name, fmt.Sprintf("%d", http.StatusTooManyRequests)).Inc()
 			return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
 		}
 
@@ -276,6 +291,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 
 	if err = pdb.validate(maxUnavailable); err != nil {
 		level.Info(request.log).Log("msg", logDenyMesg, "reason", "zpdb exceeded", "err", err)
+		c.metrics.EvictionRequests.WithLabelValues("denied", ar.Request.Name, fmt.Sprintf("%d", http.StatusTooManyRequests)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
 	}
 
@@ -284,5 +300,6 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	c.podObserver.podEvictCache.recordEviction(pod)
 
 	level.Info(request.log).Log("msg", logAllowMesg, "reason", pdb.successMessage())
+	c.metrics.EvictionRequests.WithLabelValues("allowed", ar.Request.Name, fmt.Sprintf("%d", http.StatusOK)).Inc()
 	return request.allow()
 }

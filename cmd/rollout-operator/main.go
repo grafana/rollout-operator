@@ -37,7 +37,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
-	"github.com/grafana/rollout-operator/pkg/zpdb"
+	zpdb "github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
@@ -144,6 +144,8 @@ func main() {
 
 	reg := prometheus.NewRegistry()
 	metrics := newMetrics(reg)
+	zpdbMetrics := zpdb.NewMetrics(reg)
+	
 	ready := atomic.NewBool(false)
 	restart := make(chan string)
 
@@ -219,7 +221,7 @@ func main() {
 	// If the TLS server is started below (webhooks registered), then this controller will handle the validating webhook requests
 	// for pod evictions and zpdb configuration changes. If the webhooks are not enabled, this controller is still started
 	// and will be used by the main controller to assist in validating pod deletion requests.
-	evictionController := zpdb.NewEvictionController(kubeClient, dynamicClient, cfg.kubeNamespace, logger)
+	evictionController := zpdb.NewEvictionController(kubeClient, dynamicClient, cfg.kubeNamespace, logger, zpdbMetrics)
 	check(evictionController.Start())
 
 	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, evictionController, webhookObserver)

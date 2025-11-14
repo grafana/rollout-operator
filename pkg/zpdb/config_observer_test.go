@@ -3,6 +3,8 @@ package zpdb
 import (
 	"context"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"testing"
 	"time"
 
@@ -37,7 +39,9 @@ func newFakeDynamicClient() *fake.FakeDynamicClient {
 
 func newConfigObserverTestCase() (*fake.FakeDynamicClient, *configObserver) {
 	dynamicClient := newFakeDynamicClient()
-	observer := newConfigObserver(dynamicClient, testNamespace, log.NewNopLogger())
+	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
+
+	observer := newConfigObserver(dynamicClient, testNamespace, log.NewNopLogger(), zpdbMetrics)
 	return dynamicClient, observer
 }
 
@@ -89,12 +93,18 @@ func TestConfigObserver_InvalidObject(t *testing.T) {
 	_, observer := newConfigObserverTestCase()
 	require.NoError(t, observer.start())
 	defer observer.stop()
+	require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("not-unstructured", "unknown")))
 
 	invalidObj := "not-a-config"
 
 	observer.onPdbAdded(invalidObj)
+	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("not-unstructured", "unknown")))
+
 	observer.onPdbUpdated(invalidObj, invalidObj)
+	require.Equal(t, float64(2), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("not-unstructured", "unknown")))
+
 	observer.onPdbDeleted(invalidObj)
+	require.Equal(t, float64(3), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("not-unstructured", "unknown")))
 }
 
 // TestObserver_ZPDBEvents_AddValidZPDB - tests the zpdb configCache being updated on observed config changes
@@ -104,6 +114,11 @@ func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	defer observer.stop()
 
 	require.Equal(t, observer.pdbCache.size(), 0)
+	require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("invalid", "test-zpdb")))
+	require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("updated", "test-zpdb")))
+	require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("deleted", "test-zpdb")))
+	require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("ignored", "test-zpdb")))
+	require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("delete-ignored", "test-zpdb")))
 
 	gvr := schema.GroupVersionResource{
 		Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
@@ -122,6 +137,9 @@ func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	require.Equal(t, 1, observer.pdbCache.size())
 	require.Contains(t, observer.pdbCache.entries, "test-zpdb")
 	require.Equal(t, int64(1), observer.pdbCache.entries["test-zpdb"].generation)
+	require.Eventually(t, func() bool {
+		return float64(1) == testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("updated", "test-zpdb"))
+	}, time.Second*1, time.Millisecond*10)
 
 	// test triggering a new zpdb being updated
 	updatedPdb := newPDB("test-zpdb")
@@ -136,6 +154,7 @@ func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "zpdb config configCache has not been updated")
 	require.Equal(t, 1, observer.pdbCache.size())
 	require.Equal(t, int64(3), observer.pdbCache.entries["test-zpdb"].generation)
+	require.Equal(t, float64(2), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("updated", "test-zpdb")))
 
 	// test triggering a stale zpdb update coming in
 	stalePdb := newPDB("test-zpdb")
@@ -146,12 +165,23 @@ func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 
 	require.Eventually(t, func() bool { return observer.pdbCache.size() == 1 }, time.Second*1, time.Millisecond*10)
 	require.Equal(t, int64(3), observer.pdbCache.entries["test-zpdb"].generation)
+	require.Eventually(t, func() bool {
+		return float64(1) == testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("ignored", "test-zpdb"))
+	}, time.Second*1, time.Millisecond*10)
 
 	// test stale delete is ignored - calling handler direct as dynamic client delete is limited
 	observer.onPdbDeleted(stalePdb)
-	require.Equal(t, observer.pdbCache.size(), 1)
+	require.Equal(t, 1, observer.pdbCache.size())
+	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("delete-ignored", "test-zpdb")))
 
 	stalePdb.SetGeneration(int64(5))
 	observer.onPdbDeleted(stalePdb)
-	require.Equal(t, observer.pdbCache.size(), 0)
+	require.Equal(t, 0, observer.pdbCache.size())
+	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("deleted", "test-zpdb")))
+
+	require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("invalid", "test-zpdb")))
+	require.Equal(t, float64(2), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("updated", "test-zpdb")))
+	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("deleted", "test-zpdb")))
+	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("ignored", "test-zpdb")))
+	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("delete-ignored", "test-zpdb")))
 }

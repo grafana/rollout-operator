@@ -6,6 +6,7 @@
   * `github.com/prometheus/common` from `v0.67.1` to `v0.67.2`
   * `golang.org/x/sync` from `v0.17.0` to `v0.18.0`
   * `sigs.k8s.io/controller-runtime` from `v0.22.3` to `v0.22.4`
+* [ENHANCEMENT] Added prometheus metrics for `rollout_operator_zpdb_configurations_observed_total`, `rollout_operator_zpdb_eviction_requests_total` and `rollout_operator_zpdb_inflight_eviction_requests_total`
 
 ## v0.32.0
 
