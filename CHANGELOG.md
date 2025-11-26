@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Dashboard: Support native histograms. #338 
 * [ENHANCEMENT] Updated dependencies, including: #329 #335
   * `github.com/prometheus/common` from `v0.67.1` to `v0.67.3`
   * `golang.org/x/sync` from `v0.17.0` to `v0.18.0`

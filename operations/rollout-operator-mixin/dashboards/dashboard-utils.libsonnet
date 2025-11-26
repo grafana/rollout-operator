@@ -71,7 +71,8 @@ local utils = import 'mixin-utils/utils.libsonnet';
 
         d
         .addMultiTemplate('cluster', $._config.dashboard_variables.cluster_query, '%s' % $._config.per_cluster_label, sort=sortAscending)
-        .addMultiTemplate('namespace', $._config.dashboard_variables.namespace_query, '%s' % $._config.per_namespace_label, sort=sortAscending, includeAll=false),
+        .addMultiTemplate('namespace', $._config.dashboard_variables.namespace_query, '%s' % $._config.per_namespace_label, sort=sortAscending, includeAll=false)
+        .addShowNativeLatencyVariable(),
     },
 
   namespaceMatcher()::
@@ -128,22 +129,34 @@ local utils = import 'mixin-utils/utils.libsonnet';
       },
     },
 
+  local qpsPanelColors = {
+    '1xx': $._colors.warning,
+    '2xx': $._colors.success,
+    '3xx': '#6ED0E0',
+    '4xx': '#EF843C',
+    '5xx': $._colors.failed,
+    OK: $._colors.success,
+    success: $._colors.success,
+    'error': $._colors.failed,
+    cancel: '#A9A9A9',
+    Canceled: '#A9A9A9',
+  },
+
   qpsPanel(selector, statusLabelName='status_code')::
     super.qpsPanel(selector, statusLabelName) +
-    $.aliasColors({
-      '1xx': $._colors.warning,
-      '2xx': $._colors.success,
-      '3xx': '#6ED0E0',
-      '4xx': '#EF843C',
-      '5xx': $._colors.failed,
-      OK: $._colors.success,
-      success: $._colors.success,
-      'error': $._colors.failed,
-      cancel: '#A9A9A9',
-      Canceled: '#A9A9A9',
-    }) + {
+    $.aliasColors(qpsPanelColors) + {
       fieldConfig+: {
         defaults+: { unit: 'reqps' },
+      },
+    },
+
+  qpsPanelNativeHistogram(selector, statusLabelName='status_code')::
+    super.qpsPanelNativeHistogram(selector, statusLabelName) +
+    $.aliasColors(qpsPanelColors) + {
+      fieldConfig+: {
+        defaults+: {
+          unit: 'reqps',
+        },
       },
     },
 
@@ -153,6 +166,9 @@ local utils = import 'mixin-utils/utils.libsonnet';
         defaults+: { unit: 'ms' },
       },
     },
+
+  ncLatencyPanel(metricName, selector, multiplier='1e3')::
+    super.latencyPanelNativeHistogram(metricName, selector, multiplier),
 
   resourceUtilizationAndLimitLegend(resourceName)::
     [resourceName, 'limit', 'request'],
@@ -250,13 +266,19 @@ local utils = import 'mixin-utils/utils.libsonnet';
   aliasColors(colors):: {
     // aliasColors was the configuration in (deprecated) graph panel; we hide it from JSON model.
     aliasColors:: super.aliasColors,
+    local newOverrides = [
+      $.overrideFieldByName(name, [
+        $.overrideProperty('color', { mode: 'fixed', fixedColor: colors[name] }),
+      ])
+      for name in std.objectFields(colors)
+    ],
+    local byName(o) =
+      assert o.matcher.id == 'byName' : 'invalid matcher with id %s' % o.matcher.id;
+      o.matcher.options,
     fieldConfig+: {
-      overrides+: [
-        $.overrideFieldByName(name, [
-          $.overrideProperty('color', { mode: 'fixed', fixedColor: colors[name] }),
-        ])
-        for name in std.objectFields(colors)
-      ],
+      // Take existing field overrides and extend them with the new ones. Let new ones take
+      // precedence over already existing ones.
+      overrides: std.sort(std.setDiff(if 'overrides' in super then super.overrides else [], newOverrides, byName) + newOverrides, byName),
     },
   },
 }
