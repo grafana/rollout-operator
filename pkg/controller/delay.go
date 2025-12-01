@@ -200,8 +200,8 @@ func callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx co
 			}
 
 			if resp.StatusCode/100 != 2 {
-				level.Error(epLogger).Log("msg", "unexpected status code returned when calling DELETE on endpoint", "status", resp.StatusCode, "response_body", string(body))
-				return fmt.Errorf("HTTP DELETE request returned non-2xx status code: %v", resp.StatusCode)
+				level.Error(epLogger).Log("msg", "unexpected status code returned when calling POST on endpoint", "status", resp.StatusCode, "response_body", string(body))
+				return fmt.Errorf("HTTP POST request returned non-2xx status code: %v", resp.StatusCode)
 			}
 
 			r := expectedResponse{}
