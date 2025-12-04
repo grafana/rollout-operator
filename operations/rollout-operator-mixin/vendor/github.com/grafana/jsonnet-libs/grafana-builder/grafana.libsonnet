@@ -485,7 +485,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
             sum by (status) (
               label_replace(label_replace(rate(%s[$__rate_interval]),
               "status", "${1}xx", "%s", "([0-9]).."),
-              "status", "${1}", "%s", "([a-zA-Z]+)"))
+              "status", "${1}", "%s", "([a-zA-Z_]+)"))
           ||| % [selector, statusLabelName, statusLabelName],
         format: 'time_series',
         legendFormat: '{{status}}',
@@ -503,40 +503,12 @@ local utils = import 'mixin-utils/utils.libsonnet';
           sum by (status) (
             label_replace(label_replace(%(metricQuery)s,
             "status", "${1}xx", "%(label)s", "([0-9]).."),
-            "status", "${1}", "%(label)s", "([a-zA-Z]+)"))
+            "status", "${1}", "%(label)s", "([a-zA-Z_]+)"))
         |||,
       native: template % { metricQuery: nativeClassicQuery.native, label: statusLabelName },
       classic: template % { metricQuery: nativeClassicQuery.classic, label: statusLabelName },
     },
-    fieldConfig+: {
-      defaults+: {
-        custom+: {
-          lineWidth: 0,
-          fillOpacity: 100,  // Get solid fill.
-          stacking: {
-            mode: 'normal',
-            group: 'A',
-          },
-        },
-        unit: 'reqps',
-        min: 0,
-      },
-      overrides+: [{
-        matcher: {
-          id: 'byName',
-          options: status,
-        },
-        properties: [
-          {
-            id: 'color',
-            value: {
-              mode: 'fixed',
-              fixedColor: $.httpStatusColors[status],
-            },
-          },
-        ],
-      } for status in std.objectFieldsAll($.httpStatusColors)],
-    },
+    aliasColors: $.httpStatusColors,
     targets: [
       {
         expr: utils.showClassicHistogramQuery(sumByStatus(utils.ncHistogramCountRate(metricName, selector))),

@@ -1,6 +1,14 @@
+local utils = import 'mixin-utils/utils.libsonnet';
+
 local filename = 'rollout-operator.json';
 (import 'dashboard-utils.libsonnet') {
   local admissionWebhookRoutesMatcher = 'route=~"admission.*"',
+
+  local metrics = {
+    request_duration_seconds: 'rollout_operator_request_duration_seconds',
+    reconcile_duration_seconds: 'rollout_operator_group_reconcile_duration_seconds',
+    k8s_api_client_request_duration_seconds: 'rollout_operator_kubernetes_api_client_request_duration_seconds',
+  },
 
   [filename]:
     assert $._config.rollout_operator_dashboard_uid == '' || std.md5(filename) == $._config.rollout_operator_dashboard_uid : 'UID of the dashboard has changed, please update references to dashboard. filename is now ' + filename + '. Set rollout_operator_dashboard_uid=' + std.md5(filename);
@@ -10,29 +18,36 @@ local filename = 'rollout-operator.json';
       $.row('Incoming webhook requests')
       .addPanel(
         $.timeseriesPanel('Throughput by status') +
-        $.qpsPanel('rollout_operator_request_duration_seconds_count{%s, %s}' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher]) +
+        $.qpsPanelNativeHistogram(metrics.request_duration_seconds, '%s, %s' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher]) +
         $.units('reqps') +
         $.showAllSeriesInTooltip
       )
       .addPanel(
         $.timeseriesPanel('Throughput by webhook') +
         $.queryPanel(
-          'sum by (route) (rate(rollout_operator_request_duration_seconds_count{%s, %s}[$__rate_interval]))' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher],
-          '__auto',
+          local selector = '%s, %s' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher];
+          local query = utils.ncHistogramSumBy(
+            query=utils.ncHistogramCountRate(metrics.request_duration_seconds, selector),
+            sum_by=['route'],
+          );
+          [utils.showClassicHistogramQuery(query), utils.showNativeHistogramQuery(query)],
+          ['__auto', '__auto'],
         ) +
         $.units('reqps') +
         $.showAllSeriesInTooltip
       )
       .addPanel(
         $.timeseriesPanel('Latency (all webhooks)') +
-        $.latencyPanel('rollout_operator_request_duration_seconds', '{%s, %s}' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher]) +
+        $.ncLatencyPanel(metrics.request_duration_seconds, '%s, %s' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher]) +
         $.showAllSeriesInTooltip
       )
       .addPanel(
         $.timeseriesPanel('p99 latency by webhook') +
         $.queryPanel(
-          'histogram_quantile(0.99, sum by (le, route) (rate(rollout_operator_request_duration_seconds_bucket{%s, %s}[$__rate_interval]))) * 1e3' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher],
-          '__auto',
+          local selector = '%s, %s' % [$.rolloutOperator_jobMatcher(), admissionWebhookRoutesMatcher];
+          local query = utils.ncHistogramQuantile('0.99', metrics.request_duration_seconds, selector, sum_by=['route'], multiplier='1e3');
+          [utils.showClassicHistogramQuery(query), utils.showNativeHistogramQuery(query)],
+          ['__auto', '__auto'],
         ) +
         $.units('ms') +
         $.showAllSeriesInTooltip
@@ -64,8 +79,10 @@ local filename = 'rollout-operator.json';
       .addPanel(
         $.timeseriesPanel('Average reconcile duration by rollout group') +
         $.queryPanel(
-          '1e3 * sum by (namespace, rollout_group) (rate(rollout_operator_group_reconcile_duration_seconds_sum{%s}[$__rate_interval])) / sum by (namespace, rollout_group) (rate(rollout_operator_group_reconcile_duration_seconds_count{%s}[$__rate_interval]))' % [$.rolloutOperator_jobMatcher(), $.rolloutOperator_jobMatcher()],
-          '{{namespace}}/{{rollout_group}}',
+          local selector = '%s' % [$.rolloutOperator_jobMatcher()];
+          local query = utils.ncHistogramAverageRate(metrics.reconcile_duration_seconds, selector, sum_by=['namespace', 'rollout_group'], multiplier='1e3');
+          [utils.showClassicHistogramQuery(query), utils.showNativeHistogramQuery(query)],
+          ['{{namespace}}/{{rollout_group}}', '{{namespace}}/{{rollout_group}}'],
         ) +
         $.units('ms') +
         $.showAllSeriesInTooltip
@@ -84,15 +101,20 @@ local filename = 'rollout-operator.json';
       $.row('Outgoing Kubernetes control plane API requests')
       .addPanel(
         $.timeseriesPanel('Throughput by status') +
-        $.qpsPanel('rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}' % $.rolloutOperator_jobMatcher()) +
+        $.qpsPanelNativeHistogram(metrics.k8s_api_client_request_duration_seconds, $.rolloutOperator_jobMatcher()) +
         $.units('reqps') +
         $.showAllSeriesInTooltip
       )
       .addPanel(
         $.timeseriesPanel('Throughput by route') +
         $.queryPanel(
-          'sum by (method, path) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval]))' % $.rolloutOperator_jobMatcher(),
-          '{{method}} {{path}}',
+          local selector = '%s' % [$.rolloutOperator_jobMatcher()];
+          local query = utils.ncHistogramSumBy(
+            query=utils.ncHistogramCountRate(metrics.k8s_api_client_request_duration_seconds, selector),
+            sum_by=['method', 'path'],
+          );
+          [utils.showClassicHistogramQuery(query), utils.showNativeHistogramQuery(query)],
+          ['{{method}} {{path}}', '{{method}} {{path}}'],
         ) +
         $.units('reqps') +
         $.showAllSeriesInTooltip
@@ -100,12 +122,19 @@ local filename = 'rollout-operator.json';
       .addPanel(
         $.timeseriesPanel('Average latency (by route)') +
         $.queryPanel(
+          local selector = $.rolloutOperator_jobMatcher();
+          local byPathQuery = utils.ncHistogramAverageRate(metrics.k8s_api_client_request_duration_seconds, selector, multiplier='1e3', sum_by=['method', 'path']);
+          local allRoutesQuery = utils.ncHistogramAverageRate(metrics.k8s_api_client_request_duration_seconds, selector, multiplier='1e3');
           [
-            'sum by (method, path) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_sum{%s}[$__rate_interval])) / sum by (method, path) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval])) * 1e3' % [$.rolloutOperator_jobMatcher(), $.rolloutOperator_jobMatcher()],
-            'sum(rate(rollout_operator_kubernetes_api_client_request_duration_seconds_sum{%s}[$__rate_interval])) / sum(rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval])) * 1e3' % [$.rolloutOperator_jobMatcher(), $.rolloutOperator_jobMatcher()],
+            utils.showClassicHistogramQuery(byPathQuery),
+            utils.showNativeHistogramQuery(byPathQuery),
+            utils.showClassicHistogramQuery(allRoutesQuery),
+            utils.showNativeHistogramQuery(allRoutesQuery),
           ],
           [
             '{{method}} {{path}}',
+            '{{method}} {{path}}',
+            'All routes',
             'All routes',
           ]
         ) +
