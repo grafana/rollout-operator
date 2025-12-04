@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"flag"
 	"fmt"
+	"github.com/grafana/rollout-operator/pkg/webhooks"
 	"net/http"
 	_ "net/http/pprof" // anonymous import to get the pprof handler registered
 	"os"
@@ -37,7 +38,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
-	zpdb "github.com/grafana/rollout-operator/pkg/zpdb"
+	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
@@ -226,6 +227,15 @@ func main() {
 
 	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, evictionController, webhookObserver)
 
+	// Monitors the validating and mutating webhook configurations and provides a metric
+	// which tracks the configured FailurePolicy
+	var webhookCollector *webhooks.WebhookCollector
+	if cfg.serverTLSEnabled {
+		webhookCollector = webhooks.NewWebhookCollector(kubeClient, cfg.kubeNamespace, logger)
+		check(errors.Wrap(webhookCollector.Start(), "failed to start webhook collector"))
+		reg.Register(webhookCollector)
+	}
+
 	// Init the controller
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger, evictionController)
 	check(errors.Wrap(c.Init(), "failed to init controller"))
@@ -236,6 +246,10 @@ func main() {
 		c.Stop()
 		evictionController.Stop()
 		webhookObserver.Stop()
+		if webhookCollector != nil {
+			reg.Unregister(webhookCollector)
+			webhookCollector.Stop()
+		}
 	}()
 
 	// The operator is ready once the controller successfully initialised.

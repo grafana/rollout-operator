@@ -99,7 +99,7 @@ func (c *configObserver) addOrUpdate(obj *unstructured.Unstructured) {
 func (c *configObserver) onPdbAdded(obj interface{}) {
 	unstructuredObj, isUnstructured := obj.(*unstructured.Unstructured)
 	if !isUnstructured {
-		c.metrics.ConfigurationsObserved.WithLabelValues("not-unstructured", "unknown").Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("ignored", "unknown").Inc()
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
 		return
 	}
@@ -112,7 +112,7 @@ func (c *configObserver) onPdbUpdated(old, new interface{}) {
 	newCfg, newIsUnstructured := new.(*unstructured.Unstructured)
 
 	if !oldIsUnstructured || !newIsUnstructured {
-		c.metrics.ConfigurationsObserved.WithLabelValues("not-unstructured", "unknown").Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("ignored", "unknown").Inc()
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "old_type", reflect.TypeOf(old), "new_type", reflect.TypeOf(new))
 		return
 	}
@@ -123,7 +123,7 @@ func (c *configObserver) onPdbUpdated(old, new interface{}) {
 func (c *configObserver) onPdbDeleted(obj interface{}) {
 	oldCfg, oldIsUnstructured := obj.(*unstructured.Unstructured)
 	if !oldIsUnstructured {
-		c.metrics.ConfigurationsObserved.WithLabelValues("not-unstructured", "unknown").Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("ignored", "unknown").Inc()
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
 		return
 	}
