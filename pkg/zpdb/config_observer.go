@@ -86,20 +86,20 @@ func (c *configObserver) addOrUpdate(obj *unstructured.Unstructured) {
 	updated, generation, err := c.pdbCache.addOrUpdateRaw(obj)
 	if err != nil {
 		level.Error(c.logger).Log("msg", "zpdb configuration error", "name", obj.GetName(), "err", err)
-		c.metrics.ConfigurationsObserved.WithLabelValues("invalid", obj.GetName()).Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("invalid").Inc()
 	} else if updated {
 		level.Info(c.logger).Log("msg", "zpdb configuration updated", "name", obj.GetName(), "generation", generation)
-		c.metrics.ConfigurationsObserved.WithLabelValues("updated", obj.GetName()).Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("updated").Inc()
 	} else {
 		level.Info(c.logger).Log("msg", "zpdb configuration update ignored", "name", obj.GetName(), "generation", generation, "ignored-generation", obj.GetGeneration())
-		c.metrics.ConfigurationsObserved.WithLabelValues("ignored", obj.GetName()).Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("ignored").Inc()
 	}
 }
 
 func (c *configObserver) onPdbAdded(obj interface{}) {
 	unstructuredObj, isUnstructured := obj.(*unstructured.Unstructured)
 	if !isUnstructured {
-		c.metrics.ConfigurationsObserved.WithLabelValues("ignored", "unknown").Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("ignored").Inc()
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
 		return
 	}
@@ -112,7 +112,7 @@ func (c *configObserver) onPdbUpdated(old, new interface{}) {
 	newCfg, newIsUnstructured := new.(*unstructured.Unstructured)
 
 	if !oldIsUnstructured || !newIsUnstructured {
-		c.metrics.ConfigurationsObserved.WithLabelValues("ignored", "unknown").Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("ignored").Inc()
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "old_type", reflect.TypeOf(old), "new_type", reflect.TypeOf(new))
 		return
 	}
@@ -123,16 +123,16 @@ func (c *configObserver) onPdbUpdated(old, new interface{}) {
 func (c *configObserver) onPdbDeleted(obj interface{}) {
 	oldCfg, oldIsUnstructured := obj.(*unstructured.Unstructured)
 	if !oldIsUnstructured {
-		c.metrics.ConfigurationsObserved.WithLabelValues("ignored", "unknown").Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("ignored").Inc()
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
 		return
 	}
 	success, generation := c.pdbCache.delete(oldCfg.GetGeneration(), oldCfg.GetName())
 	if success {
-		c.metrics.ConfigurationsObserved.WithLabelValues("deleted", oldCfg.GetName()).Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("deleted").Inc()
 		level.Info(c.logger).Log("msg", "zpdb configuration deleted", "old", oldCfg.GetName(), "generation", generation)
 	} else {
-		c.metrics.ConfigurationsObserved.WithLabelValues("delete-ignored", oldCfg.GetName()).Inc()
+		c.metrics.ConfigurationsObserved.WithLabelValues("delete-ignored").Inc()
 		level.Info(c.logger).Log("msg", "zpdb configuration delete ignored", "name", oldCfg.GetName(), "generation", generation, "ignored-generation", oldCfg.GetGeneration())
 	}
 }

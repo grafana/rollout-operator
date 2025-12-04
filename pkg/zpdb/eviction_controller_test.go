@@ -164,7 +164,7 @@ func TestPodEviction_NotCreateEvent(t *testing.T) {
 	ar.Request.Operation = admissionv1.Delete
 	testCtx := newTestContext(t, ar, nil)
 	defer testCtx.controller.Stop()
-	require.Equal(t, float64(0), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("invalid-request", testPodZoneA0, "400")))
+	require.Equal(t, float64(0), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("invalid-request", "400")))
 
 	testCtx.assertDenyResponse(t, "request operation is not create, got: DELETE", 400)
 
@@ -178,7 +178,7 @@ func TestPodEviction_NotCreateEvent(t *testing.T) {
 		`reason="not a valid create pod eviction request"`,
 	}
 	testCtx.logs.assertHasLog(t, expectedLogEntry)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("invalid-request", testPodZoneA0, "400")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("invalid-request", "400")))
 }
 
 func TestPodEviction_NotEvictionSubResource(t *testing.T) {
@@ -187,14 +187,14 @@ func TestPodEviction_NotEvictionSubResource(t *testing.T) {
 	testCtx := newTestContext(t, ar, nil)
 	defer testCtx.controller.Stop()
 	testCtx.assertDenyResponse(t, "request SubResource is not eviction, got: foo", 400)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("invalid-request", testPodZoneA0, "400")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("invalid-request", "400")))
 }
 
 func TestPodEviction_EmptyName(t *testing.T) {
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview("", testNamespace), nil)
 	defer testCtx.controller.Stop()
 	testCtx.assertDenyResponse(t, "request did not include both a namespace and a name", 400)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("invalid-request", "", "400")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("invalid-request", "400")))
 }
 
 func TestPodEviction_PodNotFound(t *testing.T) {
@@ -202,7 +202,7 @@ func TestPodEviction_PodNotFound(t *testing.T) {
 	defer testCtx.controller.Stop()
 	testCtx.assertDenyResponse(t, `pods "ingester-zone-a-0" not found`, 400)
 	testCtx.logs.assertHasLog(t, []string{`reason="unable to find pod by name"`})
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("pod-not-found", testPodZoneA0, "400")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("pod-not-found", "400")))
 }
 
 func TestPodEviction_PodNotReady(t *testing.T) {
@@ -212,7 +212,7 @@ func TestPodEviction_PodNotReady(t *testing.T) {
 	defer testCtx.controller.Stop()
 	testCtx.assertAllowResponseWithWarning(t, "pod is not ready")
 	testCtx.logs.assertHasLog(t, []string{`reason="pod is not ready"`})
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("pod-not-ready", testPodZoneA0, "200")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("pod-not-ready", "200")))
 }
 
 func TestPodEviction_PodWithNoOwner(t *testing.T) {
@@ -221,7 +221,7 @@ func TestPodEviction_PodWithNoOwner(t *testing.T) {
 	defer testCtx.controller.Stop()
 	testCtx.assertDenyResponse(t, "unable to find a StatefulSet pod owner", 500)
 	testCtx.logs.assertHasLog(t, []string{`reason="unable to find pod owner"`})
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("sts-no-found", testPodZoneA0, "500")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("sts-no-found", "500")))
 }
 
 func TestPodEviction_PodNotInScope(t *testing.T) {
@@ -230,7 +230,7 @@ func TestPodEviction_PodNotInScope(t *testing.T) {
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil, pod, sts)
 	defer testCtx.controller.Stop()
 	testCtx.assertAllowResponse(t)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", testPodZoneA0, "200")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", "200")))
 }
 
 func TestPodEviction_MaxUnavailableEq0(t *testing.T) {
@@ -240,7 +240,7 @@ func TestPodEviction_MaxUnavailableEq0(t *testing.T) {
 	defer testCtx.controller.Stop()
 	testCtx.assertDenyResponse(t, "max unavailable = 0", 403)
 	testCtx.logs.assertHasLog(t, []string{`reason="max unavailable = 0"`})
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", testPodZoneA0, "403")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", "403")))
 }
 
 func TestPodEviction_MaxUnavailableEq0_ViaAllowPodEviction(t *testing.T) {
@@ -250,7 +250,7 @@ func TestPodEviction_MaxUnavailableEq0_ViaAllowPodEviction(t *testing.T) {
 	defer testCtx.controller.Stop()
 	testCtx.assertDenyResponseViaMarkPodAsDeleted(t, testPodZoneA0, "max unavailable = 0")
 	testCtx.logs.assertHasLog(t, []string{`reason="max unavailable = 0"`})
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", testPodZoneA0, "403")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", "403")))
 }
 
 func TestPodEviction_Allowed_ViaAllowPodEviction(t *testing.T) {
@@ -278,10 +278,10 @@ func TestPodEviction_Allowed_ViaAllowPodEviction(t *testing.T) {
 	// note that we do not stop the controller after this test
 	testCtx.assertAllowResponseViaMarkPodAsDeleted(t, zoneAPod0.Name)
 	require.True(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", zoneAPod0.Name, "200")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 
 	testCtx.assertDenyResponseViaMarkPodAsDeleted(t, zoneAPod2.Name, "1 pod not ready in ingester-zone-a")
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", zoneAPod2.Name, "429")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 }
 
 func TestPodEviction_MaxUnavailablePercentageEq0(t *testing.T) {
@@ -291,7 +291,7 @@ func TestPodEviction_MaxUnavailablePercentageEq0(t *testing.T) {
 	defer testCtx.controller.Stop()
 	testCtx.assertDenyResponse(t, "max unavailable = 0", 403)
 	testCtx.logs.assertHasLog(t, []string{`reason="max unavailable = 0"`})
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", testPodZoneA0, "403")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", "403")))
 }
 
 // TestPodEviction_SingleZoneMultiplePodsUpscale - only 1 StatefulSet has been found
@@ -303,7 +303,7 @@ func TestPodEviction_SingleZoneMultiplePodsUpscale(t *testing.T) {
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), pod0, pod1, sts)
 	defer testCtx.controller.Stop()
 	testCtx.assertDenyResponse(t, "minimum number of StatefulSets not found", 400)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("min-sts-not-found", testPodZoneA0, "400")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("min-sts-not-found", "400")))
 }
 
 // TestPodEviction_MultiZoneClassic tests a classic multi-zone topology.
@@ -335,7 +335,7 @@ func TestPodEviction_MultiZoneClassic(t *testing.T) {
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
 	require.False(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
 	testCtx.assertAllowResponse(t)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", zoneAPod0.Name, "200")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 
 	require.True(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
 	testCtx.controller.Stop()
@@ -344,26 +344,26 @@ func TestPodEviction_MultiZoneClassic(t *testing.T) {
 	zoneAPod2.Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
 	testCtx.assertDenyResponse(t, "1 pod not ready in ingester-zone-a", 429)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", testPodZoneA0, "429")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 	testCtx.controller.Stop()
 
 	// mark a pod in the same zone as failed - with maxUnavailable=2 this will be allowed
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(2, rolloutGroupValue), objs...)
 	testCtx.assertAllowResponse(t)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", testPodZoneA0, "200")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 	testCtx.controller.Stop()
 
 	// mark a pod in the another zone as failed - we will deny this eviction
 	zoneCPod2.Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
 	testCtx.assertDenyResponse(t, "1 pod not ready in ingester-zone-c", 429)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", testPodZoneA0, "429")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 	testCtx.controller.Stop()
 
 	// mark a pod in the another zone as failed - we will deny this eviction even if max unavailable = 2
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(2, rolloutGroupValue), objs...)
 	testCtx.assertDenyResponse(t, "1 pod not ready in ingester-zone-c", 429)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", testPodZoneA0, "429")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 	testCtx.controller.Stop()
 
 	// reset so all the pods are reporting running
@@ -374,7 +374,7 @@ func TestPodEviction_MultiZoneClassic(t *testing.T) {
 	stsZoneB.Status.Replicas = 4
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
 	testCtx.assertDenyResponse(t, "1 pod unknown in ingester-zone-b", 429)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", testPodZoneA0, "429")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 	testCtx.controller.Stop()
 }
 
@@ -405,28 +405,28 @@ func TestPodEviction_PartitionZones(t *testing.T) {
 
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertAllowResponse(t)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", testPodZoneA0, "200")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 	testCtx.controller.Stop()
 
 	// mark a pod in the same zone as failed - we will allow this eviction as it's in a different partition
 	zoneAPod1.Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertAllowResponse(t)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", testPodZoneA0, "200")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 	testCtx.controller.Stop()
 
 	// mark a pod in the another zone + partition as failed - we will allow this eviction as it's in a different partition
 	zoneCPod2.Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertAllowResponse(t)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", testPodZoneA0, "200")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 	testCtx.controller.Stop()
 
 	// mark a pod in the another zone + same partition as failed - we will deny this eviction
 	zoneBPod0.Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertDenyResponse(t, "1 pod not ready in partition 0", 429)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", testPodZoneA0, "429")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 	testCtx.controller.Stop()
 
 	// reset so all the pods are reporting running
@@ -438,12 +438,12 @@ func TestPodEviction_PartitionZones(t *testing.T) {
 	stsZoneB.Status.Replicas = 4
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertDenyResponse(t, "1 pod unknown in partition 0", 429)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", testPodZoneA0, "429")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 	testCtx.controller.Stop()
 
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, "ingester(-foo)?-zone-[a-z]-([0-9]+)", int64(2)), objs...)
 	testCtx.assertDenyResponse(t, "1 pod unknown in partition 0", 429)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", testPodZoneA0, "429")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 	testCtx.controller.Stop()
 }
 
@@ -474,19 +474,19 @@ func TestPodEviction_PartitionZonesMaxUnavailable2(t *testing.T) {
 	zoneBPod0.Status.Phase = corev1.PodFailed
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertDenyResponse(t, "1 pod not ready in partition 0", 429)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", testPodZoneA0, "429")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 	testCtx.controller.Stop()
 
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(2, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertAllowResponse(t)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", testPodZoneA0, "200")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 	testCtx.controller.Stop()
 
 	// mark another pod in the another zone + same partition as failed
 	zoneCPod0.Status.Phase = corev1.PodFailed
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(2, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	testCtx.assertDenyResponse(t, "2 pods not ready in partition 0", 429)
-	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", testPodZoneA0, "429")))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 	testCtx.controller.Stop()
 }
 

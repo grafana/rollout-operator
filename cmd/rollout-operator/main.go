@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"flag"
 	"fmt"
-	"github.com/grafana/rollout-operator/pkg/webhooks"
 	"net/http"
 	_ "net/http/pprof" // anonymous import to get the pprof handler registered
 	"os"
@@ -38,6 +37,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
+	"github.com/grafana/rollout-operator/pkg/webhooks"
 	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
@@ -233,7 +233,7 @@ func main() {
 	if cfg.serverTLSEnabled {
 		webhookCollector = webhooks.NewWebhookCollector(kubeClient, cfg.kubeNamespace, logger)
 		check(errors.Wrap(webhookCollector.Start(), "failed to start webhook collector"))
-		reg.Register(webhookCollector)
+		check(reg.Register(webhookCollector))
 	}
 
 	// Init the controller

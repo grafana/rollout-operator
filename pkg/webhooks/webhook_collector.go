@@ -3,12 +3,12 @@ package webhooks
 import (
 	"sync"
 
-	"github.com/grafana/rollout-operator/pkg/tlscert"
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
-
-	"github.com/go-kit/log"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/grafana/rollout-operator/pkg/tlscert"
 )
 
 const (
