@@ -89,8 +89,18 @@ func (c *WebhookCollector) Collect(ch chan<- prometheus.Metric) {
 	defer c.lock.RUnlock()
 	for name, failureMode := range c.validatingWebhooksSettings {
 		ch <- prometheus.MustNewConstMetric(c.metricDescription, prometheus.GaugeValue, 1, "ValidatingWebhook", name, string(failureMode))
+		ch <- prometheus.MustNewConstMetric(c.metricDescription, prometheus.GaugeValue, 0, "ValidatingWebhook", name, string(c.opposite(failureMode)))
 	}
 	for name, failureMode := range c.mutatingWebhooksSettings {
 		ch <- prometheus.MustNewConstMetric(c.metricDescription, prometheus.GaugeValue, 1, "MutatingWebhook", name, string(failureMode))
+		ch <- prometheus.MustNewConstMetric(c.metricDescription, prometheus.GaugeValue, 0, "MutatingWebhook", name, string(c.opposite(failureMode)))
 	}
+}
+
+// opposite returns the opposite FailurePolicyType for the given policy type
+func (c *WebhookCollector) opposite(mode admissionregistrationv1.FailurePolicyType) admissionregistrationv1.FailurePolicyType {
+	if mode == admissionregistrationv1.Fail {
+		return admissionregistrationv1.Ignore
+	}
+	return admissionregistrationv1.Fail
 }

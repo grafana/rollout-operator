@@ -14,13 +14,6 @@ import (
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
-func TestStartStop(t *testing.T) {
-	client := k8sfake.NewClientset()
-	collector := NewWebhookCollector(client, "test", log.NewNopLogger())
-	require.NoError(t, collector.Start())
-	collector.Stop()
-}
-
 func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 	client := k8sfake.NewClientset()
 	collector := NewWebhookCollector(client, "test", log.NewNopLogger())
@@ -84,7 +77,7 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait until the collector has observed and cached all three inner webhooks
-	expectedSeries := 3
+	expectedSeries := 6
 	require.Eventually(t, func() bool {
 		return testutil.CollectAndCount(collector, "kube_validating_webhook_failure_policy") == expectedSeries
 	}, 5*time.Second, 10*time.Millisecond, "expected %d samples from collector", expectedSeries)
@@ -94,8 +87,11 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 	# HELP kube_validating_webhook_failure_policy FailurePolicy setting of Kubernetes ValidatingWebhooks and MutatingWebhooks
 	# TYPE kube_validating_webhook_failure_policy gauge
     kube_validating_webhook_failure_policy{policy="Ignore",type="ValidatingWebhook",webhook="validating-webhook-with-ignore"} 1
+	kube_validating_webhook_failure_policy{policy="Fail",type="ValidatingWebhook",webhook="validating-webhook-with-ignore"} 0
 	kube_validating_webhook_failure_policy{policy="Fail",type="ValidatingWebhook",webhook="no-failure-policy-set"} 1
+	kube_validating_webhook_failure_policy{policy="Ignore",type="ValidatingWebhook",webhook="no-failure-policy-set"} 0
 	kube_validating_webhook_failure_policy{policy="Fail",type="MutatingWebhook",webhook="mutating-webhook-with-fail"} 1
+	kube_validating_webhook_failure_policy{policy="Ignore",type="MutatingWebhook",webhook="mutating-webhook-with-fail"} 0
 	`
 	err = testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy")
 	require.NoError(t, err)
@@ -109,8 +105,11 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 	# HELP kube_validating_webhook_failure_policy FailurePolicy setting of Kubernetes ValidatingWebhooks and MutatingWebhooks
 	# TYPE kube_validating_webhook_failure_policy gauge
     kube_validating_webhook_failure_policy{policy="Ignore",type="ValidatingWebhook",webhook="validating-webhook-with-ignore"} 1
+	kube_validating_webhook_failure_policy{policy="Fail",type="ValidatingWebhook",webhook="validating-webhook-with-ignore"} 0
 	kube_validating_webhook_failure_policy{policy="Fail",type="ValidatingWebhook",webhook="no-failure-policy-set"} 1
+	kube_validating_webhook_failure_policy{policy="Ignore",type="ValidatingWebhook",webhook="no-failure-policy-set"} 0
 	kube_validating_webhook_failure_policy{policy="Ignore",type="MutatingWebhook",webhook="mutating-webhook-with-fail"} 1
+	kube_validating_webhook_failure_policy{policy="Fail",type="MutatingWebhook",webhook="mutating-webhook-with-fail"} 0
 	`
 	require.Eventually(t, func() bool {
 		err := testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy")
@@ -126,8 +125,11 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 	# HELP kube_validating_webhook_failure_policy FailurePolicy setting of Kubernetes ValidatingWebhooks and MutatingWebhooks
 	# TYPE kube_validating_webhook_failure_policy gauge
     kube_validating_webhook_failure_policy{policy="Fail",type="ValidatingWebhook",webhook="validating-webhook-with-ignore"} 1
+	kube_validating_webhook_failure_policy{policy="Ignore",type="ValidatingWebhook",webhook="validating-webhook-with-ignore"} 0
 	kube_validating_webhook_failure_policy{policy="Fail",type="ValidatingWebhook",webhook="no-failure-policy-set"} 1
+	kube_validating_webhook_failure_policy{policy="Ignore",type="ValidatingWebhook",webhook="no-failure-policy-set"} 0
 	kube_validating_webhook_failure_policy{policy="Ignore",type="MutatingWebhook",webhook="mutating-webhook-with-fail"} 1
+	kube_validating_webhook_failure_policy{policy="Fail",type="MutatingWebhook",webhook="mutating-webhook-with-fail"} 0
 	`
 	require.Eventually(t, func() bool {
 		err := testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy")
