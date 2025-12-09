@@ -12,6 +12,7 @@
   * `k8s.io/apimachinery` from `v0.34.1` to `v0.34.2`
   * `k8s.io/client-go` from `v0.34.1` to `v0.34.2`
   * `sigs.k8s.io/controller-runtime` from `v0.22.3` to `v0.22.4`
+* [ENHANCEMENT] Added prometheus metrics for `rollout_operator_zpdb_configurations_observed_total`, `rollout_operator_zpdb_eviction_requests_total` and `rollout_operator_zpdb_inflight_eviction_requests_total`
 
 ## v0.32.0
 
