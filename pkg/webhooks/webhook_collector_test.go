@@ -168,7 +168,7 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 	require.NoError(t, err)
 
 	// The above webhook creation has been ignored - our metrics remain the same
-	time.Sleep(5 * time.Second)
-	err = testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy")
-	require.NoError(t, err)
+	require.Never(t, func() bool {
+		return testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy") != nil
+	}, 5*time.Second, 10*time.Millisecond)
 }
