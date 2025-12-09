@@ -37,6 +37,7 @@ import (
 	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
+	"github.com/grafana/rollout-operator/pkg/webhooks"
 	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
@@ -144,6 +145,8 @@ func main() {
 
 	reg := prometheus.NewRegistry()
 	metrics := newMetrics(reg)
+	zpdbMetrics := zpdb.NewMetrics(reg)
+
 	ready := atomic.NewBool(false)
 	restart := make(chan string)
 
@@ -219,10 +222,19 @@ func main() {
 	// If the TLS server is started below (webhooks registered), then this controller will handle the validating webhook requests
 	// for pod evictions and zpdb configuration changes. If the webhooks are not enabled, this controller is still started
 	// and will be used by the main controller to assist in validating pod deletion requests.
-	evictionController := zpdb.NewEvictionController(kubeClient, dynamicClient, cfg.kubeNamespace, logger)
+	evictionController := zpdb.NewEvictionController(kubeClient, dynamicClient, cfg.kubeNamespace, logger, zpdbMetrics)
 	check(evictionController.Start())
 
 	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, evictionController, webhookObserver)
+
+	// Monitors the validating and mutating webhook configurations and provides a metric
+	// which tracks the configured FailurePolicy
+	var webhookCollector *webhooks.WebhookCollector
+	if cfg.serverTLSEnabled {
+		webhookCollector = webhooks.NewWebhookCollector(kubeClient, cfg.kubeNamespace, logger)
+		check(errors.Wrap(webhookCollector.Start(), "failed to start webhook collector"))
+		check(reg.Register(webhookCollector))
+	}
 
 	// Init the controller
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger, evictionController)
@@ -234,6 +246,10 @@ func main() {
 		c.Stop()
 		evictionController.Stop()
 		webhookObserver.Stop()
+		if webhookCollector != nil {
+			reg.Unregister(webhookCollector)
+			webhookCollector.Stop()
+		}
 	}()
 
 	// The operator is ready once the controller successfully initialised.
