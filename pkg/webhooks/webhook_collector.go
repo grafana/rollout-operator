@@ -16,6 +16,8 @@ const (
 	desc = "FailurePolicy setting of Kubernetes ValidatingWebhooks and MutatingWebhooks"
 )
 
+var policyTypes = []admissionregistrationv1.FailurePolicyType{admissionregistrationv1.Fail, admissionregistrationv1.Ignore}
+
 type WebhookCollector struct {
 	lock                       sync.RWMutex
 	observer                   *tlscert.WebhookObserver
@@ -88,19 +90,20 @@ func (c *WebhookCollector) Collect(ch chan<- prometheus.Metric) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	for name, failureMode := range c.validatingWebhooksSettings {
-		ch <- prometheus.MustNewConstMetric(c.metricDescription, prometheus.GaugeValue, 1, "ValidatingWebhook", name, string(failureMode))
-		ch <- prometheus.MustNewConstMetric(c.metricDescription, prometheus.GaugeValue, 0, "ValidatingWebhook", name, string(c.opposite(failureMode)))
+		for _, policyType := range policyTypes {
+			ch <- prometheus.MustNewConstMetric(c.metricDescription, prometheus.GaugeValue, c.boolToFloat(failureMode == policyType), "ValidatingWebhook", name, string(policyType))
+		}
 	}
 	for name, failureMode := range c.mutatingWebhooksSettings {
-		ch <- prometheus.MustNewConstMetric(c.metricDescription, prometheus.GaugeValue, 1, "MutatingWebhook", name, string(failureMode))
-		ch <- prometheus.MustNewConstMetric(c.metricDescription, prometheus.GaugeValue, 0, "MutatingWebhook", name, string(c.opposite(failureMode)))
+		for _, policyType := range policyTypes {
+			ch <- prometheus.MustNewConstMetric(c.metricDescription, prometheus.GaugeValue, c.boolToFloat(failureMode == policyType), "MutatingWebhook", name, string(policyType))
+		}
 	}
 }
 
-// opposite returns the opposite FailurePolicyType for the given policy type
-func (c *WebhookCollector) opposite(mode admissionregistrationv1.FailurePolicyType) admissionregistrationv1.FailurePolicyType {
-	if mode == admissionregistrationv1.Fail {
-		return admissionregistrationv1.Ignore
+func (c *WebhookCollector) boolToFloat(value bool) float64 {
+	if value {
+		return 1
 	}
-	return admissionregistrationv1.Fail
+	return 0
 }

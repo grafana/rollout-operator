@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -111,10 +112,15 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 	kube_validating_webhook_failure_policy{policy="Ignore",type="MutatingWebhook",webhook="mutating-webhook-with-fail"} 1
 	kube_validating_webhook_failure_policy{policy="Fail",type="MutatingWebhook",webhook="mutating-webhook-with-fail"} 0
 	`
-	require.Eventually(t, func() bool {
-		err := testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy")
-		return err == nil
-	}, 5*time.Second, 10*time.Millisecond, "awaiting MutatingWebhook to have policy=Ignore")
+
+	require.EventuallyWithT(t, func(t *assert.CollectT) {
+		err := testutil.CollectAndCompare(
+			collector,
+			bytes.NewBufferString(expected),
+			"kube_validating_webhook_failure_policy",
+		)
+		require.NoError(t, err)
+	}, 5*time.Second, 10*time.Millisecond)
 
 	// Update the policy to Fail and await the collector to report this in the metrics
 	validatingConfiguration.Webhooks[0].FailurePolicy = &fail
@@ -131,8 +137,8 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 	kube_validating_webhook_failure_policy{policy="Ignore",type="MutatingWebhook",webhook="mutating-webhook-with-fail"} 1
 	kube_validating_webhook_failure_policy{policy="Fail",type="MutatingWebhook",webhook="mutating-webhook-with-fail"} 0
 	`
-	require.Eventually(t, func() bool {
+	require.EventuallyWithT(t, func(t *assert.CollectT) {
 		err := testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy")
-		return err == nil
-	}, 5*time.Second, 10*time.Millisecond, "awaiting MutatingWebhook to have policy=Ignore")
+		require.NoError(t, err)
+	}, 5*time.Second, 10*time.Millisecond)
 }
