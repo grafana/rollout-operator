@@ -30,6 +30,9 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 		&admissionregistrationv1.ValidatingWebhookConfiguration{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "validating-webhook-1",
+				Labels: map[string]string{
+					"grafana.com/namespace": "test",
+				},
 			},
 			Webhooks: []admissionregistrationv1.ValidatingWebhook{
 				{
@@ -47,6 +50,9 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 		&admissionregistrationv1.ValidatingWebhookConfiguration{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "validating-webhook-2",
+				Labels: map[string]string{
+					"grafana.com/namespace": "test",
+				},
 			},
 			Webhooks: []admissionregistrationv1.ValidatingWebhook{
 				{
@@ -65,6 +71,9 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 		&admissionregistrationv1.MutatingWebhookConfiguration{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "mutating-webhook-1",
+				Labels: map[string]string{
+					"grafana.com/namespace": "test",
+				},
 			},
 			Webhooks: []admissionregistrationv1.MutatingWebhook{
 				{
@@ -137,4 +146,29 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 		err := testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy")
 		require.NoError(t, err)
 	}, 5*time.Second, 10*time.Millisecond)
+
+	_, err = client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(
+		context.Background(),
+		&admissionregistrationv1.MutatingWebhookConfiguration{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "mutating-webhook-2",
+				Labels: map[string]string{
+					"grafana.com/namespace": "different-namespace",
+				},
+			},
+			Webhooks: []admissionregistrationv1.MutatingWebhook{
+				{
+					Name:          "mutating-webhook-with-fail",
+					FailurePolicy: &fail,
+				},
+			},
+		},
+		metav1.CreateOptions{},
+	)
+	require.NoError(t, err)
+
+	// The above webhook creation has been ignored - our metrics remain the same
+	time.Sleep(5 * time.Second)
+	err = testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy")
+	require.NoError(t, err)
 }
