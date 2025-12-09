@@ -941,6 +941,25 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 		},
+
+		"scale up succeeds even if DELETE returns 409 Conflict (i.e partition state locked)": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(2, 2),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
+			},
+			httpResponses: map[string]httpResponse{
+				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: http.StatusConflict, body: "partition state is locked"},
+				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: http.StatusConflict, body: "partition state is locked"},
+			},
+			customResourceScaleSpecReplicas:   5,
+			customResourceScaleStatusReplicas: 2,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":5}}`}},
+			expectedHttpRequests: []string{
+				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+		},
 	}
 
 	for testName, testData := range tests {

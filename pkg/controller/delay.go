@@ -200,8 +200,10 @@ func callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx co
 			}
 
 			if resp.StatusCode/100 != 2 {
-				level.Error(epLogger).Log("msg", "unexpected status code returned when calling DELETE on endpoint", "status", resp.StatusCode, "response_body", string(body))
-				return fmt.Errorf("HTTP DELETE request returned non-2xx status code: %v", resp.StatusCode)
+				// Unlike `callCancelDelayedDownscale`, here we consider all non 2xx status code as error and should block the downscale.
+				// this includes the case where we fail because a partition state change is locked.
+				level.Error(epLogger).Log("msg", "unexpected status code returned when calling POST on endpoint", "status", resp.StatusCode, "response_body", string(body))
+				return fmt.Errorf("HTTP POST request returned non-2xx status code: %v", resp.StatusCode)
 			}
 
 			r := expectedResponse{}
@@ -260,8 +262,15 @@ func callCancelDelayedDownscale(ctx context.Context, logger log.Logger, client h
 			defer resp.Body.Close()
 
 			if resp.StatusCode/100 != 2 {
-				err := errors.New("HTTP DELETE request returned non-2xx status code")
 				body, readError := io.ReadAll(resp.Body)
+
+				// Handle 409 Conflict separately - this typically means that the partition state is locked by an engineer
+				if resp.StatusCode == http.StatusConflict {
+					level.Info(epLogger).Log("msg", "HTTP DELETE request returned 409 status code, delayed downscale cancellation skipped", "status", resp.StatusCode, "response_body", string(body))
+					return nil
+				}
+
+				err := errors.New("HTTP DELETE request returned non-2xx status code")
 				level.Error(epLogger).Log("msg", "unexpected status code returned when calling DELETE on endpoint", "status", resp.StatusCode, "response_body", string(body))
 				return errors.Join(err, readError)
 			}
