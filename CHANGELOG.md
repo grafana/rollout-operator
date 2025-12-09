@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [BUGFIX] Limit webhook metrics to validating and mutating webhook configurations which have a matching grafana.com/namespace label. #347
+
 ## v0.32.1
 
 * [ENHANCEMENT] Dashboard: Support native histograms. #338 
