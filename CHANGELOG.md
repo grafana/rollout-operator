@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.32.1
+
 * [ENHANCEMENT] Dashboard: Support native histograms. #338 
 * [ENHANCEMENT] Updated dependencies, including: #329 #335 #337
   * `github.com/prometheus/common` from `v0.67.1` to `v0.67.3`
