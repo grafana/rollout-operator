@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.32.2
+
 * [BUGFIX] Limit webhook metrics to validating and mutating webhook configurations which have a matching grafana.com/namespace label. #347
 * [ENHANCEMENT] Updated dependencies, including: #341
   * `github.com/prometheus/common` from `v0.67.3` to `v0.67.4`
