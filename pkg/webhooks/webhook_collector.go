@@ -2,10 +2,13 @@ package webhooks
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/pkg/tlscert"
@@ -20,14 +23,20 @@ var policyTypes = []admissionregistrationv1.FailurePolicyType{admissionregistrat
 
 type WebhookCollector struct {
 	lock                       sync.RWMutex
+	labelSelector              *metav1.LabelSelector
 	observer                   *tlscert.WebhookObserver
 	validatingWebhooksSettings map[string]admissionregistrationv1.FailurePolicyType
 	mutatingWebhooksSettings   map[string]admissionregistrationv1.FailurePolicyType
 	metricDescription          *prometheus.Desc
+	observationCounter         atomic.Int64
 }
 
 func NewWebhookCollector(kubeClient kubernetes.Interface, namespace string, logger log.Logger) *WebhookCollector {
+
 	return &WebhookCollector{
+		labelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+			"grafana.com/namespace": namespace,
+		}},
 		observer:                   tlscert.NewWebhookObserver(kubeClient, namespace, logger),
 		validatingWebhooksSettings: make(map[string]admissionregistrationv1.FailurePolicyType),
 		mutatingWebhooksSettings:   make(map[string]admissionregistrationv1.FailurePolicyType),
@@ -44,6 +53,13 @@ func (c *WebhookCollector) Start() error {
 	// monitor for validating and mutating webhooks and maintain a local cache of their failure policy settings
 	webHookListener := &tlscert.WebhookConfigurationListener{
 		OnValidatingWebhookConfiguration: func(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) error {
+			c.observationCounter.Add(1)
+			if selector, err := metav1.LabelSelectorAsSelector(c.labelSelector); err != nil {
+				return err
+			} else if !selector.Matches(labels.Set(webhook.GetLabels())) {
+				return nil
+			}
+
 			c.lock.Lock()
 			defer c.lock.Unlock()
 			for _, wh := range webhook.Webhooks {
@@ -57,6 +73,13 @@ func (c *WebhookCollector) Start() error {
 			return nil
 		},
 		OnMutatingWebhookConfiguration: func(webhook *admissionregistrationv1.MutatingWebhookConfiguration) error {
+			c.observationCounter.Add(1)
+			if selector, err := metav1.LabelSelectorAsSelector(c.labelSelector); err != nil {
+				return err
+			} else if !selector.Matches(labels.Set(webhook.GetLabels())) {
+				return nil
+			}
+
 			c.lock.Lock()
 			defer c.lock.Unlock()
 			for _, wh := range webhook.Webhooks {
