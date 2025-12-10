@@ -147,6 +147,8 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 		require.NoError(t, err)
 	}, 5*time.Second, 10*time.Millisecond)
 
+	observationCount := collector.observationCounter.Load()
+
 	_, err = client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(
 		context.Background(),
 		&admissionregistrationv1.MutatingWebhookConfiguration{
@@ -167,8 +169,10 @@ func TestWebhookCollector_CollectsWebhookFailurePolicies(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// The above webhook creation has been ignored - our metrics remain the same
-	require.Never(t, func() bool {
-		return testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy") != nil
+	require.Eventually(t, func() bool {
+		return collector.observationCounter.Load() > observationCount
 	}, 5*time.Second, 10*time.Millisecond)
+
+	err = testutil.CollectAndCompare(collector, bytes.NewBufferString(expected), "kube_validating_webhook_failure_policy")
+	require.NoError(t, err)
 }

@@ -2,6 +2,7 @@ package webhooks
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -27,6 +28,7 @@ type WebhookCollector struct {
 	validatingWebhooksSettings map[string]admissionregistrationv1.FailurePolicyType
 	mutatingWebhooksSettings   map[string]admissionregistrationv1.FailurePolicyType
 	metricDescription          *prometheus.Desc
+	observationCounter         atomic.Int64
 }
 
 func NewWebhookCollector(kubeClient kubernetes.Interface, namespace string, logger log.Logger) *WebhookCollector {
@@ -51,6 +53,7 @@ func (c *WebhookCollector) Start() error {
 	// monitor for validating and mutating webhooks and maintain a local cache of their failure policy settings
 	webHookListener := &tlscert.WebhookConfigurationListener{
 		OnValidatingWebhookConfiguration: func(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) error {
+			c.observationCounter.Add(1)
 			if selector, err := metav1.LabelSelectorAsSelector(c.labelSelector); err != nil {
 				return err
 			} else if !selector.Matches(labels.Set(webhook.GetLabels())) {
@@ -70,6 +73,7 @@ func (c *WebhookCollector) Start() error {
 			return nil
 		},
 		OnMutatingWebhookConfiguration: func(webhook *admissionregistrationv1.MutatingWebhookConfiguration) error {
+			c.observationCounter.Add(1)
 			if selector, err := metav1.LabelSelectorAsSelector(c.labelSelector); err != nil {
 				return err
 			} else if !selector.Matches(labels.Set(webhook.GetLabels())) {
