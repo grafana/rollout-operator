@@ -74,6 +74,12 @@ func TestDownscaleDryRun(t *testing.T) {
 	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withDryRun())
 }
 
+// TestDownscaleAnotherStsHasNonUpdatedReplicas validates that the downscale request will be denied if another StatefulSet has pods yet to be updated.
+func TestDownscaleAnotherStsHasNonUpdatedReplicas(t *testing.T) {
+	testPrepDownscaleWebhook(t, 5, 1, withNonUpdatedReplicas(), expectDeny())
+	testPrepDownscaleWebhookWithZoneTracker(t, 5, 3, withNonUpdatedReplicas(), expectDeny())
+}
+
 func newDebugLogger() log.Logger {
 	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	var options []level.Option
@@ -91,6 +97,8 @@ type testParams struct {
 	dryRun               bool
 	expectDeletes        bool
 	failSetLastDownscale bool
+	// optional function to decorate the default mock StatefulSet objects
+	statefulSetDecorator func(statefulSets []runtime.Object) error
 }
 
 type optionFunc func(*testParams)
@@ -127,6 +135,25 @@ func withDryRun() optionFunc {
 	return func(tp *testParams) {
 		tp.dryRun = true
 		tp.stsAnnotated = false
+	}
+}
+
+// withNonUpdatedReplicas will decorate the second StatefulSet to indicate it has pods which have not yet been updated
+func withNonUpdatedReplicas() optionFunc {
+	return func(tp *testParams) {
+		tp.statefulSetDecorator = func(statefulSets []runtime.Object) error {
+			if len(statefulSets) > 1 {
+				sts, ok := statefulSets[1].(*appsv1.StatefulSet)
+				if !ok {
+					return fmt.Errorf("expected a StatefulSet object")
+				}
+				sts.Status = appsv1.StatefulSetStatus{
+					Replicas:        1,
+					UpdatedReplicas: 0,
+				}
+			}
+			return nil
+		}
 	}
 }
 
@@ -285,6 +312,11 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 			},
 		},
 	}
+	if params.statefulSetDecorator != nil {
+		err := params.statefulSetDecorator(objects)
+		require.NoError(t, err)
+	}
+
 	if params.downscaleInProgress {
 		objects = append(objects,
 			&appsv1.StatefulSet{
@@ -760,6 +792,12 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 			},
 		},
 	}
+
+	if params.statefulSetDecorator != nil {
+		err := params.statefulSetDecorator(objects)
+		require.NoError(t, err)
+	}
+
 	if params.downscaleInProgress {
 		objects = append(objects,
 			&appsv1.StatefulSet{

@@ -72,6 +72,28 @@ func TestPodPartitionZoneMatch(t *testing.T) {
 	}
 }
 
+func TestOptionalRegexGrouping(t *testing.T) {
+	pdbCfg := config{
+		podNamePartition:           regexp.MustCompile(`^[a-z\-]+-zone-[a-z]-(partition\-)?([0-9]+)$`),
+		podNamePartitionRegexGroup: 2,
+	}
+
+	// test successful matches
+	for _, name := range []string{"ingester-zone-a-5", "ingester-zone-a-partition-5"} {
+		pod := newPodCfgTest(name)
+		p, err := pdbCfg.podPartition(pod)
+		require.NoError(t, err, name)
+		require.Equal(t, "5", p)
+	}
+
+	// test no match
+	for _, name := range []string{"", "ingester-zone-a", "test-app-1"} {
+		pod := newPodCfgTest(name)
+		_, err := pdbCfg.podPartition(pod)
+		require.NotNil(t, err)
+	}
+}
+
 // TestPodPartitionZoneMatch validates the regular expression parsing of a Pod name to return a logical partition name
 func TestPodPartitionZoneMatchWithGrouping(t *testing.T) {
 	pdbCfg := config{
