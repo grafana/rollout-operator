@@ -5,5 +5,5 @@ rollout_operator {
     namespace: 'default',
     zpdb_custom_resource_definition_enabled: false,
   },
-  ingester_rollout_pdb: $.newZPDB('ingester-rollout', 'ingester', 1, '[a-z\\-]+-zone-[a-z]-([0-9]+)'),
+  ingester_rollout_pdb: $.newZPDB('ingester-rollout', 'ingester', 1, '[a-z\\-]+-zone-[a-z]-(partition\\-)?([0-9]+)'),
 }
