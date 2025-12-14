@@ -180,6 +180,56 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			expectedDeletedPods: []string{"ingester-zone-b-1"},
 			zpdbErrors:          []error{errors.New("zpdb denies eviction request")},
 		},
+		"zones a & b need full updates, but the zpdb denies all the updates in zone-a": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a"),
+				mockStatefulSet("ingester-zone-b"),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			// no pods are deleted because the updates to zone-a are considered ongoing
+			expectedDeletedPods: nil,
+			zpdbErrors:          []error{errors.New("zpdb denies eviction request"), errors.New("zpdb denies eviction request"), errors.New("zpdb denies eviction request")},
+		},
+		"zones a & b need full updates, but the zpdb denies some of the updates in zone-a": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a"),
+				mockStatefulSet("ingester-zone-b"),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-3", testPrevRevisionHash),
+			},
+			// ingester-zone-a-0 denied, but a-1 is deleted. No other pods are deleted as the update in zone-a is considered ongoing
+			expectedDeletedPods: []string{"ingester-zone-a-1"},
+			zpdbErrors:          []error{errors.New("zpdb denies eviction request")},
+		},
+		"zones a & b need full updates, the zpdb does not deny anything in zone-a": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision()),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			// the first batch of zone-a pods is deleted
+			expectedDeletedPods: []string{"ingester-zone-a-0", "ingester-zone-a-1"},
+		},
 		"should default max unavailable to 1 if set to an invalid value": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision(), func(sts *v1.StatefulSet) {
