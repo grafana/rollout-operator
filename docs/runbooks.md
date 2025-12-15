@@ -36,12 +36,13 @@ How to **investigate**:
 
 This alert fires when the zone aware pod disruption budget configuration validating webhook observes an invalid ZPDB object.
 
-This indicates that a malformed configuration was attempted to be applied, or an invalid configuration already exists when the `rollout-operator` starts.
+This indicates that a malformed configuration has been applied, or an invalid configuration already exists when the `rollout-operator` starts.
 
 How it **works**:
 
-- If the `zpdb-validation` `ValidatingWebhookConfiguration` has a failure policy set to `Fail`, then the invalid configuration will have been rejected. But it may indicate that there is an issue with the construction of the zpdb configurations
-- If the failure policy is set to `Ignore`, then an invalid configuration may have been applied. This can occur if the `rollout-operator` pod has not been running and a `zpdb` configuration is applied. With a failure policy set to `Ignore` the configuration will be accepted if the webhook is unavailable
+- If the `zpdb-validation` `ValidatingWebhookConfiguration` has a failure policy set to `Fail`, then the invalid configuration will be rejected by this webhook. This alert will NOT be triggered in this circumstance
+- If the failure policy is set to `Ignore`, then an invalid configuration may have been applied. This can occur if the `rollout-operator` pod is not running and a `zpdb` configuration is applied. With a failure policy set to `Ignore` the configuration will be accepted if the webhook is unavailable
+- If the `zpdb-validation` `ValidatingWebhookConfiguration` is not applied then an invalid configuration may be applied. This alert will trigger in this scenario.
 
 How to **investigate**:
 
