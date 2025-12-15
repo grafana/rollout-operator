@@ -168,7 +168,7 @@ jobs:
           sudo sh install-misspell.sh -b /usr/bin
       - name: Install prettier
         run: |
-          sudo npm install --save-dev --save-exact prettier
+          sudo npm install prettier
       - name: Check doc lint
         run: make doc-lint
       - name: Check doc
