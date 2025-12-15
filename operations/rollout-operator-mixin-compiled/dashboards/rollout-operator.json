@@ -1327,15 +1327,61 @@
                            "mode": "absolute",
                            "steps": [ ]
                         },
-                        "unit": "short"
+                        "unit": "count"
                      },
-                     "overrides": [ ]
+                     "overrides": [
+                        {
+                           "matcher": {
+                              "id": "byName",
+                              "options": "updated"
+                           },
+                           "properties": [
+                              {
+                                 "id": "color",
+                                 "value": {
+                                    "fixedColor": "#31a354",
+                                    "mode": "fixed"
+                                 }
+                              }
+                           ]
+                        },
+                        {
+                           "matcher": {
+                              "id": "byName",
+                              "options": "deleted"
+                           },
+                           "properties": [
+                              {
+                                 "id": "color",
+                                 "value": {
+                                    "fixedColor": "#3182bd",
+                                    "mode": "fixed"
+                                 }
+                              }
+                           ]
+                        },
+                        {
+                           "matcher": {
+                              "id": "byName",
+                              "options": "invalid"
+                           },
+                           "properties": [
+                              {
+                                 "id": "color",
+                                 "value": {
+                                    "fixedColor": "#de2d26",
+                                    "mode": "fixed"
+                                 }
+                              }
+                           ]
+                        }
+                     ]
                   },
                   "id": 15,
                   "links": [ ],
                   "options": {
                      "legend": {
-                        "showLegend": false
+                        "showLegend": true
                      },
                      "tooltip": {
                         "mode": "multi",
@@ -1345,7 +1391,7 @@
                   "span": 4,
                   "targets": [
                      {
-                        "expr": "sum by (result)(rollout_operator_zpdb_configurations_observed_total{result!=\"ignored\", cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"})",
+                        "expr": "sum by (result)(rollout_operator_zpdb_configurations_observed_total{result!~\".*ignored\", cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"})",
                         "format": "time_series",
                         "legendFormat": "{{result}}",
                         "legendLink": null
@@ -1501,7 +1547,7 @@
                            "mode": "absolute",
                            "steps": [ ]
                         },
-                        "unit": "short"
+                        "unit": "count"
                      },
                      "overrides": [ ]
                   },

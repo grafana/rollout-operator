@@ -177,11 +177,26 @@ local filename = 'rollout-operator.json';
         $.timeseriesPanel('Configuration changes') +
         $.panelDescription('Configuration changes', 'Shows the number of ZPDB configuration changes. This includes the number of updated (included added), deleted and invalid configurations.') +
         $.queryPanel(
-          'sum by (result)(rollout_operator_zpdb_configurations_observed_total{result!="ignored", %s})' % [$.rolloutOperator_jobMatcher()],
+          'sum by (result)(rollout_operator_zpdb_configurations_observed_total{result!~".*ignored", %s})' % [$.rolloutOperator_jobMatcher()],
           '{{result}}'
         ) +
-        $.min(0) +
-        $.hideLegend
+        {
+          fieldConfig+: {
+            overrides: [
+              $.overrideFieldByName('updated', [
+                $.overrideProperty('color', { mode: 'fixed', fixedColor: '#31a354' }),
+              ]),
+              $.overrideFieldByName('deleted', [
+                $.overrideProperty('color', { mode: 'fixed', fixedColor: '#3182bd' }),
+              ]),
+              $.overrideFieldByName('invalid', [
+                $.overrideProperty('color', { mode: 'fixed', fixedColor: '#de2d26' }),
+              ]),
+            ],
+          },
+        } +
+        $.units('count') +
+        $.min(0)
       )
       .addPanel(
         $.timeseriesPanel('Request rate by status') +
@@ -221,6 +236,7 @@ local filename = 'rollout-operator.json';
           'sum by(job) (rollout_operator_zpdb_inflight_eviction_requests{%s})' % [$.rolloutOperator_jobMatcher()],
           '{{job}}'
         ) +
+        $.units('count') +
         $.min(0) +
         $.hideLegend
       )
