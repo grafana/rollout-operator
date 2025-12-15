@@ -165,7 +165,7 @@ jobs:
       - name: Install misspell
         run: |
           curl -L -o install-misspell.sh https://git.io/misspell
-          sh install-misspell.sh -b .
+          sh install-misspell.sh -b /usr/bin
       - name: Check doc lint
         run: make doc-lint
       - name: Check doc
