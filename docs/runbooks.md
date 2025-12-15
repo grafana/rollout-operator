@@ -19,18 +19,18 @@ How it **works**:
 - This alert checks on the configured failure policy of the `pod-eviction` and `zpdb-validation` validating webhooks via the `kube_validating_webhook_failure_policy` metric
 - Although it may be valid to temporarily enable an `Ignore` failure mode, normal operations should have the failure mode set to `Fail`
 - When in `Ignore` mode the Kubernetes API server ignores a webhook failure if the webhook can not be reached
-- This would result in the zone aware pod disruption budget not being enforced or the zpdb configuration validator not being enforced if the `rollout-operator` is not running
+- This would result in the zone aware pod disruption budget not being enforced or the ZPDB configuration validator not being enforced if the `rollout-operator` is not running
 
 How to **investigate**:
 
-- Review the configuration of the `pod-eviction` and `zpdb-configuration` webhooks
-- `kubectl -n <namespace> get ValidatingWebhookConfigurations zpdb-validation-<namespace> -o yaml`
-- `kubectl -n <namespace> get ValidatingWebhookConfigurations pod-eviction-<namespace> -o yaml`
+- Review the configuration of the `pod-eviction` and `zpdb-configuration` webhooks:
+  - `kubectl -n <namespace> get ValidatingWebhookConfigurations zpdb-validation-<namespace> -o yaml`
+  - `kubectl -n <namespace> get ValidatingWebhookConfigurations pod-eviction-<namespace> -o yaml`
 - Update the configuration to use a `Fail` policy. See jsonnet configuration options `ignore_rollout_operator_zpdb_eviction_webhook_failures` and `ignore_rollout_operator_zpdb_validation_webhook_failures` in [rollout-operator.libsonnet](https://github.com/grafana/rollout-operator/blob/main/operations/rollout-operator/rollout-operator.libsonnet).
 
 ### BadZoneAwarePodDisruptionBudgetConfiguration
 
-This alert fires when the zone aware pod disruption budget configuration validating webhook observes an invalid configuration.
+This alert fires when the zone aware pod disruption budget configuration validating webhook observes an invalid ZPDB object.
 
 This indicates that a malformed configuration was attempted to be applied, or an invalid configuration already exists when the `rollout-operator` starts.
 
