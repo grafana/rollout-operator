@@ -1,5 +1,9 @@
 # Rollout-operator runbooks
 
+## Helm chart
+
+A Helm chart is available [here](https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator) for the `rollout-operator`.
+
 ## Alerts
 
 ### IncorrectWebhookConfigurationFailurePolicy
@@ -128,6 +132,8 @@ _config+:: {
     ignore_rollout_operator_zpdb_validation_webhook_failures: true|false,
     ignore_rollout_operator_zpdb_eviction_webhook_failures: true|false
 ```
+
+Note that if you are using the `rollout-operator` [Helm chart](https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator) there is a single configuration value of `webhooks.failurePolicy` which can be set to `Fail` or `Ignore` and this is applied to all the webhooks.
 
 ### Disable voluntary pod evictions
 
