@@ -8,10 +8,8 @@ local utils = import 'mixin-utils/utils.libsonnet';
       rules: [
         {
           alert: $.alertName('IncorrectWebhookConfigurationFailurePolicy'),
-          expr: |||
-            count by(type, webhook) (kube_validating_webhook_failure_policy{policy="Ignore", webhook=~"^(pod-eviction|zpdb-validation)%s"} > 0)
-          ||| % $._config.webhook_domain(),
-          'for': '1h',
+          expr: 'count by(type, webhook) (kube_validating_webhook_failure_policy{policy="Ignore", webhook=~"^(pod-eviction|zpdb-validation).+"} > 0)',
+          'for': '5m',
           labels: {
             severity: 'warning',
           },
