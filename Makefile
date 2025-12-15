@@ -91,13 +91,16 @@ integration/mock-service/.uptodate:
 
 .PHONY: lint
 lint: ## Run lints to check for style issues.
-lint: check-makefiles
-	misspell -error $(DOC_SOURCES_PATH)
+lint: check-makefiles doc-lint
 	golangci-lint run --timeout=5m
 
 .PHONY: fix-lint
 fix-lint: ## Automatically fix linting issues where possible
 	golangci-lint run --timeout=5m --fix
+
+.PHONY: doc-lint
+doc-lint: 
+	misspell -error $(DOC_SOURCES_PATH)
 
 .PHONY: clean
 clean: ## Run go clean and remove the rollout-operator binary
