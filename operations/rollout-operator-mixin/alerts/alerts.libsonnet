@@ -40,7 +40,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
             severity: 'warning',
           },
           annotations: {
-            message: 'A sustained number of in-flight zpdb eviction requests has been observed.',
+            message: 'A sustained number of inflight ZPDB eviction requests has been observed.',
           },
         },
       ],
