@@ -30,7 +30,7 @@ How to **investigate**:
 
 ### BadZoneAwarePodDisruptionBudgetConfiguration
 
-This alert fires when the zone aware pod disruption budget configuration validating webhook observes an invalid configuration.
+This alert fires when the zone aware pod disruption budget configuration validating webhook observes an invalid ZPDB object.
 
 This indicates that a malformed configuration was attempted to be applied, or an invalid configuration already exists when the `rollout-operator` starts.
 
