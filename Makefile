@@ -23,6 +23,8 @@ MAKE_FILES := $(shell find . $(DONT_FIND) -o -name 'Makefile' -print -o -name '*
 MIXIN_PATH := operations/rollout-operator-mixin
 MIXIN_OUT_PATH ?= operations/rollout-operator-mixin-compiled
 
+DOC_SOURCES_PATH := docs
+
 .DEFAULT_GOAL := rollout-operator
 
 REGO_POLICIES_PATH=operations/policies
@@ -159,7 +161,16 @@ build-mixin: check-mixin-jb
 	@mkdir -p "$(MIXIN_OUT_PATH)"
 	@find "$(MIXIN_OUT_PATH)" -type f -delete;
 	mixtool generate dashboards --directory "$(MIXIN_OUT_PATH)/dashboards" "${MIXIN_PATH}/mixin.libsonnet";
+
+	@mkdir -p "$(MIXIN_OUT_PATH)/alerts"
+	mixtool generate alerts -y --output-alerts "$(MIXIN_OUT_PATH)/alerts/alerts.yaml" "${MIXIN_PATH}/mixin.libsonnet";
 	@echo "sample rollout-operator dashboard generated to $(MIXIN_OUT_PATH)/dashboards"
 
+.PHONY: mixin-serve
 mixin-serve: ## Runs Grafana loading the mixin dashboards.
 	@./operations/rollout-operator-mixin-tools/serve/run.sh -p $(MIXIN_OUT_PATH)
+
+.PHONY: doc
+doc:
+	misspell -error $(DOC_SOURCES_PATH)
+	prettier --write "$(DOC_SOURCES_PATH)/*.md"

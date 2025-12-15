@@ -170,5 +170,59 @@ local filename = 'rollout-operator.json';
         $.min(0) +
         $.hideLegend
       )
-    ),
+    )
+   .addRow(
+    $.row('ZPDB')
+     .addPanel(
+            $.timeseriesPanel('Configuration changes') +
+            $.panelDescription('Configuration changes', 'Shows the number of ZPDB configuration changes. This includes the number of updated (included added), deleted and invalid configurations.') +
+            $.queryPanel(
+              'sum by (result)(rollout_operator_zpdb_configurations_observed_total{result!="ignored", %s})' % [$.rolloutOperator_jobMatcher()],
+              '{{result}}'
+            ) +
+            $.min(0) +
+            $.hideLegend
+     )
+     .addPanel(
+             $.timeseriesPanel('Request rate by status') +
+             $.panelDescription('Request rate', 'Shows the number of ZPDB eviction requests per second, grouped by response status. Note that this includes both voluntary eviction requests via the pod-eviction webhook, and requests to delete a pod as part of the rolling update controller. HTTP 429 indicates that the request has been denied to enforce the pdb. Other HTTP 4xx and 5xx indicate and internal error within the eviction controller.') +
+             $.queryPanel(
+               'sum by(job, status) (rate(rollout_operator_zpdb_eviction_requests_total{%s}[$__rate_interval]))' % [$.rolloutOperator_jobMatcher()],
+               '{{status}}'
+             ) +
+             {
+               fieldConfig+: {
+                 overrides: [
+                   $.overrideFieldByName('200', [
+                     $.overrideProperty('color', { mode: 'fixed', fixedColor: '#31a354' }),
+                   ]),
+                   $.overrideFieldByName('429', [
+                    $.overrideProperty('color', { mode: 'fixed', fixedColor: '#3182bd' }),
+                  ]),
+                  $.overrideFieldByName('400', [
+                    $.overrideProperty('color', { mode: 'fixed', fixedColor: '#fdae6b' }),
+                  ]),
+                    $.overrideFieldByName('403', [
+                  $.overrideProperty('color', { mode: 'fixed', fixedColor: '#e6550d' }),
+                ]),
+                 $.overrideFieldByName('500', [
+                  $.overrideProperty('color', { mode: 'fixed', fixedColor: '#de2d26' }),
+                ]),
+ ],
+               },
+             } +
+             $.min(0) +
+             $.units('req/s')
+          )
+     .addPanel(
+              $.timeseriesPanel('In-flight requests') +
+              $.panelDescription('Request rate', 'Shows the number of in-flight ZPDB eviction requests. Note that this includes both voluntary eviction requests via the pod-eviction webhook, and requests to delete a pod as part of the rolling update controller.') +
+              $.queryPanel(
+                'sum by(job) (rollout_operator_zpdb_inflight_eviction_requests{%s})' % [$.rolloutOperator_jobMatcher()],
+                '{{job}}'
+              ) +
+              $.min(0) +
+              $.hideLegend
+           )
+   ),
 }

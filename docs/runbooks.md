@@ -1,0 +1,144 @@
+# Rollout-operator runbooks
+
+## Alerts
+
+### IncorrectWebhookConfigurationFailurePolicy
+
+This alert fires when one of the validating webhooks used by the `rollout-operator` has its failure policy set to `Ignore`.
+
+In normal operations the failure policy should be set to `Fail`.
+
+```
+kind: ValidatingWebhookConfiguration
+...
+  failurePolicy: Fail
+```
+
+How it **works**:
+
+- This alert checks on the configured failure policy of the `pod-eviction` and `zpdb-validation` validating webhooks via the `kube_validating_webhook_failure_policy` metric
+- Although it may be valid to temporarily enable an `Ignore` failure mode, normal operations should have the failure mode set to `Fail`
+- When in `Ignore` mode the Kubernetes API server ignores a webhook failure if the webhook can not be reached
+- This would result in the zone aware pod disruption budget not being enforced or the zpdb configuration validator not being enforced if the `rollout-operator` is not running
+
+How to **investigate**:
+
+- Review the configuration of the `pod-eviction` and `zpdb-configuration` webhooks
+- `kubectl -n <namespace> get ValidatingWebhookConfigurations zpdb-validation-<namespace> -o yaml`
+- `kubectl -n <namespace> get ValidatingWebhookConfigurations pod-eviction-<namespace> -o yaml`
+- Update the configuration to use a `Fail` policy. See jsonnet configuration options `ignore_rollout_operator_zpdb_eviction_webhook_failures` and `ignore_rollout_operator_zpdb_validation_webhook_failures` in [rollout-operator.libsonnet](https://github.com/grafana/rollout-operator/blob/main/operations/rollout-operator/rollout-operator.libsonnet).
+
+### BadZoneAwarePodDisruptionBudgetConfiguration
+
+This alert fires when the zone aware pod disruption budget configuration validating webhook observes an invalid configuration.
+
+This indicates that a malformed configuration was attempted to be applied, or an invalid configuration already exists when the `rollout-operator` starts.
+
+How it **works**:
+
+- If the `zpdb-validation` `ValidatingWebhookConfiguration` has a failure policy set to `Fail`, then the invalid configuration will have been rejected. But it may indicate that there is an issue with the construction of the zpdb configurations
+- If the failure policy is set to `Ignore`, then an invalid configuration may have been applied. This can occur if the `rollout-operator` pod has not been running and a `zpdb` configuration is applied. With a failure policy set to `Ignore` the configuration will be accepted if the webhook is unavailable
+
+How to **investigate**:
+
+- Review the `zpdb-validation` `ValidatingWebhookConfiguration` and ensure its failure policy is set to `Fail`
+- `kubectl -n <namespace> get ValidatingWebhookConfigurations zpdb-validation-<namespace> -o yaml`
+- Review the `zpdb` configurations and verify they are valid
+- `kubectl -n <namespace> get zpdb <name> -o yaml`
+
+### HighNumberInflightZpdbRequests
+
+This alert fires when there has been a sustained number of in-flight pod eviction requests for a given period of time.
+
+This indicates that there is likely an issue causing a delay in the pod eviction consideration process.
+
+How it **works**:
+- The `pod-eviction` `ValidatingWebhookConfiguration` routes voluntary pod eviction requests into the `zpdb` eviction controller
+- The rollout controller uses the `zpdb` eviction controller to test if a pod can be updated (as part of rolling updates)
+- The `zpdb` eviction controller serializes these requests, such that only one pod is considered at a time. Other requests are queued
+- The `zpdb` eviction controller relies on the Kubernetes API to query for status on StatefulSets and Pods
+
+How to **investigate**:
+- Review the `rollout-operator` logs (or trace) to gain insight into what may be causing a delay or blockage in the `zpdb` eviction controller
+- Use caution with restarting the `rollout-operator` pod. It maintains internal state of recently evicted pods
+- Ensure that the `pod-eviction` and `zpdb-validation` `ValidatingWebhookConfiguration` have a failure policy set to `Fail` before restarting the `rollout-operator`
+
+## Metrics
+
+A prometheus metrics service is available at `/metrics` of the `rollout-operator` deployment.
+
+### kube_validating_webhook_failure_policy
+
+This metric reports on the current configuration of validating and mutating webhook failure policy configurations.
+
+Labels are used to indicate the policy mode (`Fail` or `Ignore`) and the webhook details. A value of `1` indicates that this is the current setting.
+
+Use this metric to monitor that the webhooks have been correctly configured.
+
+### rollout_operator_zpdb_configurations_observed_total
+
+This counter metric reports on the total number of `ValidatingWebhookConfiguration` configurations which have been `updated` (including additions) or `deleted`.
+
+It also tracks the number of `ignored` and `invalid` configuration updates.
+
+A configuration will be `ignored` if it is a stale update or an update in an unexpected format.
+
+A configuration will be `invalid` if it fails a validation process.
+
+Use this metric to monitor for changes to the `zpdb` configurations and to monitor for unexpected `invalid` configurations being observed. This may indicate an error in the generation of these configurations.
+
+### rollout_operator_zpdb_eviction_requests_total
+
+This counter metric reports on the total number of pod eviction requests.
+
+This includes both pod eviction requests which come in via the pod eviction webhook, and pod deletion requests which come from the rollout controller (pod updates).
+
+Note that the number of requests arriving via the pod eviction webhook can be tracked with the `rollout_operator_kubernetes_api_client_request_duration_seconds_count` metric.
+
+Use this metric to monitor for abnormal request volume and/or frequency.
+
+### rollout_operator_zpdb_inflight_eviction_requests
+
+This is a gauge metric which tracks the number of in-flight pod eviction requests.
+
+Like `rollout_operator_zpdb_eviction_requests_total`, this metrics takes both eviction requests which come in via the pod eviction webhook, and pod deletion requests which come from the rollout controller (pod updates).
+
+Note that the number of in-flight requests via the pod eviction webhook can be tracked with the `rollout_operator_inflight_requests` metric.
+
+Use this metric to monitor for abnormal high volumes of in-flight requests. Since these eviction requests should return quickly, even a small number of sustained in-flight requests is likely indicative of an error.
+
+Check that the rollout-operator error logs to gain insight into why the eviction is being delayed.
+
+## Configuration
+
+See [rollout-operator.libsonnet](https://github.com/grafana/rollout-operator/blob/main/operations/rollout-operator/rollout-operator.libsonnet).
+
+### Webhook failure policies
+
+The following jsonnet flags can be set to toggle the webhook failure modes. These should be used with caution.
+
+Setting these to `true` will result in the Kubernetes API server proceeding if the webhook is not reachable / `rollout-operator` pod is not running.
+
+```shell
+_config+:: {
+    ignore_rollout_operator_no_downscale_webhook_failures: true|false,
+    ignore_rollout_operator_prepare_downscale_webhook_failures: true|false,
+    ignore_rollout_operator_zpdb_validation_webhook_failures: true|false,
+    ignore_rollout_operator_zpdb_eviction_webhook_failures: true|false    
+```
+
+### Disable voluntary pod evictions
+
+This example illustrates using a `mimir` identifier.
+
+```shell
+ingester_rollout_pdb+:
+  local podDisruptionBudget = $.policy.v1.podDisruptionBudget;
+  podDisruptionBudget.mixin.spec.withMaxUnavailable(0),
+```
+
+
+
+
+
+
