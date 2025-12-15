@@ -46,5 +46,5 @@ local utils = import 'mixin-utils/utils.libsonnet';
       ],
     },
   ],
-  groups+: $.withRunbookURL('https://grafana.com/docs/mimir/latest/operators-guide/mimir-runbooks/#%s', $.withExtraLabelsAnnotations(alertGroups)),
+  groups+: $.withRunbookURL('https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#%s', $.withExtraLabelsAnnotations(alertGroups)),
 }
