@@ -9,7 +9,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
         {
           alert: $.alertName('IncorrectWebhookConfigurationFailurePolicy'),
           expr: |||
-           count by(type, webhook) (kube_validating_webhook_failure_policy{policy="Ignore", webhook=~"^(pod-eviction|zpdb-validation)%s"} > 0)
+            count by(type, webhook) (kube_validating_webhook_failure_policy{policy="Ignore", webhook=~"^(pod-eviction|zpdb-validation)%s"} > 0)
           ||| % $._config.webhook_domain(),
           'for': '1h',
           labels: {
@@ -43,8 +43,8 @@ local utils = import 'mixin-utils/utils.libsonnet';
             message: 'A sustained number of in-flight zpdb eviction requests has been observed.',
           },
         },
-       ]
-    }
+      ],
+    },
   ],
   groups+: $.withRunbookURL('https://grafana.com/docs/mimir/latest/operators-guide/mimir-runbooks/#%s', $.withExtraLabelsAnnotations(alertGroups)),
 }
