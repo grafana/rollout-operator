@@ -92,6 +92,7 @@ integration/mock-service/.uptodate:
 .PHONY: lint
 lint: ## Run lints to check for style issues.
 lint: check-makefiles
+	misspell -error $(DOC_SOURCES_PATH)
 	golangci-lint run --timeout=5m
 
 .PHONY: fix-lint
@@ -170,7 +171,11 @@ build-mixin: check-mixin-jb
 mixin-serve: ## Runs Grafana loading the mixin dashboards.
 	@./operations/rollout-operator-mixin-tools/serve/run.sh -p $(MIXIN_OUT_PATH)
 
+check-doc: ## Check the documentation files are up to date.
+check-doc: doc
+	@find "$(DOC_SOURCES_PATH)" -name "*.md" | xargs git diff --exit-code -- \
+	|| (echo "Please update documentation by running 'make doc' and committing the changes" && false)
+
 .PHONY: doc
 doc:
-	misspell -error $(DOC_SOURCES_PATH)
 	prettier --write "$(DOC_SOURCES_PATH)/*.md"

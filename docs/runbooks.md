@@ -53,12 +53,14 @@ This alert fires when there has been a sustained number of in-flight pod evictio
 This indicates that there is likely an issue causing a delay in the pod eviction consideration process.
 
 How it **works**:
+
 - The `pod-eviction` `ValidatingWebhookConfiguration` routes voluntary pod eviction requests into the `zpdb` eviction controller
 - The rollout controller uses the `zpdb` eviction controller to test if a pod can be updated (as part of rolling updates)
 - The `zpdb` eviction controller serializes these requests, such that only one pod is considered at a time. Other requests are queued
 - The `zpdb` eviction controller relies on the Kubernetes API to query for status on StatefulSets and Pods
 
 How to **investigate**:
+
 - Review the `rollout-operator` logs (or trace) to gain insight into what may be causing a delay or blockage in the `zpdb` eviction controller
 - Use caution with restarting the `rollout-operator` pod. It maintains internal state of recently evicted pods
 - Ensure that the `pod-eviction` and `zpdb-validation` `ValidatingWebhookConfiguration` have a failure policy set to `Fail` before restarting the `rollout-operator`
@@ -124,7 +126,7 @@ _config+:: {
     ignore_rollout_operator_no_downscale_webhook_failures: true|false,
     ignore_rollout_operator_prepare_downscale_webhook_failures: true|false,
     ignore_rollout_operator_zpdb_validation_webhook_failures: true|false,
-    ignore_rollout_operator_zpdb_eviction_webhook_failures: true|false    
+    ignore_rollout_operator_zpdb_eviction_webhook_failures: true|false
 ```
 
 ### Disable voluntary pod evictions
@@ -136,9 +138,3 @@ ingester_rollout_pdb+:
   local podDisruptionBudget = $.policy.v1.podDisruptionBudget;
   podDisruptionBudget.mixin.spec.withMaxUnavailable(0),
 ```
-
-
-
-
-
-
