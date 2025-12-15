@@ -319,7 +319,7 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 	}
 
 	podEvictionFunc := func(ctx context.Context, _ log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {
-		return evictionController.HandlePodEvictionRequest(ctx, ar)
+		return evictionController.HandlePodEvictionRequest(ctx, ar, zpdb.NewMaxUnavailableZeroOverrideNone())
 	}
 
 	zpdbValidationFunc := func(ctx context.Context, l log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {

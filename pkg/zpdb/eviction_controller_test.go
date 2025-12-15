@@ -129,7 +129,7 @@ func newTestContextWithoutAdmissionReview(t *testing.T, pdbRawConfig *unstructur
 }
 
 func (c *testContext) assertDenyResponse(t *testing.T, reason string, statusCode int) {
-	response := c.controller.HandlePodEvictionRequest(c.ctx, c.request)
+	response := c.controller.HandlePodEvictionRequest(c.ctx, c.request, NewMaxUnavailableZeroOverrideNone())
 	require.NotNil(t, response.UID)
 	require.False(t, response.Allowed)
 	require.Equal(t, reason, response.Result.Message)
@@ -137,23 +137,23 @@ func (c *testContext) assertDenyResponse(t *testing.T, reason string, statusCode
 }
 
 func (c *testContext) assertDenyResponseViaMarkPodAsDeleted(t *testing.T, pod string, reason string) {
-	response := c.controller.MarkPodAsDeleted(c.ctx, testNamespace, pod, "eviction-controller-test")
+	response := c.controller.MarkPodAsDeleted(c.ctx, testNamespace, pod, "eviction-controller-test", NewMaxUnavailableZeroOverrideNone())
 	require.ErrorContains(t, response, reason)
 }
 
 func (c *testContext) assertAllowResponseViaMarkPodAsDeleted(t *testing.T, pod string) {
-	response := c.controller.MarkPodAsDeleted(t.Context(), testNamespace, pod, "eviction-controller-test")
+	response := c.controller.MarkPodAsDeleted(t.Context(), testNamespace, pod, "eviction-controller-test", NewMaxUnavailableZeroOverrideNone())
 	require.NoError(t, response)
 }
 
 func (c *testContext) assertAllowResponse(t *testing.T) {
-	response := c.controller.HandlePodEvictionRequest(c.ctx, c.request)
+	response := c.controller.HandlePodEvictionRequest(c.ctx, c.request, NewMaxUnavailableZeroOverrideNone())
 	require.NotNil(t, response.UID)
 	require.True(t, response.Allowed)
 }
 
 func (c *testContext) assertAllowResponseWithWarning(t *testing.T, warning string) {
-	response := c.controller.HandlePodEvictionRequest(c.ctx, c.request)
+	response := c.controller.HandlePodEvictionRequest(c.ctx, c.request, NewMaxUnavailableZeroOverrideNone())
 	require.NotNil(t, response.UID)
 	require.True(t, response.Allowed)
 	require.Equal(t, warning, response.Warnings[0])
@@ -243,7 +243,7 @@ func TestPodEviction_MaxUnavailableEq0(t *testing.T) {
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", "403")))
 }
 
-func TestPodEviction_MaxUnavailableEq0_ViaAllowPodEviction(t *testing.T) {
+func TestPodEviction_MaxUnavailableEq0_ViaMarkPodAsDeleted(t *testing.T) {
 	sts := newEvictionControllerSts(statefulSetZoneA)
 	pod := newPod(testPodZoneA0, sts)
 	testCtx := newTestContextWithoutAdmissionReview(t, newPDBMaxUnavailable(0, rolloutGroupValue), pod, sts)
@@ -253,7 +253,34 @@ func TestPodEviction_MaxUnavailableEq0_ViaAllowPodEviction(t *testing.T) {
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", "403")))
 }
 
-func TestPodEviction_Allowed_ViaAllowPodEviction(t *testing.T) {
+func TestPodEviction_MaxUnavailableEq0_Override_MarkPodAsDeleted(t *testing.T) {
+	objs := make([]runtime.Object, 0, 12)
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneC))
+
+	for _, p := range []string{testPodZoneA0, testPodZoneA1, testPodZoneA2} {
+		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
+	}
+	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
+		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
+	}
+	for _, p := range []string{testPodZoneC0, testPodZoneC1, testPodZoneC2} {
+		objs = append(objs, newPod(p, objs[2].(*appsv1.StatefulSet)))
+	}
+
+	zoneAPod0 := objs[3].(*corev1.Pod)
+
+	testCtx := newTestContextWithoutAdmissionReview(t, newPDBMaxUnavailable(0, rolloutGroupValue), objs...)
+	defer testCtx.controller.Stop()
+	// even though the config has a maxUnavailable=0, an override is passed in which allows this eviction to be considered
+	response := testCtx.controller.MarkPodAsDeleted(testCtx.ctx, testNamespace, zoneAPod0.Name, "eviction-controller-test", NewMaxUnavailableZeroOverride(1))
+	require.NoError(t, response)
+	require.True(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
+}
+
+func TestPodEviction_Allowed_ViaMarkPodAsDeleted(t *testing.T) {
 	objs := make([]runtime.Object, 0, 12)
 	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
 	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
@@ -375,6 +402,51 @@ func TestPodEviction_MultiZoneClassic(t *testing.T) {
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
 	testCtx.assertDenyResponse(t, "1 pod unknown in ingester-zone-b", 429)
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
+	testCtx.controller.Stop()
+}
+
+// TestPodEviction_MultiZoneClassicOverrideHasNoEffectWhenNotZero validates that the MaxUnavailableZeroOverride
+// is only used when maxUnavailable=0. Setting the override when this is not true has no effect.
+func TestPodEviction_MultiZoneClassicOverrideHasNoEffectWhenNotZero(t *testing.T) {
+
+	objs := make([]runtime.Object, 0, 12)
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneC))
+
+	for _, p := range []string{testPodZoneA0, testPodZoneA1, testPodZoneA2} {
+		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
+	}
+	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
+		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
+	}
+	for _, p := range []string{testPodZoneC0, testPodZoneC1, testPodZoneC2} {
+		objs = append(objs, newPod(p, objs[2].(*appsv1.StatefulSet)))
+	}
+
+	zoneAPod0 := objs[3].(*corev1.Pod)
+
+	// allow eviction since all other pods are healthy
+	// also check that the evicted pod has been stored in the eviction configCache
+	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
+	require.False(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
+
+	// note that the override of 0 is ignored since the zpdb configuration has maxUnavailable != 0
+	response := testCtx.controller.HandlePodEvictionRequest(testCtx.ctx, testCtx.request, NewMaxUnavailableZeroOverride(0))
+	require.NotNil(t, response.UID)
+	require.True(t, response.Allowed)
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
+	require.True(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
+
+	// the override of 2 is ignored since the zpdb configuration has maxUnavailable != 0
+	request := createBasicEvictionAdmissionReview(testPodZoneB0, testNamespace)
+	response = testCtx.controller.HandlePodEvictionRequest(testCtx.ctx, request, NewMaxUnavailableZeroOverride(2))
+
+	require.NotNil(t, response.UID)
+	require.False(t, response.Allowed)
+	require.Equal(t, "1 pod not ready in ingester-zone-a", response.Result.Message)
+	require.Equal(t, int32(429), response.Result.Code)
+
 	testCtx.controller.Stop()
 }
 

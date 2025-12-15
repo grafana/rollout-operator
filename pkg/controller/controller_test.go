@@ -33,6 +33,7 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
+	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const (
@@ -1364,7 +1365,7 @@ type mockEvictionController struct {
 	nextErrorsIfAny []error
 }
 
-func (m *mockEvictionController) MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error {
+func (m *mockEvictionController) MarkPodAsDeleted(_ context.Context, _ string, _ string, _ string, _ zpdb.MaxUnavailableZeroOverride) error {
 	var response error
 	if len(m.nextErrorsIfAny) > 0 {
 		response = m.nextErrorsIfAny[0]

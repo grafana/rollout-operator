@@ -32,6 +32,7 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
+	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const (
@@ -47,7 +48,7 @@ type httpClient interface {
 }
 
 type ZPDBEvictionController interface {
-	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error
+	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string, override zpdb.MaxUnavailableZeroOverride) error
 }
 
 type RolloutController struct {
@@ -589,7 +590,12 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			// the latest information is used to determine the zone/partition disruption level.
 			// If this request returns without error, the pod will be placed into the ZPDB pod eviction cache and will
 			// be considered as not ready until it either restarts or is expired from the cache.
-			err := c.zpdbController.MarkPodAsDeleted(ctx, pod.Namespace, pod.Name, "rollout-controller")
+			//
+			// A MaxUnavailableZeroOverride is set to 1. This ensures that if the pod eviction webhook has a zpdb configuration
+			// set to maxUnavailable=0 (no voluntary evictions) this controller can still request pods to be deleted.
+			// An alternate maxUnavailable of 1 is used since this is valid for either an ingest-storage / partition aware
+			// configuration or a classic zones deployment.
+			err := c.zpdbController.MarkPodAsDeleted(ctx, pod.Namespace, pod.Name, "rollout-controller", zpdb.NewMaxUnavailableZeroOverride(1))
 			if err != nil {
 				// Skip this pod. The reconcile loop regularly runs and this pod will have an opportunity to be re-tried.
 				// Rather than returning false here and abandoning the rest of the updates until the next reconcile,
