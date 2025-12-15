@@ -51,13 +51,14 @@ type config struct {
 	logFormat string
 	logLevel  string
 
-	serverPort           int
-	kubeAPIURL           string
-	kubeConfigFile       string
-	kubeClusterDomain    string
-	kubeNamespace        string
-	kubeClientTimeout    time.Duration
-	reconcileInterval    time.Duration
+	serverPort        int
+	kubeAPIURL        string
+	kubeConfigFile    string
+	kubeClusterDomain string
+	kubeNamespace     string
+	kubeClientTimeout time.Duration
+	reconcileInterval time.Duration
+	// rolloutDelay         time.Duration
 	clusterValidationCfg clusterutil.ClusterValidationProtocolConfigForHTTP
 
 	serverTLSEnabled bool
@@ -87,6 +88,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.kubeClusterDomain, "kubernetes.cluster-domain", "cluster.local.", "The Kubernetes cluster domain.")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
+	// fs.DurationVar(&cfg.rolloutDelay, "rollout.delay", 0, "The delay before starting a rollout.")
 	cfg.clusterValidationCfg.RegisterFlagsWithPrefix("server.cluster-validation.http.", fs)
 
 	fs.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
@@ -173,7 +175,7 @@ func main() {
 	check(srv.Start())
 
 	// Build the Kubernetes client config.
-	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile)
+	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile) //sepi
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
 	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
 

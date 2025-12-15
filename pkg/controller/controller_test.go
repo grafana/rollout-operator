@@ -1138,6 +1138,50 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 	}
 }
 
+func TestRolloutController_RolloutDelayForStatefulSet(t *testing.T) {
+	c := &RolloutController{logger: log.NewNopLogger()}
+
+	tests := []struct {
+		name      string
+		sts       *v1.StatefulSet
+		wantDelay time.Duration
+	}{
+		{
+			name:      "no label returns zero delay",
+			sts:       mockStatefulSet("ingester-zone-a"),
+			wantDelay: 0,
+		},
+		{
+			name: "empty label returns zero delay",
+			sts: mockStatefulSet("ingester-zone-a", withLabels(map[string]string{
+				config.RolloutDelayKey: "",
+			})),
+			wantDelay: 0,
+		},
+		{
+			name: "invalid duration returns zero delay",
+			sts: mockStatefulSet("ingester-zone-a", withLabels(map[string]string{
+				config.RolloutDelayKey: "not-a-duration",
+			})),
+			wantDelay: 0,
+		},
+		{
+			name: "valid duration is parsed",
+			sts: mockStatefulSet("ingester-zone-a", withLabels(map[string]string{
+				config.RolloutDelayKey: "10s",
+			})),
+			wantDelay: 10 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := c.rolloutDelayForStatefulSet(tt.sts)
+			assert.Equal(t, tt.wantDelay, got)
+		})
+	}
+}
+
 func mockStatefulSet(name string, overrides ...func(sts *v1.StatefulSet)) *v1.StatefulSet {
 	replicas := int32(3)
 
