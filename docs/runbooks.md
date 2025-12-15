@@ -19,7 +19,7 @@ How it **works**:
 - This alert checks on the configured failure policy of the `pod-eviction` and `zpdb-validation` validating webhooks via the `kube_validating_webhook_failure_policy` metric
 - Although it may be valid to temporarily enable an `Ignore` failure mode, normal operations should have the failure mode set to `Fail`
 - When in `Ignore` mode the Kubernetes API server ignores a webhook failure if the webhook can not be reached
-- This would result in the zone aware pod disruption budget not being enforced or the zpdb configuration validator not being enforced if the `rollout-operator` is not running
+- This would result in the zone aware pod disruption budget not being enforced or the ZPDB configuration validator not being enforced if the `rollout-operator` is not running
 
 How to **investigate**:
 
