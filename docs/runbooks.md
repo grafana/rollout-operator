@@ -72,7 +72,7 @@ How to **investigate**:
 
 ## Metrics
 
-A prometheus metrics service is available at `/metrics` of the `rollout-operator` deployment.
+A Prometheus metrics endpoint is available at `/metrics` of the `rollout-operator` deployment.
 
 ### kube_validating_webhook_failure_policy
 
@@ -112,7 +112,7 @@ Like `rollout_operator_zpdb_eviction_requests_total`, this metrics takes both ev
 
 Note that the number of in-flight requests via the pod eviction webhook can be tracked with the `rollout_operator_inflight_requests` metric.
 
-Use this metric to monitor for abnormal high volumes of in-flight requests. Since these eviction requests should return quickly, even a small number of sustained in-flight requests is likely indicative of an error.
+Use this metric to monitor for abnormal high volumes of in-flight requests. Since these eviction requests should return quickly, even a small number of sustained in-flight requests is likely indicative of an issue.
 
 Check that the rollout-operator error logs to gain insight into why the eviction is being delayed.
 
@@ -126,7 +126,7 @@ The following jsonnet flags can be set to toggle the webhook failure modes. Thes
 
 Setting these to `true` will result in the Kubernetes API server proceeding if the webhook is not reachable / `rollout-operator` pod is not running.
 
-```shell
+```jsonnet
 _config+:: {
     ignore_rollout_operator_no_downscale_webhook_failures: true|false,
     ignore_rollout_operator_prepare_downscale_webhook_failures: true|false,
@@ -140,7 +140,7 @@ Note that if you are using the `rollout-operator` [Helm chart](https://github.co
 
 This example illustrates using a `mimir` identifier.
 
-```shell
+```jsonnet
 ingester_rollout_pdb+:
   local podDisruptionBudget = $.policy.v1.podDisruptionBudget;
   podDisruptionBudget.mixin.spec.withMaxUnavailable(0),
