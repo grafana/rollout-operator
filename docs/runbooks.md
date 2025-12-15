@@ -41,14 +41,14 @@ This indicates that a malformed configuration has been applied, or an invalid co
 How it **works**:
 
 - If the `zpdb-validation` `ValidatingWebhookConfiguration` has a failure policy set to `Fail`, then the invalid configuration will be rejected by this webhook. This alert will NOT be triggered in this circumstance
-- If the failure policy is set to `Ignore`, then an invalid configuration may have been applied. This can occur if the `rollout-operator` pod is not running and a `zpdb` configuration is applied. With a failure policy set to `Ignore` the configuration will be accepted if the webhook is unavailable
+- If the failure policy is set to `Ignore`, then an invalid configuration may have been applied. This can occur if the `rollout-operator` pod is not running and a `ZPDB` configuration is applied. With a failure policy set to `Ignore` the configuration will be accepted if the webhook is unavailable
 - If the `zpdb-validation` `ValidatingWebhookConfiguration` is not applied then an invalid configuration may be applied. This alert will trigger in this scenario.
 
 How to **investigate**:
 
 - Review the `zpdb-validation` `ValidatingWebhookConfiguration` and ensure its failure policy is set to `Fail`
 - `kubectl -n <namespace> get ValidatingWebhookConfigurations zpdb-validation-<namespace> -o yaml`
-- Review the `zpdb` configurations and verify they are valid
+- Review the `ZPDB` configurations and verify they are valid
 - `kubectl -n <namespace> get zpdb <name> -o yaml`
 
 ### HighNumberInflightZpdbRequests
@@ -61,12 +61,12 @@ How it **works**:
 
 - The `pod-eviction` `ValidatingWebhookConfiguration` routes voluntary pod eviction requests into the ZPDB eviction controller
 - The rollout controller uses the ZPDB eviction controller to test if a pod can be updated (as part of rolling updates)
-- The `zpdb` eviction controller serializes these requests, such that only one pod is considered at a time. Other requests are queued
-- The `zpdb` eviction controller relies on the Kubernetes API to query for status on StatefulSets and Pods
+- The `ZPDB` eviction controller serializes these requests, such that only one pod is considered at a time. Other requests are queued
+- The `ZPDB` eviction controller relies on the Kubernetes API to query for status on StatefulSets and Pods
 
 How to **investigate**:
 
-- Review the `rollout-operator` logs (or trace) to gain insight into what may be causing a delay or blockage in the `zpdb` eviction controller
+- Review the `rollout-operator` logs (or trace) to gain insight into what may be causing a delay or blockage in the `ZPDB` eviction controller
 - Use caution with restarting the `rollout-operator` pod. It maintains internal state of recently evicted pods
 - Ensure that the `pod-eviction` and `zpdb-validation` `ValidatingWebhookConfiguration` have a failure policy set to `Fail` before restarting the `rollout-operator`
 
@@ -92,7 +92,7 @@ A configuration will be `ignored` if it is a stale update or an update in an une
 
 A configuration will be `invalid` if it fails a validation process.
 
-Use this metric to monitor for changes to the `zpdb` configurations and to monitor for unexpected `invalid` configurations being observed. This may indicate an error in the generation of these configurations.
+Use this metric to monitor for changes to the `ZPDB` configurations and to monitor for unexpected `invalid` configurations being observed. This may indicate an error in the generation of these configurations.
 
 ### rollout_operator_zpdb_eviction_requests_total
 
