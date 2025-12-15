@@ -164,8 +164,8 @@ jobs:
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - name: Install misspell
         run: |
-          curl -L -o install-misspell.sh https://git.io/misspell
-          sh install-misspell.sh -b /usr/bin
+          sudo curl -L -o install-misspell.sh https://git.io/misspell
+          sudo sh install-misspell.sh -b /usr/bin
       - name: Check doc lint
         run: make doc-lint
       - name: Check doc
