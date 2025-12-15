@@ -23,9 +23,9 @@ How it **works**:
 
 How to **investigate**:
 
-- Review the configuration of the `pod-eviction` and `zpdb-configuration` webhooks
-- `kubectl -n <namespace> get ValidatingWebhookConfigurations zpdb-validation-<namespace> -o yaml`
-- `kubectl -n <namespace> get ValidatingWebhookConfigurations pod-eviction-<namespace> -o yaml`
+- Review the configuration of the `pod-eviction` and `zpdb-configuration` webhooks:
+  - `kubectl -n <namespace> get ValidatingWebhookConfigurations zpdb-validation-<namespace> -o yaml`
+  - `kubectl -n <namespace> get ValidatingWebhookConfigurations pod-eviction-<namespace> -o yaml`
 - Update the configuration to use a `Fail` policy. See jsonnet configuration options `ignore_rollout_operator_zpdb_eviction_webhook_failures` and `ignore_rollout_operator_zpdb_validation_webhook_failures` in [rollout-operator.libsonnet](https://github.com/grafana/rollout-operator/blob/main/operations/rollout-operator/rollout-operator.libsonnet).
 
 ### BadZoneAwarePodDisruptionBudgetConfiguration
