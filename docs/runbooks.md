@@ -1,14 +1,10 @@
 # Rollout-operator runbooks
 
-## Helm chart
-
-A Helm chart is available [here](https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator) for the `rollout-operator`.
-
 ## Alerts
 
 ### IncorrectWebhookConfigurationFailurePolicy
 
-This alert fires when one of the validating webhooks used by the `rollout-operator` has its failure policy set to `Ignore`.
+This alert fires when one of the validating webhooks used by the rollout-operator has its failure policy set to `Ignore`.
 
 In normal operations the failure policy should be set to `Fail`.
 
@@ -23,27 +19,29 @@ How it **works**:
 - This alert checks on the configured failure policy of the `pod-eviction` and `zpdb-validation` validating webhooks via the `kube_validating_webhook_failure_policy` metric
 - Although it may be valid to temporarily enable an `Ignore` failure mode, normal operations should have the failure mode set to `Fail`
 - When in `Ignore` mode the Kubernetes API server ignores a webhook failure if the webhook can not be reached
-- This would result in the zone aware pod disruption budget not being enforced or the ZPDB configuration validator not being enforced if the `rollout-operator` is not running
+- This would result in the zone aware pod disruption budget not being enforced or the ZPDB configuration validator not being enforced if the rollout-operator is not running
 
 How to **investigate**:
 
 - Review the configuration of the `pod-eviction` and `zpdb-configuration` webhooks:
   - `kubectl -n <namespace> get ValidatingWebhookConfigurations zpdb-validation-<namespace> -o yaml`
   - `kubectl -n <namespace> get ValidatingWebhookConfigurations pod-eviction-<namespace> -o yaml`
-- Update the configuration to use a `Fail` policy. See jsonnet configuration options `ignore_rollout_operator_zpdb_eviction_webhook_failures` and `ignore_rollout_operator_zpdb_validation_webhook_failures` in [rollout-operator.libsonnet](https://github.com/grafana/rollout-operator/blob/main/operations/rollout-operator/rollout-operator.libsonnet).
+- Update the configuration to use a `Fail` policy. See Jsonnet configuration options `ignore_rollout_operator_zpdb_eviction_webhook_failures` and `ignore_rollout_operator_zpdb_validation_webhook_failures` in [rollout-operator.libsonnet](https://github.com/grafana/rollout-operator/blob/main/operations/rollout-operator/rollout-operator.libsonnet).
 
 ### BadZoneAwarePodDisruptionBudgetConfiguration
 
 This alert fires when the zone aware pod disruption budget configuration validating webhook observes an invalid ZPDB object.
 
-This indicates that a malformed configuration has been applied, or an invalid configuration already exists when the `rollout-operator` starts.
+This indicates that a malformed configuration has been applied, or an invalid configuration already exists when the rollout-operator starts.
 
 How it **works**:
 
-- If the `zpdb-validation` `ValidatingWebhookConfiguration` has a failure policy set to `Fail`, then the invalid configuration will be rejected by this webhook. This alert will NOT be triggered in this circumstance
-- If the failure policy is set to `Ignore`, then an invalid configuration may have been applied. This can occur if the `rollout-operator` pod is not running and a `ZPDB` configuration is applied. With a failure policy set to `Ignore` the configuration will be accepted if the webhook is unavailable
-- If the `zpdb-validation` `ValidatingWebhookConfiguration` is not applied then an invalid configuration may be applied. This alert will trigger in this scenario.
-
+- Under normal circumstances, there is a `zpdb-validation` validating webhook that should prevent ZPDBs with invalid configuration from being accepted by the Kubernetes control plane
+- However, if the validating webhook did not reject the invalid ZPDB for some reason, then the rollout-operator will reject and ignore the invalid ZPDB, so the ZPDB will not be effective, and this alert will fire
+- The invalid ZPDB could have been accepted for a number of reasons, including:
+  - The validating webhook was not installed correctly when the invalid ZPDB was stored
+  - The validating webhook's failure policy was set to `Ignore` instead of `Fail`
+  
 How to **investigate**:
 
 - Review the `zpdb-validation` `ValidatingWebhookConfiguration` and ensure its failure policy is set to `Fail`
@@ -66,13 +64,13 @@ How it **works**:
 
 How to **investigate**:
 
-- Review the `rollout-operator` logs (or trace) to gain insight into what may be causing a delay or blockage in the `ZPDB` eviction controller
-- Use caution with restarting the `rollout-operator` pod. It maintains internal state of recently evicted pods
-- Ensure that the `pod-eviction` and `zpdb-validation` `ValidatingWebhookConfiguration` have a failure policy set to `Fail` before restarting the `rollout-operator`
+- Review the rollout-operator logs (or trace) to gain insight into what may be causing a delay or blockage in the `ZPDB` eviction controller
+- Use caution with restarting the rollout-operator pod. It maintains internal state of recently evicted pods
+- Ensure that the `pod-eviction` and `zpdb-validation` `ValidatingWebhookConfiguration` have a failure policy set to `Fail` before restarting the rollout-operator
 
 ## Metrics
 
-A Prometheus metrics endpoint is available at `/metrics` of the `rollout-operator` deployment.
+A Prometheus metrics endpoint is available at `/metrics` of the rollout-operator deployment.
 
 ### kube_validating_webhook_failure_policy
 
@@ -122,11 +120,11 @@ See [rollout-operator.libsonnet](https://github.com/grafana/rollout-operator/blo
 
 ### Webhook failure policies
 
-The following jsonnet flags can be set to toggle the webhook failure modes. These should be used with caution.
+The following Jsonnet flags can be set to toggle the webhook failure modes. These should be used with caution.
 
-Setting these to `true` will result in the Kubernetes API server proceeding if the webhook is not reachable / `rollout-operator` pod is not running.
+Setting these to `true` will result in the Kubernetes API server proceeding if the webhook is not reachable / rollout-operator pod is not running.
 
-```jsonnet
+```Jsonnet
 _config+:: {
     ignore_rollout_operator_no_downscale_webhook_failures: true|false,
     ignore_rollout_operator_prepare_downscale_webhook_failures: true|false,
@@ -134,13 +132,13 @@ _config+:: {
     ignore_rollout_operator_zpdb_eviction_webhook_failures: true|false
 ```
 
-Note that if you are using the `rollout-operator` [Helm chart](https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator) there is a single configuration value of `webhooks.failurePolicy` which can be set to `Fail` or `Ignore` and this is applied to all the webhooks.
+Note that if you are using the rollout-operator [Helm chart](https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator) there is a single configuration value of `webhooks.failurePolicy` which can be set to `Fail` or `Ignore` and this is applied to all the webhooks.
 
 ### Disable voluntary pod evictions
 
 This example illustrates using a `mimir` identifier.
 
-```jsonnet
+```Jsonnet
 ingester_rollout_pdb+:
   local podDisruptionBudget = $.policy.v1.podDisruptionBudget;
   podDisruptionBudget.mixin.spec.withMaxUnavailable(0),
