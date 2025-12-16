@@ -241,6 +241,16 @@ func TestPodEviction_MaxUnavailableEq0(t *testing.T) {
 	testCtx.assertDenyResponse(t, "max unavailable = 0", 403)
 	testCtx.logs.assertHasLog(t, []string{`reason="max unavailable = 0"`})
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", "403")))
+
+	// this is not a partition aware pdb
+	hasPartitionAwarePdb, err := testCtx.controller.HasPartitionAwarePdb(pod)
+	require.NoError(t, err)
+	require.False(t, hasPartitionAwarePdb)
+
+	// confirm that this check returns false for a pod not managed by this pdb
+	hasPartitionAwarePdb, err = testCtx.controller.HasPartitionAwarePdb(newPodNoOwner("foo"))
+	require.NoError(t, err)
+	require.False(t, hasPartitionAwarePdb)
 }
 
 func TestPodEviction_MaxUnavailableEq0_ViaMarkPodAsDeleted(t *testing.T) {
@@ -431,6 +441,10 @@ func TestPodEviction_MultiZoneClassicOverrideHasNoEffectWhenNotZero(t *testing.T
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
 	require.False(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
 
+	hasPartitionAwarePdb, err := testCtx.controller.HasPartitionAwarePdb(zoneAPod0)
+	require.NoError(t, err)
+	require.False(t, hasPartitionAwarePdb)
+
 	// note that the override of 0 is ignored since the zpdb configuration has maxUnavailable != 0
 	response := testCtx.controller.HandlePodEvictionRequest(testCtx.ctx, testCtx.request, NewMaxUnavailableZeroOverride(0))
 	require.NotNil(t, response.UID)
@@ -476,6 +490,11 @@ func TestPodEviction_PartitionZones(t *testing.T) {
 	podPartitionZoneRegex := "[a-z\\-]+-zone-[a-z]-([0-9]+)"
 
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
+
+	hasPartitionAwarePdb, err := testCtx.controller.HasPartitionAwarePdb(zoneAPod1)
+	require.NoError(t, err)
+	require.True(t, hasPartitionAwarePdb)
+
 	testCtx.assertAllowResponse(t)
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 	testCtx.controller.Stop()
@@ -545,11 +564,21 @@ func TestPodEviction_PartitionZonesMaxUnavailable2(t *testing.T) {
 	// mark 1 pod in the another zone + same partition as failed
 	zoneBPod0.Status.Phase = corev1.PodFailed
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
+
+	hasPartitionAwarePdb, err := testCtx.controller.HasPartitionAwarePdb(zoneBPod0)
+	require.NoError(t, err)
+	require.True(t, hasPartitionAwarePdb)
+
 	testCtx.assertDenyResponse(t, "1 pod not ready in partition 0", 429)
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("denied", "429")))
 	testCtx.controller.Stop()
 
 	testCtx = newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailableWithRegex(2, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
+
+	hasPartitionAwarePdb, err = testCtx.controller.HasPartitionAwarePdb(zoneBPod0)
+	require.NoError(t, err)
+	require.True(t, hasPartitionAwarePdb)
+
 	testCtx.assertAllowResponse(t)
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 	testCtx.controller.Stop()

@@ -159,6 +159,15 @@ func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace str
 	return nil
 }
 
+func (c *EvictionController) HasPartitionAwarePdb(pod *corev1.Pod) (bool, error) {
+	pdbConfig, err := c.cfgObserver.pdbCache.find(pod)
+	if err != nil || pdbConfig == nil {
+		return false, err
+	}
+
+	return pdbConfig.podNamePartition != nil, nil
+}
+
 func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1.AdmissionReview, maxUnavailableOverride MaxUnavailableZeroOverride) *v1.AdmissionResponse {
 	logger, _ := spanlogger.New(ctx, c.logger, "admission.PodEviction()", c.resolver)
 	defer logger.Finish()
