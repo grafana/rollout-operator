@@ -46,7 +46,6 @@ How to **investigate**:
 
 - Review the `zpdb-validation` `ValidatingWebhookConfiguration` and ensure its failure policy is set to `Fail`:
   `kubectl -n <namespace> get ValidatingWebhookConfigurations zpdb-validation-<namespace> -o yaml`
-  
 - Review the `ZPDB` configurations and verify they are valid
   `kubectl -n <namespace> get zpdb <name> -o yaml`
 
