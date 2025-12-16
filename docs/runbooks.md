@@ -18,7 +18,7 @@ How it **works**:
 
 - This alert checks on the configured failure policy of the `pod-eviction` and `zpdb-validation` validating webhooks via the `kube_validating_webhook_failure_policy` metric
 - Although it may be valid to temporarily enable an `Ignore` failure mode, normal operations should have the failure mode set to `Fail`
-- When in `Ignore` mode the Kubernetes API server ignores a webhook failure if the webhook can not be reached
+- When in `Ignore` mode the Kubernetes API server ignores a webhook failure if the webhook is unavailable or can not be reached
 - This would result in the zone aware pod disruption budget not being enforced or the ZPDB configuration validator not being enforced if the rollout-operator is not running
 
 How to **investigate**:
@@ -66,6 +66,10 @@ How to **investigate**:
 
 - Review the rollout-operator logs (or trace) to gain insight into what may be causing a delay or blockage in the `ZPDB` eviction controller
 - Use caution with restarting the rollout-operator pod. It maintains internal state of recently evicted pods
+  - There is a short window of time from when an eviction request is allowed to the pod transitioning to a state where it will report as not ready
+  - The rollout-operator maintains an in-memory cache of these recently evicted pods to compensate for the pod still reporting as ready after it's eviction request has been allowed
+  - In normal circumstances with the pod eviction webhook failure policy set to `Fail`, by the time a rollout-operator pod has been restarted the recently evicted pod states will be correctly reconciled
+  - But if pods have been evicted with a failure policy of `Ignore` then there is a small possibility for a race condition which can result in a ZPDB breach 
 - Ensure that the `pod-eviction` and `zpdb-validation` `ValidatingWebhookConfiguration` have a failure policy set to `Fail` before restarting the rollout-operator
 
 ## Metrics
@@ -96,7 +100,7 @@ Use this metric to monitor for changes to the `ZPDB` configurations and to monit
 
 This counter metric reports on the total number of pod eviction requests.
 
-This includes both pod eviction requests which come in via the pod eviction webhook, and pod deletion requests which come from the rollout controller (pod updates).
+This includes both pod eviction requests which come in via the pod eviction webhook, and pod deletion requests which come from the rollout controller (StatefulSet pod updates).
 
 Note that the number of requests arriving via the pod eviction webhook can be tracked with the `rollout_operator_kubernetes_api_client_request_duration_seconds_count` metric.
 
@@ -106,7 +110,7 @@ Use this metric to monitor for abnormal request volume and/or frequency.
 
 This is a gauge metric which tracks the number of in-flight pod eviction requests.
 
-Like `rollout_operator_zpdb_eviction_requests_total`, this metrics takes both eviction requests which come in via the pod eviction webhook, and pod deletion requests which come from the rollout controller (pod updates).
+Like `rollout_operator_zpdb_eviction_requests_total`, this metrics takes both eviction requests which come in via the pod eviction webhook, and pod deletion requests which come from the rollout controller (StatefulSet pod updates).
 
 Note that the number of in-flight requests via the pod eviction webhook can be tracked with the `rollout_operator_inflight_requests` metric.
 
