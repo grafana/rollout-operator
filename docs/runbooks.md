@@ -67,7 +67,7 @@ How to **investigate**:
 - Review the rollout-operator logs (or trace) to gain insight into what may be causing a delay or blockage in the `ZPDB` eviction controller
 - Use caution with restarting the rollout-operator pod. It maintains internal state of recently evicted pods
   - There is a short window of time from when an eviction request is allowed to the pod transitioning to a state where it will report as not ready
-  - The rollout-operator maintains an in-memory cache of these recently evicted pods to compensate for the pod still reporting as ready after it's eviction request has been allowed
+  - The rollout-operator maintains an in-memory cache of these recently evicted pods to compensate for the pod still reporting as ready after its eviction request has been allowed
   - In normal circumstances with the pod eviction webhook failure policy set to `Fail`, by the time a rollout-operator pod has been restarted the recently evicted pod states will be correctly reconciled
   - But if pods have been evicted with a failure policy of `Ignore` then there is a small possibility for a race condition which can result in a ZPDB breach
 - Ensure that the `pod-eviction` and `zpdb-validation` `ValidatingWebhookConfiguration` have a failure policy set to `Fail` before restarting the rollout-operator
@@ -128,7 +128,7 @@ The following Jsonnet flags can be set to toggle the webhook failure modes. Thes
 
 Setting these to `true` will result in the Kubernetes API server proceeding if the webhook is not reachable / rollout-operator pod is not running.
 
-```Jsonnet
+```jsonnet
 _config+:: {
     ignore_rollout_operator_no_downscale_webhook_failures: true|false,
     ignore_rollout_operator_prepare_downscale_webhook_failures: true|false,
@@ -136,13 +136,13 @@ _config+:: {
     ignore_rollout_operator_zpdb_eviction_webhook_failures: true|false
 ```
 
-Note that if you are using the rollout-operator [Helm chart](https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator) there is a single configuration value of `webhooks.failurePolicy` which can be set to `Fail` or `Ignore` and this is applied to all the webhooks.
+Note that if you are using the rollout-operator [Helm chart](https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator) there are equivalent [values](https://github.com/grafana/helm-charts/blob/main/charts/rollout-operator/values.yaml) for changing the webhook failure policies.
 
 ### Disable voluntary pod evictions
 
 This example illustrates using a `mimir` identifier.
 
-```Jsonnet
+```jsonnet
 ingester_rollout_pdb+:
   local podDisruptionBudget = $.policy.v1.podDisruptionBudget;
   podDisruptionBudget.mixin.spec.withMaxUnavailable(0),
