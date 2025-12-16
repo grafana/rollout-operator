@@ -59,7 +59,7 @@ This indicates that there is likely an issue causing a delay in the pod eviction
 How it **works**:
 
 - The `pod-eviction` `ValidatingWebhookConfiguration` routes voluntary pod eviction requests into the ZPDB eviction controller
-- The rollout controller uses the ZPDB eviction controller to test if a pod can be updated (as part of rolling updates)
+- The rollout controller also uses the ZPDB eviction controller to test if a pod can be updated (as part of rolling updates)
 - The `ZPDB` eviction controller serializes these requests, such that only one pod is considered at a time. Other requests are queued
 - The `ZPDB` eviction controller relies on the Kubernetes API to query for status on StatefulSets and Pods
 
