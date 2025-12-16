@@ -22,7 +22,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help: "Number of zpdb eviction requests.",
 		}, []string{"reason", "status"}),
 		InFlightRequests: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
-			Name: "rollout_operator_zpdb_inflight_eviction_requests_total",
+			Name: "rollout_operator_zpdb_inflight_eviction_requests",
 			Help: "Number of zpdb eviction requests which are currently in-flight.",
 		}, []string{}),
 	}

@@ -1,0 +1,28 @@
+groups:
+    - name: rollout_operator_alerts
+      rules:
+        - alert: rollout-operatorIncorrectWebhookConfigurationFailurePolicy
+          annotations:
+            message: |
+                A validating or mutating rollout-operator webhook has an Ignore policy set. This should be set to Fail.
+            runbook_url: https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#rollout-operatorincorrectwebhookconfigurationfailurepolicy
+          expr: count by(type, webhook) (kube_validating_webhook_failure_policy{policy="Ignore", webhook=~"^(pod-eviction|zpdb-validation).+"} > 0)
+          for: 5m
+          labels:
+            severity: warning
+        - alert: rollout-operatorBadZoneAwarePodDisruptionBudgetConfiguration
+          annotations:
+            message: An invalid zone aware pod disruption budget configuration has been observed.
+            runbook_url: https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#rollout-operatorbadzoneawarepoddisruptionbudgetconfiguration
+          expr: sum by (job)(rate(rollout_operator_zpdb_configurations_observed_total{result="invalid"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+        - alert: rollout-operatorHighNumberInflightZpdbRequests
+          annotations:
+            message: A sustained number of inflight ZPDB eviction requests has been observed.
+            runbook_url: https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#rollout-operatorhighnumberinflightzpdbrequests
+          expr: avg_over_time(rollout_operator_zpdb_inflight_eviction_requests[5m]) > 10
+          for: 5m
+          labels:
+            severity: warning

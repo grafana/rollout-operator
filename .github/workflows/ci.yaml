@@ -151,6 +151,29 @@ jobs:
       - name: Check Dashboard Mixin
         run: make check-mixin
 
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6
+        with:
+          go-version: '1.25'
+          check-latest: true
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
+      - name: Install misspell
+        run: |
+          sudo curl -L -o install-misspell.sh https://git.io/misspell
+          sudo sh install-misspell.sh -b /usr/bin
+      - name: Install prettier
+        run: |
+          sudo npm install --global prettier
+      - name: Check doc lint
+        run: make doc-lint
+      - name: Check doc
+        run: make check-doc
+
   push-image:
     runs-on: ubuntu-latest
     needs:

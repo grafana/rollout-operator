@@ -23,6 +23,8 @@ MAKE_FILES := $(shell find . $(DONT_FIND) -o -name 'Makefile' -print -o -name '*
 MIXIN_PATH := operations/rollout-operator-mixin
 MIXIN_OUT_PATH ?= operations/rollout-operator-mixin-compiled
 
+DOC_SOURCES_PATH := docs
+
 .DEFAULT_GOAL := rollout-operator
 
 REGO_POLICIES_PATH=operations/policies
@@ -89,12 +91,16 @@ integration/mock-service/.uptodate:
 
 .PHONY: lint
 lint: ## Run lints to check for style issues.
-lint: check-makefiles
+lint: check-makefiles doc-lint
 	golangci-lint run --timeout=5m
 
 .PHONY: fix-lint
 fix-lint: ## Automatically fix linting issues where possible
 	golangci-lint run --timeout=5m --fix
+
+.PHONY: doc-lint
+doc-lint: 
+	misspell -error $(DOC_SOURCES_PATH)
 
 .PHONY: clean
 clean: ## Run go clean and remove the rollout-operator binary
@@ -159,7 +165,20 @@ build-mixin: check-mixin-jb
 	@mkdir -p "$(MIXIN_OUT_PATH)"
 	@find "$(MIXIN_OUT_PATH)" -type f -delete;
 	mixtool generate dashboards --directory "$(MIXIN_OUT_PATH)/dashboards" "${MIXIN_PATH}/mixin.libsonnet";
+
+	@mkdir -p "$(MIXIN_OUT_PATH)/alerts"
+	mixtool generate alerts -y --output-alerts "$(MIXIN_OUT_PATH)/alerts/alerts.yaml" "${MIXIN_PATH}/mixin.libsonnet";
 	@echo "sample rollout-operator dashboard generated to $(MIXIN_OUT_PATH)/dashboards"
 
+.PHONY: mixin-serve
 mixin-serve: ## Runs Grafana loading the mixin dashboards.
 	@./operations/rollout-operator-mixin-tools/serve/run.sh -p $(MIXIN_OUT_PATH)
+
+check-doc: ## Check the documentation files are up to date.
+check-doc: doc
+	@find "$(DOC_SOURCES_PATH)" -name "*.md" | xargs git diff --exit-code -- \
+	|| (echo "Please update documentation by running 'make doc' and committing the changes" && false)
+
+.PHONY: doc
+doc:
+	prettier --write "$(DOC_SOURCES_PATH)/*.md"

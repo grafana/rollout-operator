@@ -8,6 +8,9 @@
 * [ENHANCEMENT] Updated dependencies, including: #341
   * `github.com/prometheus/common` from `v0.67.3` to `v0.67.4`
   * `golang.org/x/sync` from `v0.18.0` to `v0.19.0`
+* [ENHANCEMENT] Change metric name `rollout_operator_zpdb_inflight_eviction_requests_total` to `rollout_operator_zpdb_inflight_eviction_requests`. #350
+* [ENHANCEMENT] Added alerts mixin and corresponding [runbooks](https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md). #350
+* [ENHANCEMENT] Added additional dashboard panels to dashboard mixin. #350
 
 ## v0.32.1
 
