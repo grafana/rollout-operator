@@ -41,7 +41,7 @@ How it **works**:
 - The invalid ZPDB could have been accepted for a number of reasons, including:
   - The validating webhook was not installed correctly when the invalid ZPDB was stored
   - The validating webhook's failure policy was set to `Ignore` instead of `Fail`
-  
+
 How to **investigate**:
 
 - Review the `zpdb-validation` `ValidatingWebhookConfiguration` and ensure its failure policy is set to `Fail`
@@ -69,7 +69,7 @@ How to **investigate**:
   - There is a short window of time from when an eviction request is allowed to the pod transitioning to a state where it will report as not ready
   - The rollout-operator maintains an in-memory cache of these recently evicted pods to compensate for the pod still reporting as ready after it's eviction request has been allowed
   - In normal circumstances with the pod eviction webhook failure policy set to `Fail`, by the time a rollout-operator pod has been restarted the recently evicted pod states will be correctly reconciled
-  - But if pods have been evicted with a failure policy of `Ignore` then there is a small possibility for a race condition which can result in a ZPDB breach 
+  - But if pods have been evicted with a failure policy of `Ignore` then there is a small possibility for a race condition which can result in a ZPDB breach
 - Ensure that the `pod-eviction` and `zpdb-validation` `ValidatingWebhookConfiguration` have a failure policy set to `Fail` before restarting the rollout-operator
 
 ## Metrics
