@@ -29,6 +29,12 @@ For each **rollout group**, the operator **guarantees**:
    - `1`: pods are rolled out sequentially
    - `> 1`: pods are rolled out in parallel (honoring the configured number of max unavailable pods)
 
+Additionally, each StatefulSet can optionally configure a per-pod rollout delay with the `rollout-delay` label:
+
+- The value is parsed as a Go duration (for example: `10s`, `5m`, `1h`).
+- If the label is unset, empty, or cannot be parsed, no delay is applied and behavior is unchanged.
+- When set on a StatefulSet, the operator waits for the configured duration between deleting each pod during a rollout, while still respecting the `rollout-max-unavailable` limit and any configured `ZoneAwarePodDisruptionBudget`.
+
 ## How scaling up and down works
 
 The operator can also optionally coordinate scaling up and down of `StatefulSets` that are part of the same `rollout-group` based on the `grafana.com/rollout-downscale-leader` annotation. When using this feature, the `grafana.com/min-time-between-zones-downscale` label must also be set on each `StatefulSet`.
