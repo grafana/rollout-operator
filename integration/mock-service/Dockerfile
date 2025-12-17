@@ -1,7 +1,7 @@
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 
-COPY       mock-service /bin/mock-service
-ENTRYPOINT [ "/bin/mock-service" ]
+COPY       mock-service /usr/bin/mock-service
+ENTRYPOINT [ "/usr/bin/mock-service" ]
 
 ARG revision
 LABEL org.opencontainers.image.title="mock-service" \

@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [CHANGE] Update base images from distroless Debian 12 to Debian 13. #355
+
 ## v0.32.2
 
 * [BUGFIX] Limit webhook metrics to validating and mutating webhook configurations which have a matching grafana.com/namespace label. #347
