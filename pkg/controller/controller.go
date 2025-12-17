@@ -573,13 +573,20 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			return true, nil
 		}
 
-		for _, pod := range podsToUpdate[:numPods] {
+		for i, pod := range podsToUpdate[:numPods] {
 			// Skip if the pod is terminating. Since "Terminating" is not a pod Phase, we can infer it by checking
 			// if the pod is in the Running phase but the deletionTimestamp has been set (kubectl does something
 			// similar too).
 			if pod.Status.Phase == corev1.PodRunning && pod.DeletionTimestamp != nil {
 				level.Debug(c.logger).Log("msg", fmt.Sprintf("waiting for pod %s to be terminated", pod.Name))
 				continue
+			}
+
+			// we don't want to delay the first pod in the batch, hence we check i > 0
+			if i > 0 {
+				if err := c.applyRolloutDelay(ctx, sts, pod); err != nil {
+					return false, err
+				}
 			}
 
 			// Use the ZPDB to determine if this pod delete is allowed.
@@ -694,4 +701,52 @@ func (c *RolloutController) patchStatefulSetSpecReplicas(ctx context.Context, st
 	patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas)
 	_, err := c.kubeClient.AppsV1().StatefulSets(c.namespace).Patch(ctx, sts.GetName(), types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
 	return err
+}
+
+// applyRolloutDelay applies an optional per-pod rollout delay for the given
+// StatefulSet. It returns nil if no delay is configured.
+func (c *RolloutController) applyRolloutDelay(ctx context.Context, sts *v1.StatefulSet, pod *corev1.Pod) error {
+	delay := c.rolloutDelayForStatefulSet(sts)
+	if delay <= 0 {
+		return nil
+	}
+
+	level.Info(c.logger).Log(
+		"msg", "delaying between pod rollouts",
+		"statefulset", sts.Name,
+		"pod", pod.Name,
+		"delay", delay,
+	)
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(delay):
+		return nil
+	}
+}
+
+func (c *RolloutController) rolloutDelayForStatefulSet(sts *v1.StatefulSet) time.Duration {
+	if sts == nil || sts.Labels == nil {
+		return 0
+	}
+
+	raw, ok := sts.Labels[config.RolloutDelayKey]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return 0
+	}
+
+	delay, err := time.ParseDuration(raw)
+	if err != nil {
+		// Invalid duration: log and fall back to 0.
+		level.Warn(c.logger).Log(
+			"msg", "invalid rollout-delay label, defaulting to 0",
+			"statefulset", sts.Name,
+			"value", raw,
+			"err", err,
+		)
+		return 0
+	}
+
+	return delay
 }
