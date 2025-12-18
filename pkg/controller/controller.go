@@ -582,7 +582,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 		hasPartitionAwarePdb, err := c.zpdbController.HasPartitionAwarePdb(podsToUpdate[0])
 		if err != nil {
-			// Note if ignore this error and continued processing the same error would be raised from the MarkPodAsDeleted() below.
+			// Note if we ignored this error and continued processing, the same error would be raised from the MarkPodAsDeleted() below.
 			return false, errors.Wrapf(err, "failed to determine pod zpdb configuration %s", podsToUpdate[0].Name)
 		}
 
