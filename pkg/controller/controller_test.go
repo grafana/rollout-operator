@@ -740,17 +740,30 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			// This checks that the expected override was passed into the eviction controller
 			// when MarkPodAsDeleted() was called as part of the pod deletion sequence.
 			if len(testData.expectedDeletedPods) > 0 {
-				sts, ok := testData.statefulSets[0].(*v1.StatefulSet)
-				require.True(t, ok)
+				// Find the StatefulSet that owns the deleted pods by matching the pod name prefix.
+				deletedPodName := testData.expectedDeletedPods[0]
+				var sts *v1.StatefulSet
+				for _, obj := range testData.statefulSets {
+					s := obj.(*v1.StatefulSet)
+					if strings.HasPrefix(deletedPodName, s.Name+"-") {
+						sts = s
+						break
+					}
+				}
+				require.NotNil(t, sts, "could not find StatefulSet for deleted pod %s", deletedPodName)
 
-				stsMaxUnavailableString, ok := sts.Annotations[config.RolloutMaxUnavailableAnnotationKey]
-				require.True(t, ok)
-				var stsMaxUnavailableInt int
-				if stsMaxUnavailableString == "xxx" || testData.zpdbPartitionMode {
-					stsMaxUnavailableInt = 1
+				var expectedOverride int
+				if testData.zpdbPartitionMode {
+					expectedOverride = 1
 				} else {
-					stsMaxUnavailableInt, err = strconv.Atoi(stsMaxUnavailableString)
-					require.NoError(t, err)
+					stsMaxUnavailableString, ok := sts.Annotations[config.RolloutMaxUnavailableAnnotationKey]
+					require.True(t, ok)
+					if stsMaxUnavailableString == "xxx" {
+						expectedOverride = 1
+					} else {
+						expectedOverride, err = strconv.Atoi(stsMaxUnavailableString)
+						require.NoError(t, err)
+					}
 				}
 
 				assert.Equal(t, zpdb.NewMaxUnavailableZeroOverride(expectedOverride), evictionController.lastOverride)
