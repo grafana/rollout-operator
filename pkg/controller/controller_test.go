@@ -247,7 +247,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			// the first batch of zone-a pods is deleted
 			expectedDeletedPods: []string{"ingester-zone-a-0", "ingester-zone-a-1"},
-			// setting this will trigger the maxUnavailability override if 0 to be 1
+			// setting this will trigger the maxUnavailability override to be 1
 			zpdbPartitionMode: true,
 		},
 		"should default max unavailable to 1 if set to an invalid value": {
