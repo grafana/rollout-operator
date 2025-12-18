@@ -28,7 +28,7 @@ const (
 	logAllowMesg = "pod eviction allowed"
 )
 
-// MaxUnavailableZeroOverride provides an alternate maxUnavailable value to be used when the current maxUnavailable configuration is set to zero
+// MaxUnavailableZeroOverride provides an alternate maxUnavailable value to be used when the current maxUnavailable configuration is set to zero.
 type MaxUnavailableZeroOverride struct {
 	maxUnavailable int
 	set            bool
