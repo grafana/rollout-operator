@@ -245,7 +245,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	// the number of allowed unavailable pods in other zones.
 	maxUnavailable := pdbConfig.maxUnavailablePods(sts)
 
-	// if the maxUnavailable is 0 (no voluntary evictions), replace this value with an override if it has been set.
+	// if maxUnavailable is 0 (no voluntary evictions), replace this value with an override if it has been set.
 	// this allows the rollout controller to still request pods to be updated (deleted) during rolling updates
 	// even if the voluntary pod evictions have been otherwise disabled.
 	if maxUnavailable == 0 && maxUnavailableOverride.set {
