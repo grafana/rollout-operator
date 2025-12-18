@@ -418,7 +418,6 @@ func TestPodEviction_MultiZoneClassic(t *testing.T) {
 // TestPodEviction_MultiZoneClassicOverrideHasNoEffectWhenNotZero validates that the MaxUnavailableZeroOverride
 // is only used when maxUnavailable=0. Setting the override when this is not true has no effect.
 func TestPodEviction_MultiZoneClassicOverrideHasNoEffectWhenNotZero(t *testing.T) {
-
 	objs := make([]runtime.Object, 0, 12)
 	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
 	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
