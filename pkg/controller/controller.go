@@ -577,7 +577,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 		// Initialize a maxUnavailable override to the ZPDB.
 		// This will only be used if the ZPDB has disabled voluntary evictions (maxUnavailable=0).
-		// Note that this will have also have no effect if the pods are not within a ZPDB scope.
+		// Note that this will also have no effect if the pods are not within a ZPDB scope.
 		zpdbMaxUnavailableOverrideIfZero := zpdb.NewMaxUnavailableZeroOverride(maxUnavailable)
 
 		hasPartitionAwarePdb, err := c.zpdbController.HasPartitionAwarePdb(podsToUpdate[0])
