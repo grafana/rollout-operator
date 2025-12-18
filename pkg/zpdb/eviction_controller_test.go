@@ -284,8 +284,8 @@ func TestPodEviction_MaxUnavailableEq0_Override_MarkPodAsDeleted(t *testing.T) {
 	testCtx := newTestContextWithoutAdmissionReview(t, newPDBMaxUnavailable(0, rolloutGroupValue), objs...)
 	defer testCtx.controller.Stop()
 	// even though the config has a maxUnavailable=0, an override is passed in which allows this eviction to be considered
-	response := testCtx.controller.MarkPodAsDeleted(testCtx.ctx, testNamespace, zoneAPod0.Name, "eviction-controller-test", NewMaxUnavailableZeroOverride(1))
-	require.NoError(t, response)
+	err := testCtx.controller.MarkPodAsDeleted(testCtx.ctx, testNamespace, zoneAPod0.Name, "eviction-controller-test", NewMaxUnavailableZeroOverride(1))
+	require.NoError(t, err)
 	require.True(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 }
