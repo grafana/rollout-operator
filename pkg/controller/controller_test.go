@@ -753,7 +753,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					require.NoError(t, err)
 				}
 
-				assert.Equal(t, evictionController.lastOverride, zpdb.NewMaxUnavailableZeroOverride(stsMaxUnavailableInt))
+				assert.Equal(t, zpdb.NewMaxUnavailableZeroOverride(expectedOverride), evictionController.lastOverride)
 			}
 
 			// Assert deleted pods.
