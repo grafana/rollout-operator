@@ -28,6 +28,20 @@ const (
 	logAllowMesg = "pod eviction allowed"
 )
 
+// MaxUnavailableZeroOverride provides an alternate maxUnavailable value to be used when the current maxUnavailable configuration is set to zero.
+type MaxUnavailableZeroOverride struct {
+	maxUnavailable int
+	set            bool
+}
+
+func NewMaxUnavailableZeroOverrideNone() MaxUnavailableZeroOverride {
+	return MaxUnavailableZeroOverride{set: false}
+}
+
+func NewMaxUnavailableZeroOverride(maxUnavailable int) MaxUnavailableZeroOverride {
+	return MaxUnavailableZeroOverride{set: true, maxUnavailable: maxUnavailable}
+}
+
 type EvictionController struct {
 	// a lock used to control finding a specific named lock
 	lock sync.RWMutex
@@ -103,7 +117,7 @@ func (c *EvictionController) findLock(name string) *sync.Mutex {
 // MarkPodAsDeleted allows for a programmatic pod eviction request. It returns an error if the pod eviction is denied.
 // Note that if this func returns without an error, the pod will be marked as pending eviction within the zpdb eviction cache.
 // Note also that this func does not actually evict or delete the pod from kubernetes.
-func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error {
+func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string, override MaxUnavailableZeroOverride) error {
 	request := v1.AdmissionReview{
 		Request: &v1.AdmissionRequest{
 			// not a real uid. The eviction_controller only uses this for logging purposes
@@ -138,14 +152,23 @@ func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace str
 		},
 	}
 
-	response := c.HandlePodEvictionRequest(ctx, request)
+	response := c.HandlePodEvictionRequest(ctx, request, override)
 	if !response.Allowed {
 		return errors.New(response.Result.Message)
 	}
 	return nil
 }
 
-func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1.AdmissionReview) *v1.AdmissionResponse {
+func (c *EvictionController) HasPartitionAwarePdb(pod *corev1.Pod) (bool, error) {
+	pdbConfig, err := c.cfgObserver.pdbCache.find(pod)
+	if err != nil || pdbConfig == nil {
+		return false, err
+	}
+
+	return pdbConfig.podNamePartition != nil, nil
+}
+
+func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1.AdmissionReview, maxUnavailableOverride MaxUnavailableZeroOverride) *v1.AdmissionResponse {
 	logger, _ := spanlogger.New(ctx, c.logger, "admission.PodEviction()", c.resolver)
 	defer logger.Finish()
 
@@ -221,6 +244,14 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 
 	// the number of allowed unavailable pods in other zones.
 	maxUnavailable := pdbConfig.maxUnavailablePods(sts)
+
+	// if maxUnavailable is 0 (no voluntary evictions), replace this value with an override if it has been set.
+	// this allows the rollout controller to still request pods to be updated (deleted) during rolling updates
+	// even if the voluntary pod evictions have been otherwise disabled.
+	if maxUnavailable == 0 && maxUnavailableOverride.set {
+		maxUnavailable = maxUnavailableOverride.maxUnavailable
+	}
+
 	if maxUnavailable == 0 {
 		level.Info(request.log).Log("msg", logDenyMesg, "reason", "max unavailable = 0")
 		c.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", fmt.Sprintf("%d", http.StatusForbidden)).Inc()

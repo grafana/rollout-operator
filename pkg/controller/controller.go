@@ -32,6 +32,7 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
+	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const (
@@ -47,7 +48,8 @@ type httpClient interface {
 }
 
 type ZPDBEvictionController interface {
-	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error
+	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string, override zpdb.MaxUnavailableZeroOverride) error
+	HasPartitionAwarePdb(pod *corev1.Pod) (bool, error)
 }
 
 type RolloutController struct {
@@ -573,6 +575,24 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			return true, nil
 		}
 
+		// Initialize a maxUnavailable override to the ZPDB.
+		// This will only be used if the ZPDB has disabled voluntary evictions (maxUnavailable=0).
+		// Note that this will also have no effect if the pods are not within a ZPDB scope.
+		zpdbMaxUnavailableOverrideIfZero := zpdb.NewMaxUnavailableZeroOverride(maxUnavailable)
+
+		hasPartitionAwarePdb, err := c.zpdbController.HasPartitionAwarePdb(podsToUpdate[0])
+		if err != nil {
+			// Note if we ignored this error and continued processing, the same error would be raised from the MarkPodAsDeleted() below.
+			return false, errors.Wrapf(err, "failed to determine pod zpdb configuration %s", podsToUpdate[0].Name)
+		}
+
+		// If the pods are covered by a partition aware ZPDB then the override is set to 1
+		// It would not be correct to use the StatefulSet maxUnavailable value as an override to a
+		// partition aware ZPDB.
+		if hasPartitionAwarePdb {
+			zpdbMaxUnavailableOverrideIfZero = zpdb.NewMaxUnavailableZeroOverride(1)
+		}
+
 		for _, pod := range podsToUpdate[:numPods] {
 			// Skip if the pod is terminating. Since "Terminating" is not a pod Phase, we can infer it by checking
 			// if the pod is in the Running phase but the deletionTimestamp has been set (kubectl does something
@@ -589,7 +609,14 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			// the latest information is used to determine the zone/partition disruption level.
 			// If this request returns without error, the pod will be placed into the ZPDB pod eviction cache and will
 			// be considered as not ready until it either restarts or is expired from the cache.
-			err := c.zpdbController.MarkPodAsDeleted(ctx, pod.Namespace, pod.Name, "rollout-controller")
+			//
+			// A MaxUnavailableZeroOverride is passed into this call. This ensures that if the pod eviction webhook has a ZPDB configuration
+			// set to maxUnavailable=0 (no voluntary evictions) this controller can still request pods to be deleted and a zone or
+			// partition based PDB is still enforced.
+			//
+			// Note also that the MaxUnavailableZeroOverride will have no effect if the pod is not within a ZPDB scope.
+			//
+			err := c.zpdbController.MarkPodAsDeleted(ctx, pod.Namespace, pod.Name, "rollout-controller", zpdbMaxUnavailableOverrideIfZero)
 			if err != nil {
 				// Skip this pod. The reconcile loop regularly runs and this pod will have an opportunity to be re-tried.
 				// Rather than returning false here and abandoning the rest of the updates until the next reconcile,

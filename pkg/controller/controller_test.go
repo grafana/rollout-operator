@@ -33,6 +33,7 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
+	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 const (
@@ -61,6 +62,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		expectedPatchedResources          map[string][]string
 		expectedErr                       string
 		zpdbErrors                        []error
+		zpdbPartitionMode                 bool
 	}{
 		"should return error if some StatefulSet don't have OnDelete update strategy": {
 			statefulSets: []runtime.Object{
@@ -229,6 +231,24 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			// the first batch of zone-a pods is deleted
 			expectedDeletedPods: []string{"ingester-zone-a-0", "ingester-zone-a-1"},
+		},
+		"zones a & b need full updates, the zpdb does not deny anything in zone-a - partition mode": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision()),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			// the first batch of zone-a pods is deleted
+			expectedDeletedPods: []string{"ingester-zone-a-0", "ingester-zone-a-1"},
+			// setting this will trigger the maxUnavailability override to be 1
+			zpdbPartitionMode: true,
 		},
 		"should default max unavailable to 1 if set to an invalid value": {
 			statefulSets: []runtime.Object{
@@ -702,9 +722,9 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			reg := prometheus.NewPedanticRegistry()
 
 			// Pass in a slice of errors. Each eviction request takes and removes from the head and uses this as the eviction response. Once exhausted no evictions will return an error.
-			zpdb := &mockEvictionController{nextErrorsIfAny: testData.zpdbErrors}
+			evictionController := &mockEvictionController{nextErrorsIfAny: testData.zpdbErrors, hasPartitionAwarePdb: testData.zpdbPartitionMode}
 
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), zpdb)
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), evictionController)
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -715,6 +735,38 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				assert.Contains(t, err.Error(), testData.expectedErr)
 			} else {
 				require.NoError(t, err)
+			}
+
+			// This checks that the expected override was passed into the eviction controller
+			// when MarkPodAsDeleted() was called as part of the pod deletion sequence.
+			if len(testData.expectedDeletedPods) > 0 {
+				// Find the StatefulSet that owns the deleted pods by matching the pod name prefix.
+				deletedPodName := testData.expectedDeletedPods[0]
+				var sts *v1.StatefulSet
+				for _, obj := range testData.statefulSets {
+					s := obj.(*v1.StatefulSet)
+					if strings.HasPrefix(deletedPodName, s.Name+"-") {
+						sts = s
+						break
+					}
+				}
+				require.NotNil(t, sts, "could not find StatefulSet for deleted pod %s", deletedPodName)
+
+				var expectedOverride int
+				if testData.zpdbPartitionMode {
+					expectedOverride = 1
+				} else {
+					stsMaxUnavailableString, ok := sts.Annotations[config.RolloutMaxUnavailableAnnotationKey]
+					require.True(t, ok)
+					if stsMaxUnavailableString == "xxx" {
+						expectedOverride = 1
+					} else {
+						expectedOverride, err = strconv.Atoi(stsMaxUnavailableString)
+						require.NoError(t, err)
+					}
+				}
+
+				assert.Equal(t, zpdb.NewMaxUnavailableZeroOverride(expectedOverride), evictionController.lastOverride)
 			}
 
 			// Assert deleted pods.
@@ -1361,14 +1413,21 @@ func (f *fakeHttpClient) requests() []string {
 }
 
 type mockEvictionController struct {
-	nextErrorsIfAny []error
+	nextErrorsIfAny      []error
+	hasPartitionAwarePdb bool
+	lastOverride         zpdb.MaxUnavailableZeroOverride
 }
 
-func (m *mockEvictionController) MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string) error {
+func (m *mockEvictionController) MarkPodAsDeleted(_ context.Context, _ string, _ string, _ string, override zpdb.MaxUnavailableZeroOverride) error {
 	var response error
 	if len(m.nextErrorsIfAny) > 0 {
 		response = m.nextErrorsIfAny[0]
 		m.nextErrorsIfAny = m.nextErrorsIfAny[1:]
 	}
+	m.lastOverride = override
 	return response
+}
+
+func (m *mockEvictionController) HasPartitionAwarePdb(pod *corev1.Pod) (bool, error) {
+	return m.hasPartitionAwarePdb, nil
 }
