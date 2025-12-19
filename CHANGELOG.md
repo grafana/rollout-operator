@@ -2,7 +2,10 @@
 
 ## main / unreleased
 
+## v0.33.0
+
 * [CHANGE] Update base images from distroless Debian 12 to Debian 13. #355
+* [ENHANCEMENT] Allow the rollout controller to request pod deletions from the zone-aware PDB even when voluntary evictions are disabled. #351
 
 ## v0.32.2
 
