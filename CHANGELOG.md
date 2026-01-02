@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+## v0.28.2
+
+* [ENHANCEMENT] Update to Go `1.25` and Debian 13.
+
 ## v0.28.1
 
 * [ENHANCEMENT] No code changes, building a new image with Go `1.24.10`

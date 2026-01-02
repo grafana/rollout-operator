@@ -16,7 +16,7 @@ DONT_FIND := -name vendor -prune -o -name .git -prune -o -name .cache -prune -o 
 GO_FILES := $(shell find . $(DONT_FIND) -o -type f -name '*.go' -print)
 
 # Boringcrypto has a different base image for glibc
-BORINGCRYPTO_BASE_IMAGE=gcr.io/distroless/base-nossl-debian12:nonroot
+BORINGCRYPTO_BASE_IMAGE=gcr.io/distroless/base-nossl-debian13:nonroot
 
 .DEFAULT_GOAL := rollout-operator
 
