@@ -677,7 +677,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			scheme.AddKnownTypeWithName(customResourceGVK, &dummy{})
 			restMapper := testrestmapper.TestOnlyStaticRESTMapper(scheme)
 
-			kubeClient := fake.NewSimpleClientset(append(testData.statefulSets, testData.pods...)...)
+			kubeClient := fake.NewClientset(append(testData.statefulSets, testData.pods...)...)
 
 			// Inject an hook to track all deleted pods or return mocked errors.
 			var deletedPods []string
@@ -1070,7 +1070,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			scheme.AddKnownTypeWithName(customResourceGVK, &dummy{})
 			restMapper := testrestmapper.TestOnlyStaticRESTMapper(scheme)
 
-			kubeClient := fake.NewSimpleClientset(testData.statefulSets...)
+			kubeClient := fake.NewClientset(testData.statefulSets...)
 
 			// Inject a hook to track all patched StatefulSets or return mocked errors.
 			patchedStsNames := addPatchStatefulsetReactor(kubeClient, testData.kubePatchErr)
@@ -1182,7 +1182,7 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 		mockStatefulSetPod("store-gateway-zone-b-1", testLastRevisionHash),
 	}
 
-	kubeClient := fake.NewSimpleClientset(append(append([]runtime.Object{}, ingesters...), storeGateways...)...)
+	kubeClient := fake.NewClientset(append(append([]runtime.Object{}, ingesters...), storeGateways...)...)
 
 	// Create the controller and start informers.
 	reg := prometheus.NewPedanticRegistry()

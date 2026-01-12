@@ -28,7 +28,7 @@ func TestZoneTracker(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a fake client
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 
 	// Create a new zoneTracker with the fake client
 	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
@@ -94,7 +94,7 @@ func TestZoneTracker(t *testing.T) {
 func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 	ctx := context.Background()
 	// Create a fake client
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 
 	// Create a new zoneTracker with the fake client
 	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
@@ -145,7 +145,7 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 func TestLoadZonesCreatesInitialZones(t *testing.T) {
 	ctx := context.Background()
 	// Create a fake client
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 
 	// Create a new zoneTracker with the fake client
 	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
@@ -200,7 +200,7 @@ func TestLoadZonesCreatesInitialZones(t *testing.T) {
 func TestLoadZonesEmptyConfigMap(t *testing.T) {
 	ctx := context.Background()
 	// Create a fake client
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 
 	// Create a new zoneTracker with the fake client
 	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
@@ -220,7 +220,7 @@ func TestLoadZonesEmptyConfigMap(t *testing.T) {
 func TestSetDownscaled(t *testing.T) {
 	ctx := context.Background()
 	// Create a fake client
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 
 	// Create the configmap
 	cm := &corev1.ConfigMap{
@@ -284,7 +284,7 @@ func TestSetDownscaled(t *testing.T) {
 
 func TestLastDownscaledNonExistentZone(t *testing.T) {
 	// Create a fake client
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 
 	// Create a new zoneTracker with the fake client
 	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
@@ -377,7 +377,7 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 		}
 	}
 
-	api := fake.NewSimpleClientset()
+	api := fake.NewClientset()
 
 	zt := newZoneTracker(api, clusterDomain, namespace, "testconfigmap")
 
