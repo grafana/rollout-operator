@@ -339,7 +339,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 			},
 		)
 	}
-	api := fake.NewSimpleClientset(objects...)
+	api := fake.NewClientset(objects...)
 
 	if params.failSetLastDownscale {
 		api.PrependReactor("patch", "statefulsets", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -557,7 +557,7 @@ func TestFindStatefulSetWithNonUpdatedReplicas(t *testing.T) {
 			},
 		},
 	}
-	api := fake.NewSimpleClientset(objects...)
+	api := fake.NewClientset(objects...)
 
 	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup)
 	require.NoError(t, err)
@@ -591,7 +591,7 @@ func TestFindStatefulSetWithNonUpdatedReplicas_UnavailableReplicasSameZone(t *te
 			},
 		},
 	}
-	api := fake.NewSimpleClientset(objects...)
+	api := fake.NewClientset(objects...)
 
 	stsList, err := findStatefulSetsForRolloutGroup(context.Background(), api, namespace, rolloutGroup)
 	require.NoError(t, err)
@@ -633,7 +633,7 @@ func TestFindPodsForStatefulSet(t *testing.T) {
 		},
 	}
 
-	api := fake.NewSimpleClientset(objects...)
+	api := fake.NewClientset(objects...)
 	res, err := findPodsForStatefulSet(context.Background(), api, namespace, sts)
 	assert.Nil(t, err)
 	require.NotNil(t, res)
@@ -818,7 +818,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 		)
 	}
 
-	api := fake.NewSimpleClientset(objects...)
+	api := fake.NewClientset(objects...)
 
 	if params.failSetLastDownscale {
 		api.PrependReactor("update", "configmaps", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -920,7 +920,7 @@ func TestCheckReplicasChange(t *testing.T) {
 func TestGetStatefulSetPrepareInfo(t *testing.T) {
 	ctx := context.Background()
 	ar := admissionv1.AdmissionReview{}
-	api := fake.NewSimpleClientset()
+	api := fake.NewClientset()
 
 	tests := []struct {
 		name       string
