@@ -2,6 +2,17 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #358
+  * `github.com/prometheus/common` from `v0.67.4` to `v0.67.5`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.63.0` to `v0.64.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.63.0` to `v0.64.0`
+  * `go.opentelemetry.io/otel/trace` from `v1.38.0` to `v1.39.0`
+  * `go.opentelemetry.io/otel` from `v1.38.0` to `v1.39.0`
+  * `k8s.io/api` from `v0.34.2` to `v0.35.0`
+  * `k8s.io/apiextensions-apiserver` from `v0.34.2` to `v0.35.0`
+  * `k8s.io/apimachinery` from `v0.34.2` to `v0.35.0`
+  * `k8s.io/client-go` from `v0.34.2` to `v0.35.0`
+
 ## v0.33.0
 
 * [CHANGE] Update base images from distroless Debian 12 to Debian 13. #355
