@@ -18,7 +18,16 @@
             "matchDatasources": [
                 "go"
             ],
-            "groupName": "go dependencies"
+            "groupName": "go dependencies",
+            "postUpgradeTasks": {
+                "commands": [
+                    "make update-changelog-deps"
+                ],
+                "fileFilters": [
+                    "CHANGELOG.md"
+                ],
+                "executionMode": "branch"
+            }
         },
         {
             "description": "Group all github action dependencies together to reduce noise",
