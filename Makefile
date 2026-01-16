@@ -182,3 +182,8 @@ check-doc: doc
 .PHONY: doc
 doc:
 	prettier --write "$(DOC_SOURCES_PATH)/*.md"
+
+.PHONY: update-changelog-deps
+update-changelog-deps: ## Update CHANGELOG.md with go dependency changes
+	@# Match the previous version tag then pipe its go.mod for comparison
+	@git show $$(git describe --tags --abbrev=0 --match "v*"):go.mod | go run ./tools/update-changelog-deps/main.go

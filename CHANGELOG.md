@@ -2,7 +2,8 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Updated dependencies, including: #358
+* [ENHANCEMENT] Updated dependencies, including:
+  * `github.com/grafana/dskit` from `v0.0.0-20251208160410-c006bba17343` to `v0.0.0-20260112083637-0e92ccb6d3d4`
   * `github.com/prometheus/common` from `v0.67.4` to `v0.67.5`
   * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.63.0` to `v0.64.0`
   * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.63.0` to `v0.64.0`
