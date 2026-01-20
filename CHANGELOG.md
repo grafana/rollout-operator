@@ -2,9 +2,10 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Updated dependencies, including:
-  * `github.com/grafana/dskit` from `v0.0.0-20251208160410-c006bba17343` to `v0.0.0-20260112083637-0e92ccb6d3d4`
+* [ENHANCEMENT] Updated dependencies, including: #358 #363
+  * `github.com/grafana/dskit` from `v0.0.0-20251208160410-c006bba17343` to `v0.0.0-20260119063514-a2b633bfa4ea`
   * `github.com/prometheus/common` from `v0.67.4` to `v0.67.5`
+  * `github.com/sirupsen/logrus` from `v1.9.3` to `v1.9.4`
   * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.63.0` to `v0.64.0`
   * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.63.0` to `v0.64.0`
   * `go.opentelemetry.io/otel/trace` from `v1.38.0` to `v1.39.0`
