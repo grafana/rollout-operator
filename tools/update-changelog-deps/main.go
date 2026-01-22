@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,15 @@ import (
 )
 
 func main() {
+	var pullRequestNum int
+	flag.IntVar(&pullRequestNum, "pull-request-number", 0, "The pull request number of the most recent go dependency update")
+	flag.Parse()
+
+	appendPullRequestNum := ""
+	if pullRequestNum > 0 {
+		appendPullRequestNum = fmt.Sprintf(" #%d", pullRequestNum)
+	}
+
 	currentBytes, err := os.ReadFile("go.mod")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading go.mod: %v\n", err)
@@ -64,7 +74,7 @@ func main() {
 	// Sort changes for consistent output
 	sort.Strings(changes)
 
-	newEntry := []string{"* [ENHANCEMENT] Updated dependencies, including:"}
+	newEntry := []string{"* [ENHANCEMENT] Updated dependencies, including:" + appendPullRequestNum}
 	newEntry = append(newEntry, changes...)
 
 	changelogLines, err := readChangelog()
@@ -73,7 +83,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	content, err := buildChangelog(changelogLines, newEntry)
+	content, err := buildChangelog(changelogLines, newEntry, appendPullRequestNum)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error building changelog: %v\n", err)
 		os.Exit(1)
@@ -105,7 +115,7 @@ func readChangelog() ([]string, error) {
 	return lines, nil
 }
 
-func buildChangelog(changelogLines []string, newEntry []string) ([]byte, error) {
+func buildChangelog(changelogLines []string, newEntry []string, appendPullRequestNum string) ([]byte, error) {
 	// Find main section and any existing deps entry
 	mainIdx := -1
 	mainEndIdx := -1
@@ -141,6 +151,11 @@ func buildChangelog(changelogLines []string, newEntry []string) ([]byte, error) 
 	var result []string
 
 	if depsStartIdx >= 0 {
+		// If there was an existing entry append the new PR number to it
+		// The one exception here is if that pull request number already existed (protects against reruns)
+		if !strings.HasSuffix(changelogLines[depsStartIdx], appendPullRequestNum) {
+		  newEntry[0] = changelogLines[depsStartIdx] + appendPullRequestNum
+		}
 		// Replace existing entry to reduce diff
 		result = append(result, changelogLines[:depsStartIdx]...)
 		result = append(result, newEntry...)

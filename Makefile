@@ -185,5 +185,7 @@ doc:
 
 .PHONY: update-changelog-deps
 update-changelog-deps: ## Update CHANGELOG.md with go dependency changes
-	@# Match the previous version tag then pipe its go.mod for comparison
-	@git show $$(git describe --tags --abbrev=0 --match "v*"):go.mod | go run ./tools/update-changelog-deps/main.go
+	@# Finds the most recent commit with "update go dependencies" in its message and extracts the PR number from it.
+	@# Also, in order to find dependency differences, matches the previous version tag to then pipe its go.mod for comparison.
+	@PR_NUM=$$(git log --oneline --grep="update go dependencies" --max-count=1 | $(SED) -En 's/.*\(#([0-9]+)\).*/\1/p'); \
+	git show $$(git describe --tags --abbrev=0 --match "v*"):go.mod | go run ./tools/update-changelog-deps/main.go --pull-request-number="$${PR_NUM}"
