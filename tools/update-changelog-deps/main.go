@@ -154,7 +154,7 @@ func buildChangelog(changelogLines []string, newEntry []string, appendPullReques
 		// If there was an existing entry append the new PR number to it
 		// The one exception here is if that pull request number already existed (protects against reruns)
 		if !strings.HasSuffix(changelogLines[depsStartIdx], appendPullRequestNum) {
-		  newEntry[0] = changelogLines[depsStartIdx] + appendPullRequestNum
+			newEntry[0] = changelogLines[depsStartIdx] + appendPullRequestNum
 		}
 		// Replace existing entry to reduce diff
 		result = append(result, changelogLines[:depsStartIdx]...)
