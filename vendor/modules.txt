@@ -256,7 +256,7 @@ github.com/google/uuid
 # github.com/gorilla/mux v1.8.1
 ## explicit; go 1.20
 github.com/gorilla/mux
-# github.com/grafana/dskit v0.0.0-20260119063514-a2b633bfa4ea
+# github.com/grafana/dskit v0.0.0-20260123032120-fb7d1aad51e6
 ## explicit; go 1.24.0
 github.com/grafana/dskit/clusterutil
 github.com/grafana/dskit/flagext
@@ -1452,8 +1452,8 @@ k8s.io/utils/net
 k8s.io/utils/ptr
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# sigs.k8s.io/controller-runtime v0.22.4
-## explicit; go 1.24.0
+# sigs.k8s.io/controller-runtime v0.23.0
+## explicit; go 1.25.0
 sigs.k8s.io/controller-runtime/pkg/client/apiutil
 # sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730
 ## explicit; go 1.23
