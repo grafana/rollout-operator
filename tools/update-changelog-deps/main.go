@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -12,6 +14,15 @@ import (
 )
 
 func main() {
+	var pullRequestNum int
+	flag.IntVar(&pullRequestNum, "pull-request-number", 0, "The pull request number of the most recent go dependency update")
+	flag.Parse()
+
+	appendPullRequestNum := ""
+	if pullRequestNum > 0 {
+		appendPullRequestNum = fmt.Sprintf(" #%d", pullRequestNum)
+	}
+
 	currentBytes, err := os.ReadFile("go.mod")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading go.mod: %v\n", err)
@@ -58,13 +69,14 @@ func main() {
 	}
 
 	if len(changes) == 0 {
+		fmt.Fprintf(os.Stderr, "No changes were necessary\n")
 		return
 	}
 
 	// Sort changes for consistent output
 	sort.Strings(changes)
 
-	newEntry := []string{"* [ENHANCEMENT] Updated dependencies, including:"}
+	newEntry := []string{"* [ENHANCEMENT] Updated dependencies, including:" + appendPullRequestNum}
 	newEntry = append(newEntry, changes...)
 
 	changelogLines, err := readChangelog()
@@ -73,10 +85,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	content, err := buildChangelog(changelogLines, newEntry)
+	content, err := buildChangelog(changelogLines, newEntry, appendPullRequestNum)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error building changelog: %v\n", err)
 		os.Exit(1)
+	}
+	if content == nil {
+		fmt.Fprintf(os.Stderr, "No changes were necessary\n")
+		return
 	}
 
 	err = os.WriteFile("CHANGELOG.md", content, 0644)
@@ -105,7 +121,7 @@ func readChangelog() ([]string, error) {
 	return lines, nil
 }
 
-func buildChangelog(changelogLines []string, newEntry []string) ([]byte, error) {
+func buildChangelog(changelogLines []string, newEntry []string, appendPullRequestNum string) ([]byte, error) {
 	// Find main section and any existing deps entry
 	mainIdx := -1
 	mainEndIdx := -1
@@ -141,12 +157,18 @@ func buildChangelog(changelogLines []string, newEntry []string) ([]byte, error) 
 	var result []string
 
 	if depsStartIdx >= 0 {
+		if slices.Equal(newEntry[1:], changelogLines[depsStartIdx+1:depsEndIdx+1]) {
+			// Nothing needs to be done
+			return nil, nil
+		}
+		// Append the new PR number
+		newEntry[0] = changelogLines[depsStartIdx] + appendPullRequestNum
 		// Replace existing entry to reduce diff
 		result = append(result, changelogLines[:depsStartIdx]...)
 		result = append(result, newEntry...)
 		result = append(result, changelogLines[depsEndIdx+1:]...)
 	} else {
-		// Insert new entry at the end of main section header (ENHANCEMENT ordering)
+		// Insert new entry at the end of main section header (this doesn't account for BUGFIX, but that's okay for now)
 		result = append(result, changelogLines[:mainIdx+1]...)
 		result = append(result, "") // ensure a padding blank line at the start of the section
 		for i := mainIdx + 1; i < mainEndIdx; i++ {

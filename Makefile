@@ -184,6 +184,8 @@ doc:
 	prettier --write "$(DOC_SOURCES_PATH)/*.md"
 
 .PHONY: update-changelog-deps
-update-changelog-deps: ## Update CHANGELOG.md with go dependency changes
-	@# Match the previous version tag then pipe its go.mod for comparison
-	@git show $$(git describe --tags --abbrev=0 --match "v*"):go.mod | go run ./tools/update-changelog-deps/main.go
+update-changelog-deps: ## Update CHANGELOG.md with go dependency changes (requires PR_NUM)
+ifndef PR_NUM
+	$(error PR_NUM is required. Usage example: make update-changelog-deps PR_NUM=123)
+endif
+	@git show $$(git describe --tags --abbrev=0 --match "v*"):go.mod | go run ./tools/update-changelog-deps/main.go --pull-request-number="$(PR_NUM)"
