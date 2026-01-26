@@ -69,6 +69,7 @@ func main() {
 	}
 
 	if len(changes) == 0 {
+		fmt.Fprintf(os.Stderr, "No changes were necessary\n")
 		return
 	}
 
