@@ -55,6 +55,34 @@ func TestBuildChangelog_ReplaceExistingEntry(t *testing.T) {
 	require.Equal(t, expected, string(actual))
 }
 
+func TestBuildChangelog_NoChanges(t *testing.T) {
+	changelogLines := []string{
+		"# Changelog",
+		"",
+		"## main / unreleased",
+		"",
+		"* [FEATURE] feature",
+		"* [ENHANCEMENT] Updated dependencies, including: #123",
+		"  * `github.com/example/foo` from `v1.0.0` to `v1.1.0`",
+		"  * `github.com/example/bar` from `v2.0.0` to `v2.1.0`",
+		"* [ENHANCEMENT] enhancement",
+		"",
+		"## v1.0.0",
+		"",
+		"* Initial release",
+	}
+
+	newEntry := []string{
+		"* [ENHANCEMENT] Updated dependencies, including: #124",
+		"  * `github.com/example/foo` from `v1.0.0` to `v1.1.0`",
+		"  * `github.com/example/bar` from `v2.0.0` to `v2.1.0`",
+	}
+
+	actual, err := buildChangelog(changelogLines, newEntry, " #124")
+	require.NoError(t, err)
+	require.Nil(t, actual)
+}
+
 func TestBuildChangelog_InsertNewEntry(t *testing.T) {
 	changelogLines := []string{
 		"# Changelog",

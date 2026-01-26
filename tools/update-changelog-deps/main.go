@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -88,6 +89,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error building changelog: %v\n", err)
 		os.Exit(1)
 	}
+	if content == nil {
+		fmt.Fprintf(os.Stderr, "No changes were necessary\n")
+		return
+	}
 
 	err = os.WriteFile("CHANGELOG.md", content, 0644)
 	if err != nil {
@@ -151,17 +156,18 @@ func buildChangelog(changelogLines []string, newEntry []string, appendPullReques
 	var result []string
 
 	if depsStartIdx >= 0 {
-		// If there was an existing entry append the new PR number to it
-		// The one exception here is if that pull request number already existed (protects against reruns)
-		if !strings.HasSuffix(changelogLines[depsStartIdx], appendPullRequestNum) {
-			newEntry[0] = changelogLines[depsStartIdx] + appendPullRequestNum
+		if slices.Equal(newEntry[1:], changelogLines[depsStartIdx+1:depsEndIdx+1]) {
+			// Nothing needs to be done
+			return nil, nil
 		}
+		// Append the new PR number
+		newEntry[0] = changelogLines[depsStartIdx] + appendPullRequestNum
 		// Replace existing entry to reduce diff
 		result = append(result, changelogLines[:depsStartIdx]...)
 		result = append(result, newEntry...)
 		result = append(result, changelogLines[depsEndIdx+1:]...)
 	} else {
-		// Insert new entry at the end of main section header (ENHANCEMENT ordering)
+		// Insert new entry at the end of main section header (this doesn't account for BUGFIX, but that's okay for now)
 		result = append(result, changelogLines[:mainIdx+1]...)
 		result = append(result, "") // ensure a padding blank line at the start of the section
 		for i := mainIdx + 1; i < mainEndIdx; i++ {
