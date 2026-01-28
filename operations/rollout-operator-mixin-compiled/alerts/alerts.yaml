@@ -6,7 +6,7 @@ groups:
             message: |
                 A validating or mutating rollout-operator webhook has an Ignore policy set. This should be set to Fail.
             runbook_url: https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#rollout-operatorincorrectwebhookconfigurationfailurepolicy
-          expr: count by(type, webhook) (kube_validating_webhook_failure_policy{policy="Ignore", webhook=~"^(pod-eviction|zpdb-validation).+"} > 0)
+          expr: count by(type, webhook, namespace) (kube_validating_webhook_failure_policy{policy="Ignore", webhook=~"^(pod-eviction|zpdb-validation).+"} > 0)
           for: 5m
           labels:
             severity: warning
@@ -14,7 +14,7 @@ groups:
           annotations:
             message: An invalid zone aware pod disruption budget configuration has been observed.
             runbook_url: https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#rollout-operatorbadzoneawarepoddisruptionbudgetconfiguration
-          expr: sum by (job)(rate(rollout_operator_zpdb_configurations_observed_total{result="invalid"}[5m])) > 0
+          expr: sum by (job, namespace)(rate(rollout_operator_zpdb_configurations_observed_total{result="invalid"}[5m])) > 0
           for: 5m
           labels:
             severity: warning

@@ -8,7 +8,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
       rules: [
         {
           alert: $.alertName('IncorrectWebhookConfigurationFailurePolicy'),
-          expr: 'count by(type, webhook) (kube_validating_webhook_failure_policy{policy="Ignore", webhook=~"^(pod-eviction|zpdb-validation).+"} > 0)',
+          expr: 'count by(type, webhook, namespace) (kube_validating_webhook_failure_policy{policy="Ignore", webhook=~"^(pod-eviction|zpdb-validation).+"} > 0)',
           'for': '5m',
           labels: {
             severity: 'warning',
@@ -21,7 +21,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
         },
         {
           alert: $.alertName('BadZoneAwarePodDisruptionBudgetConfiguration'),
-          expr: 'sum by (job)(rate(rollout_operator_zpdb_configurations_observed_total{result="invalid"}[5m])) > 0',
+          expr: 'sum by (job, namespace)(rate(rollout_operator_zpdb_configurations_observed_total{result="invalid"}[5m])) > 0',
           'for': '5m',
           labels: {
             severity: 'warning',
