@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.34.0
+
 * [ENHANCEMENT] Updated dependencies, including: #358 #363 #365 #367
   * `github.com/grafana/dskit` from `v0.0.0-20251208160410-c006bba17343` to `v0.0.0-20260130162739-bd087f70604d`
   * `github.com/prometheus/common` from `v0.67.4` to `v0.67.5`
