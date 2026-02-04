@@ -58,6 +58,10 @@ func (v *validatorPartitionAware) validate(maxUnavailable int) error {
 	if v.result.notReady+v.result.unknown >= maxUnavailable {
 		return errors.New(pdbMessage(v.result, "partition "+v.partition))
 	}
+	// we did not find a pod for this partition in the other StatefulSets
+	if v.result.tested == 0 {
+		return errors.New(pdbMessage(v.result, "partition "+v.partition))
+	}
 	return nil
 }
 

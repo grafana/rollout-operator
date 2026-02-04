@@ -290,6 +290,49 @@ func TestPodEviction_MaxUnavailableEq0_Override_MarkPodAsDeleted(t *testing.T) {
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
 }
 
+// TestPodEviction_PartitionAwareDownscale validates a downscale scenario.
+// A StatefulSet has been updated from 3 to 2 replicas.
+// The zone-a StatefulSet and pods will be updated first, and the pods prepared for downscale and shutdown.
+// During this time, the rollout-operator (controller) will not be able to update the StatefulSet zone b (follow the leader) if there are zone-a pods not updated/not ready.
+// There can be multiple minutes duration from when the zone-a pods have been shutdown and the zone b StatefulSet downscale occurs.
+// During this time there is a window where a voluntary eviction may arise for a zone-b pod, and the matching zone-a pod has already been shutdown and deleted.
+// We need to deny this eviction.
+func TestPodEviction_PartitionAwareDownscale(t *testing.T) {
+	objs := make([]runtime.Object, 0, 7)
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
+
+	for _, p := range []string{testPodZoneA0, testPodZoneA1} {
+		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
+	}
+	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
+		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
+	}
+
+	stsZoneA := objs[0].(*appsv1.StatefulSet)
+	stsZoneB := objs[1].(*appsv1.StatefulSet)
+
+	// The StatefulSets have been downscaled from 3 to 2
+	replicas := int32(2)
+	// Zone A has 2 desired replicas and is running 2 replicas
+	stsZoneA.Spec.Replicas = &replicas
+	stsZoneA.Status.Replicas = replicas
+
+	zoneBReplica := int32(3)
+	// Zone B has 2 desired replicas
+	stsZoneB.Spec.Replicas = &replicas
+	// Zone B is still running 3 replicas
+	stsZoneB.Status.Replicas = zoneBReplica
+
+	// ingester-zone-a-0 --> 0
+	podPartitionZoneRegex := "[a-z\\-]+-zone-[a-z]-([0-9]+)"
+
+	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneB2, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
+	defer testCtx.controller.Stop()
+	testCtx.assertDenyResponse(t, "no related pods found in partition 2", 429)
+	testCtx.logs.assertHasLog(t, []string{`no related pods found in partition 2`})
+}
+
 func TestPodEviction_Allowed_ViaMarkPodAsDeleted(t *testing.T) {
 	objs := make([]runtime.Object, 0, 12)
 	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
