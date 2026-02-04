@@ -17,7 +17,7 @@
   * `k8s.io/apimachinery` from `v0.34.2` to `v0.35.0`
   * `k8s.io/client-go` from `v0.34.2` to `v0.35.0`
   * `sigs.k8s.io/controller-runtime` from `v0.22.4` to `v0.23.1`
-[ BUGFIX ] Zone-aware PDB: deny evictions when cross-zone pod peers are not found in partitioned environments. #...
+[ BUGFIX ] Zone-aware PDB: deny evictions when cross-zone pod peers are not found in partitioned environments. #370
 
 ## v0.33.0
 
