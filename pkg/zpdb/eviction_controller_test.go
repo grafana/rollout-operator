@@ -293,9 +293,8 @@ func TestPodEviction_MaxUnavailableEq0_Override_MarkPodAsDeleted(t *testing.T) {
 // TestPodEviction_PartitionAwareDownscale validates a downscale scenario.
 // A StatefulSet has been updated from 3 to 2 replicas.
 // The zone-a StatefulSet and pods will be updated first, and the pods prepared for downscale and shutdown.
-// During this time, the rollout-operator (controller) will not be able to update the StatefulSet zone b (follow the leader) if there are zone-a pods not updated/not ready.
-// There can be multiple minutes duration from when the zone-a pods have been shutdown and the zone b StatefulSet downscale occurs.
-// During this time there is a window where a voluntary eviction may arise for a zone-b pod, and the matching zone-a pod has already been shutdown and deleted.
+// There can be multiple minutes window of time from when the zone-a pods have been shutdown and the zone b StatefulSet downscale occurs.
+// During this time a voluntary eviction may arise for a zone-b pod, and the matching zone-a pod has already been shutdown and deleted.
 // We need to deny this eviction.
 func TestPodEviction_PartitionAwareDownscale(t *testing.T) {
 	objs := make([]runtime.Object, 0, 7)
