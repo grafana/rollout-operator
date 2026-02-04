@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [FEATURE] Add `grafana.com/rollout-force-replicas` annotation to manually override the replica count for a StatefulSet, bypassing the operator's normal scaling logic. #371
+
 ## v0.34.0
 
 * [ENHANCEMENT] Updated dependencies, including: #358 #363 #365 #367
