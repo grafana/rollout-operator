@@ -62,9 +62,6 @@ func pdbMessage(result *zoneStatusResult, span string) string {
 		// 2 pods unknown
 		msg += fmt.Sprintf("%d %s unknown", result.unknown, plural("pod", result.unknown))
 	}
-	if result.tested == 0 {
-		msg += "no related pods found"
-	}
 
 	// in ingester-zone-a partition 0
 	// in ingester-zone-a

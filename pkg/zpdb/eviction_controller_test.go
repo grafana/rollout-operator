@@ -328,8 +328,58 @@ func TestPodEviction_PartitionAwareDownscale(t *testing.T) {
 
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneB2, testNamespace), newPDBMaxUnavailableWithRegex(1, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
 	defer testCtx.controller.Stop()
-	testCtx.assertDenyResponse(t, "no related pods found in partition 2", 429)
-	testCtx.logs.assertHasLog(t, []string{`no related pods found in partition 2`})
+	testCtx.assertDenyResponse(t, "1 pod unknown in partition 2", 429)
+	testCtx.logs.assertHasLog(t, []string{`1 pod unknown in partition 2`})
+}
+
+// TestPodEviction_PartitionAwareDownscaleMaxUnavailable2 is a hypothetical case where we have 3 partition aware zones and we require a maxUnavailable=2
+// In this scenario zone A has been downscaled from 3 to 1 pods, zone B partition 2 has an unhealthy pod, and zone C is all healthy.
+// We deny the eviction of the zone c partition 2 pod.
+func TestPodEviction_PartitionAwareDownscaleMaxUnavailable2(t *testing.T) {
+	objs := make([]runtime.Object, 0, 10)
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneC))
+
+	// Zone A has scaled down to 1 pod
+	for _, p := range []string{testPodZoneA0} {
+		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
+	}
+
+	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
+		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
+	}
+
+	for _, p := range []string{testPodZoneC0, testPodZoneC1, testPodZoneC2} {
+		objs = append(objs, newPod(p, objs[2].(*appsv1.StatefulSet)))
+	}
+
+	stsZoneA := objs[0].(*appsv1.StatefulSet)
+	stsZoneB := objs[1].(*appsv1.StatefulSet)
+	stsZoneC := objs[2].(*appsv1.StatefulSet)
+
+	podZoneB2 := objs[6].(*corev1.Pod)
+	podZoneB2.Status.Phase = corev1.PodFailed
+
+	// The StatefulSets have been downscaled from 3 to 2
+	replicas := int32(1)
+	// Zone A has 1 desired replicas and is running 1 replicas
+	stsZoneA.Spec.Replicas = &replicas
+	stsZoneA.Status.Replicas = replicas
+
+	zoneBCReplica := int32(3)
+	stsZoneB.Spec.Replicas = &zoneBCReplica
+	stsZoneB.Status.Replicas = zoneBCReplica
+	stsZoneC.Spec.Replicas = &zoneBCReplica
+	stsZoneC.Status.Replicas = zoneBCReplica
+
+	// ingester-zone-a-0 --> 0
+	podPartitionZoneRegex := "[a-z\\-]+-zone-[a-z]-([0-9]+)"
+
+	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneC2, testNamespace), newPDBMaxUnavailableWithRegex(2, rolloutGroupValue, podPartitionZoneRegex, int64(1)), objs...)
+	defer testCtx.controller.Stop()
+	testCtx.assertDenyResponse(t, "1 pod not ready, 1 pod unknown in partition 2", 429)
+	testCtx.logs.assertHasLog(t, []string{`1 pod not ready, 1 pod unknown in partition 2`})
 }
 
 func TestPodEviction_Allowed_ViaMarkPodAsDeleted(t *testing.T) {
