@@ -35,7 +35,7 @@ if [ ! -d "$OUTPUT_DIR" ]; then
     cd "$OUTPUT_DIR"
 
     # Initialise the Tanka.
-    tk init --k8s=1.29
+    tk init --k8s=1.35
 
     # Install rollout-operator from this branch.
     jb install ../../operations/rollout-operator
