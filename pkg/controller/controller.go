@@ -400,6 +400,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToFollowLeader(ctx co
 	for _, sts := range sets {
 		currentReplicas := *sts.Spec.Replicas
 		desiredReplicas, err := desiredStsReplicas(groupName, sts, sets, c.logger)
+
 		if err != nil {
 			return false, err
 		}

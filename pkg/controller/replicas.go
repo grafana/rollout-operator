@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/go-kit/log"
@@ -11,12 +12,32 @@ import (
 	"github.com/grafana/rollout-operator/pkg/config"
 )
 
+// getForceReplicasOverride returns the value of the force-replicas annotation if set and valid.
+func getForceReplicasOverride(sts *v1.StatefulSet) (int32, bool) {
+	annotations := sts.GetAnnotations()
+	valueStr, ok := annotations[config.RolloutForceReplicasAnnotationKey]
+	if !ok {
+		return 0, false
+	}
+	value, err := strconv.ParseInt(valueStr, 10, 32)
+	if err != nil || value < 0 {
+		return 0, false
+	}
+	return int32(value), true
+}
+
 // desiredStsReplicas returns desired replicas for statefulset based on leader-replicas, and minimum time between zone downscales.
 func desiredStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulSet, logger log.Logger) (int32, error) {
 	followerReplicas := *sts.Spec.Replicas
 	leader, err := getLeaderForStatefulSet(sts, all)
 	if leader == nil || err != nil {
 		return followerReplicas, err
+	}
+
+	// If force-replicas annotation is set, use it as the desired replicas
+	// instead of the reference resource's replicas
+	if forceReplicas, hasForceReplicas := getForceReplicasOverride(sts); hasForceReplicas {
+		return forceReplicas, nil
 	}
 
 	leaderReplicas := *leader.Spec.Replicas

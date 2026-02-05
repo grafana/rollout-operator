@@ -11,6 +11,66 @@ import (
 	"github.com/grafana/rollout-operator/pkg/config"
 )
 
+func TestGetForceReplicasOverride(t *testing.T) {
+	t.Run("no annotation", func(t *testing.T) {
+		sts := mockStatefulSet("test-zone-a")
+
+		replicas, ok := getForceReplicasOverride(sts)
+		require.False(t, ok)
+		require.Equal(t, int32(0), replicas)
+	})
+
+	t.Run("valid annotation", func(t *testing.T) {
+		sts := mockStatefulSet("test-zone-a", withAnnotations(map[string]string{
+			config.RolloutForceReplicasAnnotationKey: "5",
+		}))
+
+		replicas, ok := getForceReplicasOverride(sts)
+		require.True(t, ok)
+		require.Equal(t, int32(5), replicas)
+	})
+
+	t.Run("zero value", func(t *testing.T) {
+		sts := mockStatefulSet("test-zone-a", withAnnotations(map[string]string{
+			config.RolloutForceReplicasAnnotationKey: "0",
+		}))
+
+		replicas, ok := getForceReplicasOverride(sts)
+		require.True(t, ok)
+		require.Equal(t, int32(0), replicas)
+	})
+
+	t.Run("negative value", func(t *testing.T) {
+		sts := mockStatefulSet("test-zone-a", withAnnotations(map[string]string{
+			config.RolloutForceReplicasAnnotationKey: "-1",
+		}))
+
+		replicas, ok := getForceReplicasOverride(sts)
+		require.False(t, ok)
+		require.Equal(t, int32(0), replicas)
+	})
+
+	t.Run("non-numeric value", func(t *testing.T) {
+		sts := mockStatefulSet("test-zone-a", withAnnotations(map[string]string{
+			config.RolloutForceReplicasAnnotationKey: "invalid",
+		}))
+
+		replicas, ok := getForceReplicasOverride(sts)
+		require.False(t, ok)
+		require.Equal(t, int32(0), replicas)
+	})
+
+	t.Run("empty value", func(t *testing.T) {
+		sts := mockStatefulSet("test-zone-a", withAnnotations(map[string]string{
+			config.RolloutForceReplicasAnnotationKey: "",
+		}))
+
+		replicas, ok := getForceReplicasOverride(sts)
+		require.False(t, ok)
+		require.Equal(t, int32(0), replicas)
+	})
+}
+
 func TestGetMostRecentDownscale(t *testing.T) {
 	t.Run("no last downscale", func(t *testing.T) {
 		sts1 := mockStatefulSet("test-zone-a")
@@ -348,4 +408,5 @@ func TestReconcileStsReplicas(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int32(2), replicas)
 	})
+
 }
