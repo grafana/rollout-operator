@@ -112,6 +112,29 @@ Rollout-operator does NOT remember any state of "delayed scaledown" preparation.
 
 How is this different from `grafana.com/prepare-downscale` label used by `/admission/prepare-downscale` webhook? That webhook calls the "prepare-downscale" endpoint called *just* before the downscale is done, and pods are shutdown right after. On the other hand delayed downscale can take many hours. Delayed downscale and "prepare downscale" features can be used together.
 
+## Manual replica override
+
+The `grafana.com/rollout-force-replicas` annotation allows you to manually set the replica count for a specific StatefulSet, bypassing the operator's normal leader/follower and mirror-resource logic for that StatefulSet only. Other StatefulSets in the same rollout group continue to operate normally.
+
+When set to a non-negative integer, the operator scales the StatefulSet to that exact number. The scaling behavior depends on the StatefulSet configuration:
+
+- **With `grafana.com/rollout-downscale-leader` annotation (leader/follower mode)**: Scales immediately without delay.
+- **With `grafana.com/rollout-mirror-replicas-from-resource-*` annotations (mirror-replicas mode)**: Respects the delayed downscale mechanism if configured.
+
+Example:
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ingester-zone-a
+  annotations:
+    grafana.com/rollout-force-replicas: "0"
+spec:
+  # ...
+```
+
+To resume normal behavior, remove the annotation.
+
 ## Operations
 
 ### HTTP endpoints

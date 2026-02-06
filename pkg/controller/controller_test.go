@@ -1112,6 +1112,152 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 			},
 		},
+
+		"force-replicas overrides mirror-replicas and respects delayed downscale": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale"),
+					withAnnotations(map[string]string{
+						config.RolloutForceReplicasAnnotationKey: "2",
+					})),
+			},
+			httpResponses: map[string]httpResponse{
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+			},
+			customResourceScaleSpecReplicas:   10, // Reference resource says 10, but force-replicas says 2
+			customResourceScaleStatusReplicas: 5,
+			// force-replicas goes through mirror-replicas path, respects delayed downscale
+			expectedPatchedSets: map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":2}}`}},
+			expectedHttpRequests: []string{
+				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+		},
+
+		"force-replicas waits for delayed downscale when delay not elapsed": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale"),
+					withAnnotations(map[string]string{
+						config.RolloutForceReplicasAnnotationKey: "0",
+					})),
+			},
+			httpResponses: map[string]httpResponse{
+				"POST http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-30*time.Minute).Unix())},
+				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-30*time.Minute).Unix())},
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-30*time.Minute).Unix())},
+			},
+			customResourceScaleSpecReplicas:   3,
+			customResourceScaleStatusReplicas: 3,
+			// force-replicas goes through mirror-replicas path, delay not elapsed so no scale
+			expectedHttpRequests: []string{
+				"POST http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+			// No patch - delay not reached
+		},
+
+		"force-replicas at current replicas cancels delayed downscale": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale"),
+					withAnnotations(map[string]string{
+						config.RolloutForceReplicasAnnotationKey: "3", // Same as current
+					})),
+			},
+			customResourceScaleSpecReplicas:   3,
+			customResourceScaleStatusReplicas: 3,
+			// force-replicas equals current, cancels any pending downscale
+			expectedHttpRequests: []string{
+				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+		},
+
+		"force-replicas on follower scales immediately via leader path": {
+			statefulSets: []runtime.Object{
+				// zone-a: leader with 5 replicas
+				mockStatefulSet("ingester-zone-a", withReplicas(5, 5)),
+				// zone-b: follows zone-a, has force-replicas=0, should scale to 0 immediately
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
+					withAnnotations(map[string]string{
+						config.RolloutDownscaleLeaderAnnotationKey: "ingester-zone-a",
+						config.RolloutForceReplicasAnnotationKey:   "0",
+					})),
+			},
+			// force-replicas on follower is handled in leader/follower path, scales immediately
+			expectedPatchedSets:  map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":0}}`}},
+			expectedHttpRequests: nil,
+		},
+
+		"force-replicas=0 on one zone with 3 zones using mirror-replicas": {
+			statefulSets: []runtime.Object{
+				// zone-a: has force-replicas=0, goes through mirror-replicas path with delayed downscale
+				mockStatefulSet("ingester-zone-a", withReplicas(5, 5),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale"),
+					withAnnotations(map[string]string{
+						config.RolloutForceReplicasAnnotationKey: "0",
+					})),
+				// zone-b: no force-replicas, follows mirror-replicas (already at 5)
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
+				// zone-c: no force-replicas, follows mirror-replicas (already at 5)
+				mockStatefulSet("ingester-zone-c", withReplicas(5, 5),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
+			},
+			httpResponses: map[string]httpResponse{
+				"POST http://ingester-zone-a-0.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-a-1.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-a-2.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-a-3.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-a-4.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+			},
+			customResourceScaleSpecReplicas:   5,
+			customResourceScaleStatusReplicas: 5,
+			// zone-a goes through mirror-replicas path with delayed downscale
+			expectedPatchedSets: map[string][]string{"ingester-zone-a": {`{"spec":{"replicas":0}}`}},
+			expectedHttpRequests: []string{
+				"POST http://ingester-zone-a-0.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-a-1.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-a-2.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-a-3.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-a-4.ingester-zone-a.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+		},
+
+		"force-replicas=0 on one zone with 3 zones using follow-leader": {
+			statefulSets: []runtime.Object{
+				// zone-a: leader with 5 replicas
+				mockStatefulSet("ingester-zone-a", withReplicas(5, 5)),
+				// zone-b: follows zone-a, has force-replicas=0, should scale to 0 immediately
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
+					withAnnotations(map[string]string{
+						config.RolloutDownscaleLeaderAnnotationKey: "ingester-zone-a",
+						config.RolloutForceReplicasAnnotationKey:   "0",
+					})),
+				// zone-c: follows zone-a, no force-replicas, should stay at 5
+				mockStatefulSet("ingester-zone-c", withReplicas(5, 5),
+					withAnnotations(map[string]string{
+						config.RolloutDownscaleLeaderAnnotationKey: "ingester-zone-a",
+					})),
+			},
+			// force-replicas on follower is handled in leader/follower path, scales immediately
+			expectedPatchedSets:  map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":0}}`}},
+			expectedHttpRequests: nil,
+		},
 	}
 
 	for testName, testData := range tests {
