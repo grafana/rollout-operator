@@ -475,6 +475,8 @@ If `ingester-zone-b-0` has failed and `ingester-zone-a-1` is to be evicted, it w
 
 If `ingester-zone-b-0` has failed and `ingester-zone-a-0` is to be evicted, it will be denied as the partition `0` in zone `b` is disrupted.
 
+*Note that there is a key assumption that there is only one pod per partition per zone assigned to each partition. We do not expect there to be multiple pods within a zone serving the same partition.*
+
 ## Operations
 
 ### Setup
