@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [BUGFIX] Zone-aware PDB: deny evictions when cross-zone pod peers are not found in partitioned environments. #370
 * [FEATURE] Add `grafana.com/rollout-force-replicas` annotation to manually override the replica count for a StatefulSet, bypassing the operator's normal scaling logic. #371
 
 ## v0.34.0

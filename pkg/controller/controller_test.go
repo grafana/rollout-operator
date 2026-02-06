@@ -477,6 +477,31 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			kubePatchErr:        errors.New("cannot patch StatefulSet right now"),
 			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"}, // Max unavailable is 2 pods
 		},
+		"should not return early and should delete pods if StatefulSet replicas cannot be scaled down - enforce downscale pdb": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withReplicas(1, 1), withLabels(map[string]string{
+					"grafana.com/min-time-between-zones-downscale": "12h",
+				})),
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withPrevRevision(),
+					withLabels(map[string]string{
+						"grafana.com/min-time-between-zones-downscale": "12h",
+					}),
+					withAnnotations(map[string]string{
+						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			kubePatchErr:        errors.New("cannot patch StatefulSet right now"),
+			expectedDeletedPods: []string{"ingester-zone-b-0"}, // b-1 can not be deleted since this would break the partition 1 pdb
+			zpdbPartitionMode:   true,
+			zpdbErrors:          []error{nil, errors.New("zpdb denies eviction request")},
+		},
 		"should not return early and should delete pods if StatefulSet replicas cannot be scaled up": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withReplicas(3, 3), withLabels(map[string]string{
@@ -500,6 +525,31 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			kubePatchErr:        errors.New("cannot patch StatefulSet right now"),
 			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
+		},
+		"zpdb is enforced during a scale-up with a version update": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withReplicas(3, 3), withPrevRevision(), withLabels(map[string]string{
+					"grafana.com/min-time-between-zones-downscale": "12h",
+				})),
+				mockStatefulSet("ingester-zone-b", withReplicas(1, 1), withPrevRevision(),
+					withLabels(map[string]string{
+						"grafana.com/min-time-between-zones-downscale": "12h",
+					}),
+					withAnnotations(map[string]string{
+						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+					}),
+				),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash),
+			},
+			kubePatchErr:        errors.New("cannot patch StatefulSet right now"),
+			expectedDeletedPods: []string{"ingester-zone-a-0"}, // a-1 can not be deleted since this would violate the pdb
+			zpdbPartitionMode:   true,
+			zpdbErrors:          []error{nil, errors.New("zpdb denies eviction request")},
 		},
 		"should return early and scale up statefulset based on reference custom resource": {
 			statefulSets: []runtime.Object{

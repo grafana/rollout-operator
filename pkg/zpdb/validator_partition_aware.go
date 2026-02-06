@@ -47,10 +47,19 @@ func (v *validatorPartitionAware) considerSts(otherSts *appsv1.StatefulSet) bool
 	return otherSts.UID != v.sts.UID
 }
 
-func (v *validatorPartitionAware) accumulateResult(_ *appsv1.StatefulSet, r *zoneStatusResult) error {
+func (v *validatorPartitionAware) accumulateResult(sts *appsv1.StatefulSet, r *zoneStatusResult) error {
 	v.result.tested += r.tested
 	v.result.notReady += r.notReady
 	v.result.unknown += r.unknown
+
+	// If we were unable to confirm a pod status in this zone we should assume the result is unknown
+	// Note that this assumes that we only expect 1 pod per zone per partition.
+	// If ever this assumption changed, we would need to increment unknown by the number of expected pods per zone per partition.
+	if r.tested == 0 && r.notReady == 0 && r.unknown == 0 {
+		level.Debug(v.log).Log("msg", "No pod test result for %s. Assuming pod state is unknown", sts.Name)
+		v.result.unknown++
+	}
+
 	return nil
 }
 
