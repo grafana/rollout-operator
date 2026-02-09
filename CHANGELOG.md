@@ -2,8 +2,14 @@
 
 ## main / unreleased
 
-* [BUGFIX] Zone-aware PDB: deny evictions when cross-zone pod peers are not found in partitioned environments. #370
 * [FEATURE] Add `grafana.com/rollout-force-replicas` annotation to manually override the replica count for a StatefulSet, bypassing the operator's normal scaling logic. #371
+* [ENHANCEMENT] Updated dependencies, including: #374
+  * `github.com/grafana/dskit` from `v0.0.0-20260130162739-bd087f70604d` to `v0.0.0-20260209132809-8d1c6d34bb5a`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.64.0` to `v0.65.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.64.0` to `v0.65.0`
+  * `go.opentelemetry.io/otel/trace` from `v1.39.0` to `v1.40.0`
+  * `go.opentelemetry.io/otel` from `v1.39.0` to `v1.40.0`
+* [BUGFIX] Zone-aware PDB: deny evictions when cross-zone pod peers are not found in partitioned environments. #370
 
 ## v0.34.0
 
