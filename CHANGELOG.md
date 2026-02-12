@@ -2,13 +2,15 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Update to Go `1.26`. #376
+
 ## v0.28.3
 
 * [ENHANCEMENT] Update some indirect dependencies and build a new image with Go `1.25.6` to resolve CVEs. #368
 
 ## v0.28.2
 
-* [ENHANCEMENT] Update to Go `1.25` and Debian 13.
+* [ENHANCEMENT] Update to Go `1.25` and Debian 13. #357
 
 ## v0.28.1
 
