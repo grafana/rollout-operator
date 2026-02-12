@@ -1,22 +1,21 @@
 package opts
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"math/big"
 	"net"
 	"path"
+	"regexp"
 	"strings"
 
-	"github.com/docker/cli/internal/lazyregexp"
-	"github.com/docker/go-units"
-	"github.com/moby/moby/client"
+	"github.com/docker/docker/api/types/filters"
+	units "github.com/docker/go-units"
+	"github.com/pkg/errors"
 )
 
 var (
-	alphaRegexp  = lazyregexp.New(`[a-zA-Z]`)
-	domainRegexp = lazyregexp.New(`^(:?(:?[a-zA-Z0-9]|(:?[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9]))(:?\.(:?[a-zA-Z0-9]|(:?[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])))*)\.?\s*$`)
+	alphaRegexp  = regexp.MustCompile(`[a-zA-Z]`)
+	domainRegexp = regexp.MustCompile(`^(:?(:?[a-zA-Z0-9]|(:?[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9]))(:?\.(:?[a-zA-Z0-9]|(:?[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])))*)\.?\s*$`)
 )
 
 // ListOpts holds a list of values and a validation function.
@@ -61,8 +60,6 @@ func (opts *ListOpts) Set(value string) error {
 }
 
 // Delete removes the specified element from the slice.
-//
-// Deprecated: this method is no longer used and will be removed in the next release.
 func (opts *ListOpts) Delete(key string) {
 	for i, k := range *opts.values {
 		if k == key {
@@ -82,13 +79,8 @@ func (opts *ListOpts) GetMap() map[string]struct{} {
 	return ret
 }
 
-// GetSlice returns the values of slice.
-//
-// It implements [cobra.SliceValue] to allow shell completion to be provided
-// multiple times.
-//
-// [cobra.SliceValue]: https://pkg.go.dev/github.com/spf13/cobra@v1.9.1#SliceValue
-func (opts *ListOpts) GetSlice() []string {
+// GetAll returns the values of slice.
+func (opts *ListOpts) GetAll() []string {
 	return *opts.values
 }
 
@@ -118,7 +110,7 @@ func (opts *ListOpts) Len() int {
 }
 
 // Type returns a string name for this Option type
-func (*ListOpts) Type() string {
+func (opts *ListOpts) Type() string {
 	return "list"
 }
 
@@ -126,6 +118,35 @@ func (*ListOpts) Type() string {
 func (opts *ListOpts) WithValidator(validator ValidatorFctType) *ListOpts {
 	opts.validator = validator
 	return opts
+}
+
+// NamedOption is an interface that list and map options
+// with names implement.
+type NamedOption interface {
+	Name() string
+}
+
+// NamedListOpts is a ListOpts with a configuration name.
+// This struct is useful to keep reference to the assigned
+// field name in the internal configuration struct.
+type NamedListOpts struct {
+	name string
+	ListOpts
+}
+
+var _ NamedOption = &NamedListOpts{}
+
+// NewNamedListOptsRef creates a reference to a new NamedListOpts struct.
+func NewNamedListOptsRef(name string, values *[]string, validator ValidatorFctType) *NamedListOpts {
+	return &NamedListOpts{
+		name:     name,
+		ListOpts: *NewListOptsRef(values, validator),
+	}
+}
+
+// Name returns the name of the NamedListOpts in the configuration.
+func (o *NamedListOpts) Name() string {
+	return o.name
 }
 
 // MapOpts holds a map of values and a validation function.
@@ -159,7 +180,7 @@ func (opts *MapOpts) String() string {
 }
 
 // Type returns a string name for this Option type
-func (*MapOpts) Type() string {
+func (opts *MapOpts) Type() string {
 	return "map"
 }
 
@@ -172,6 +193,29 @@ func NewMapOpts(values map[string]string, validator ValidatorFctType) *MapOpts {
 		values:    values,
 		validator: validator,
 	}
+}
+
+// NamedMapOpts is a MapOpts struct with a configuration name.
+// This struct is useful to keep reference to the assigned
+// field name in the internal configuration struct.
+type NamedMapOpts struct {
+	name string
+	MapOpts
+}
+
+var _ NamedOption = &NamedMapOpts{}
+
+// NewNamedMapOpts creates a reference to a new NamedMapOpts struct.
+func NewNamedMapOpts(name string, values map[string]string, validator ValidatorFctType) *NamedMapOpts {
+	return &NamedMapOpts{
+		name:    name,
+		MapOpts: *NewMapOpts(values, validator),
+	}
+}
+
+// Name returns the name of the NamedMapOpts in the configuration.
+func (o *NamedMapOpts) Name() string {
+	return o.name
 }
 
 // ValidatorFctType defines a validator function that returns a validated string and/or an error.
@@ -194,8 +238,6 @@ func ValidateIPAddress(val string) (string, error) {
 }
 
 // ValidateMACAddress validates a MAC address.
-//
-// Deprecated: use [net.ParseMAC]. This function will be removed in the next release.
 func ValidateMACAddress(val string) (string, error) {
 	_, err := net.ParseMAC(strings.TrimSpace(val))
 	if err != nil {
@@ -223,8 +265,6 @@ func validateDomain(val string) (string, error) {
 	}
 	return "", fmt.Errorf("%s is not a valid domain", val)
 }
-
-const whiteSpaces = " \t"
 
 // ValidateLabel validates that the specified string is a valid label, and returns it.
 //
@@ -282,23 +322,20 @@ func ValidateSysctl(val string) (string, error) {
 
 // FilterOpt is a flag type for validating filters
 type FilterOpt struct {
-	filter client.Filters
+	filter filters.Args
 }
 
 // NewFilterOpt returns a new FilterOpt
 func NewFilterOpt() FilterOpt {
-	return FilterOpt{filter: make(client.Filters)}
+	return FilterOpt{filter: filters.NewArgs()}
 }
 
 func (o *FilterOpt) String() string {
-	if o == nil || len(o.filter) == 0 {
-		return ""
-	}
-	repr, err := json.Marshal(o.filter)
+	repr, err := filters.ToJSON(o.filter)
 	if err != nil {
 		return "invalid filters"
 	}
-	return string(repr)
+	return repr
 }
 
 // Set sets the value of the opt by parsing the command line value
@@ -319,12 +356,12 @@ func (o *FilterOpt) Set(value string) error {
 }
 
 // Type returns the option type
-func (*FilterOpt) Type() string {
+func (o *FilterOpt) Type() string {
 	return "filter"
 }
 
 // Value returns the value of this option
-func (o *FilterOpt) Value() client.Filters {
+func (o *FilterOpt) Value() filters.Args {
 	return o.filter
 }
 
@@ -347,7 +384,7 @@ func (c *NanoCPUs) Set(value string) error {
 }
 
 // Type returns the type
-func (*NanoCPUs) Type() string {
+func (c *NanoCPUs) Type() string {
 	return "decimal"
 }
 
@@ -424,7 +461,7 @@ func (m *MemBytes) Set(value string) error {
 }
 
 // Type returns the type
-func (*MemBytes) Type() string {
+func (m *MemBytes) Type() string {
 	return "bytes"
 }
 
@@ -459,7 +496,7 @@ func (m *MemSwapBytes) Set(value string) error {
 }
 
 // Type returns the type
-func (*MemSwapBytes) Type() string {
+func (m *MemSwapBytes) Type() string {
 	return "bytes"
 }
 

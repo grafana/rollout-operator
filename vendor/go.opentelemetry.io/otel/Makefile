@@ -34,6 +34,9 @@ $(TOOLS)/%: $(TOOLS_MOD_DIR)/go.mod | $(TOOLS)
 MULTIMOD = $(TOOLS)/multimod
 $(TOOLS)/multimod: PACKAGE=go.opentelemetry.io/build-tools/multimod
 
+SEMCONVGEN = $(TOOLS)/semconvgen
+$(TOOLS)/semconvgen: PACKAGE=go.opentelemetry.io/build-tools/semconvgen
+
 CROSSLINK = $(TOOLS)/crosslink
 $(TOOLS)/crosslink: PACKAGE=go.opentelemetry.io/build-tools/crosslink
 
@@ -68,7 +71,7 @@ GOVULNCHECK = $(TOOLS)/govulncheck
 $(TOOLS)/govulncheck: PACKAGE=golang.org/x/vuln/cmd/govulncheck
 
 .PHONY: tools
-tools: $(CROSSLINK) $(GOLANGCI_LINT) $(MISSPELL) $(GOCOVMERGE) $(STRINGER) $(PORTO) $(VERIFYREADMES) $(MULTIMOD) $(SEMCONVKIT) $(GOTMPL) $(GORELEASE)
+tools: $(CROSSLINK) $(GOLANGCI_LINT) $(MISSPELL) $(GOCOVMERGE) $(STRINGER) $(PORTO) $(SEMCONVGEN) $(VERIFYREADMES) $(MULTIMOD) $(SEMCONVKIT) $(GOTMPL) $(GORELEASE)
 
 # Virtualized python tools via docker
 
@@ -146,12 +149,11 @@ build-tests/%:
 
 # Tests
 
-TEST_TARGETS := test-default test-bench test-short test-verbose test-race test-concurrent-safe test-fuzz
+TEST_TARGETS := test-default test-bench test-short test-verbose test-race test-concurrent-safe
 .PHONY: $(TEST_TARGETS) test
 test-default test-race: ARGS=-race
 test-bench:   ARGS=-run=xxxxxMatchNothingxxxxx -test.benchtime=1ms -bench=.
 test-short:   ARGS=-short
-test-fuzz:    ARGS=-fuzztime=10s -fuzz
 test-verbose: ARGS=-v -race
 test-concurrent-safe: ARGS=-run=ConcurrentSafe -count=100 -race
 test-concurrent-safe: TIMEOUT=120
@@ -282,7 +284,7 @@ semconv-generate: $(SEMCONVKIT)
 	docker run --rm \
 		-u $(DOCKER_USER) \
 		--env HOME=/tmp/weaver \
-		--mount 'type=bind,source=$(PWD)/semconv/templates,target=/home/weaver/templates,readonly' \
+		--mount 'type=bind,source=$(PWD)/semconv,target=/home/weaver/templates/registry/go,readonly' \
 		--mount 'type=bind,source=$(PWD)/semconv/${TAG},target=/home/weaver/target' \
 		--mount 'type=bind,source=$(HOME)/.weaver,target=/tmp/weaver/.weaver' \
 		$(WEAVER_IMAGE) registry generate \
@@ -291,7 +293,7 @@ semconv-generate: $(SEMCONVKIT)
 		--param tag=$(TAG) \
 		go \
 		/home/weaver/target
-	$(SEMCONVKIT) -semconv "$(SEMCONVPKG)" -tag "$(TAG)"
+	$(SEMCONVKIT) -output "$(SEMCONVPKG)/$(TAG)" -tag "$(TAG)"
 
 .PHONY: gorelease
 gorelease: $(OTEL_GO_MOD_DIRS:%=gorelease/%)

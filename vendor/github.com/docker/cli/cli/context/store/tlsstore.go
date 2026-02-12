@@ -1,11 +1,12 @@
 package store
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/moby/sys/atomicwriter"
+	"github.com/docker/docker/errdefs"
+	"github.com/docker/docker/pkg/ioutils"
+	"github.com/pkg/errors"
 )
 
 const tlsDir = "tls"
@@ -31,16 +32,16 @@ func (s *tlsStore) createOrUpdate(name, endpointName, filename string, data []by
 	if err := os.MkdirAll(endpointDir, 0o700); err != nil {
 		return err
 	}
-	return atomicwriter.WriteFile(filepath.Join(endpointDir, filename), data, 0o600)
+	return ioutils.AtomicWriteFile(filepath.Join(endpointDir, filename), data, 0o600)
 }
 
 func (s *tlsStore) getData(name, endpointName, filename string) ([]byte, error) {
 	data, err := os.ReadFile(filepath.Join(s.endpointDir(name, endpointName), filename))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, notFound(fmt.Errorf("TLS data for %s/%s/%s does not exist", name, endpointName, filename))
+			return nil, errdefs.NotFound(errors.Errorf("TLS data for %s/%s/%s does not exist", name, endpointName, filename))
 		}
-		return nil, fmt.Errorf("failed to read TLS data for endpoint %s: %w", endpointName, err)
+		return nil, errors.Wrapf(err, "failed to read TLS data for endpoint %s", endpointName)
 	}
 	return data, nil
 }
@@ -48,14 +49,14 @@ func (s *tlsStore) getData(name, endpointName, filename string) ([]byte, error) 
 // remove deletes all TLS data for the given context.
 func (s *tlsStore) remove(name string) error {
 	if err := os.RemoveAll(s.contextDir(name)); err != nil {
-		return fmt.Errorf("failed to remove TLS data: %w", err)
+		return errors.Wrapf(err, "failed to remove TLS data")
 	}
 	return nil
 }
 
 func (s *tlsStore) removeEndpoint(name, endpointName string) error {
 	if err := os.RemoveAll(s.endpointDir(name, endpointName)); err != nil {
-		return fmt.Errorf("failed to remove TLS data for endpoint %s: %w", endpointName, err)
+		return errors.Wrapf(err, "failed to remove TLS data for endpoint %s", endpointName)
 	}
 	return nil
 }
@@ -67,7 +68,7 @@ func (s *tlsStore) listContextData(name string) (map[string]EndpointFiles, error
 		if os.IsNotExist(err) {
 			return map[string]EndpointFiles{}, nil
 		}
-		return nil, fmt.Errorf("failed to list TLS files for context %s: %w", name, err)
+		return nil, errors.Wrapf(err, "failed to list TLS files for context %s", name)
 	}
 	r := make(map[string]EndpointFiles)
 	for _, epFS := range epFSs {
@@ -77,7 +78,7 @@ func (s *tlsStore) listContextData(name string) (map[string]EndpointFiles, error
 				continue
 			}
 			if err != nil {
-				return nil, fmt.Errorf("failed to list TLS files for endpoint %s: %w", epFS.Name(), err)
+				return nil, errors.Wrapf(err, "failed to list TLS files for endpoint %s", epFS.Name())
 			}
 			var files EndpointFiles
 			for _, fs := range fss {

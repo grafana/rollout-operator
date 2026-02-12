@@ -1,19 +1,20 @@
 // FIXME(thaJeztah): remove once we are a module; the go:build directive prevents go from downgrading language version to go1.16:
-//go:build go1.24
+//go:build go1.21
 
 package store
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 
+	"github.com/docker/docker/errdefs"
+	"github.com/docker/docker/pkg/ioutils"
 	"github.com/fvbommel/sortorder"
-	"github.com/moby/sys/atomicwriter"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -39,7 +40,7 @@ func (s *metadataStore) createOrUpdate(meta Metadata) error {
 	if err != nil {
 		return err
 	}
-	return atomicwriter.WriteFile(filepath.Join(contextDir, metaFile), bytes, 0o644)
+	return ioutils.AtomicWriteFile(filepath.Join(contextDir, metaFile), bytes, 0o644)
 }
 
 func parseTypedOrMap(payload []byte, getter TypeGetter) (any, error) {
@@ -63,7 +64,7 @@ func parseTypedOrMap(payload []byte, getter TypeGetter) (any, error) {
 func (s *metadataStore) get(name string) (Metadata, error) {
 	m, err := s.getByID(contextdirOf(name))
 	if err != nil {
-		return m, fmt.Errorf("context %q: %w", name, err)
+		return m, errors.Wrapf(err, "context %q", name)
 	}
 	return m, nil
 }
@@ -73,7 +74,7 @@ func (s *metadataStore) getByID(id contextdir) (Metadata, error) {
 	bytes, err := os.ReadFile(fileName)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Metadata{}, notFound(fmt.Errorf("context not found: %w", err))
+			return Metadata{}, errdefs.NotFound(errors.Wrap(err, "context not found"))
 		}
 		return Metadata{}, err
 	}
@@ -98,7 +99,7 @@ func (s *metadataStore) getByID(id contextdir) (Metadata, error) {
 
 func (s *metadataStore) remove(name string) error {
 	if err := os.RemoveAll(s.contextDir(contextdirOf(name))); err != nil {
-		return fmt.Errorf("failed to remove metadata: %w", err)
+		return errors.Wrapf(err, "failed to remove metadata")
 	}
 	return nil
 }
@@ -118,7 +119,7 @@ func (s *metadataStore) list() ([]Metadata, error) {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return nil, fmt.Errorf("failed to read metadata: %w", err)
+			return nil, errors.Wrap(err, "failed to read metadata")
 		}
 		res = append(res, c)
 	}

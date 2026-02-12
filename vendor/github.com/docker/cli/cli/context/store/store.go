@@ -1,5 +1,5 @@
 // FIXME(thaJeztah): remove once we are a module; the go:build directive prevents go from downgrading language version to go1.16:
-//go:build go1.24
+//go:build go1.21
 
 package store
 
@@ -10,16 +10,21 @@ import (
 	"bytes"
 	_ "crypto/sha256" // ensure ids can be computed
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
+	"github.com/docker/docker/errdefs"
 	"github.com/opencontainers/go-digest"
+	"github.com/pkg/errors"
 )
+
+const restrictedNamePattern = "^[a-zA-Z0-9][a-zA-Z0-9_.+-]+$"
+
+var restrictedNameRegEx = regexp.MustCompile(restrictedNamePattern)
 
 // Store provides a context store for easily remembering endpoints configuration
 type Store interface {
@@ -119,9 +124,6 @@ func (s *ContextStore) List() ([]Metadata, error) {
 
 // Names return Metadata names for a Lister
 func Names(s Lister) ([]string, error) {
-	if s == nil {
-		return nil, errors.New("nil lister")
-	}
 	list, err := s.List()
 	if err != nil {
 		return nil, err
@@ -141,10 +143,10 @@ func (s *ContextStore) CreateOrUpdate(meta Metadata) error {
 // Remove deletes the context with the given name, if found.
 func (s *ContextStore) Remove(name string) error {
 	if err := s.meta.remove(name); err != nil {
-		return fmt.Errorf("failed to remove context %s: %w", name, err)
+		return errors.Wrapf(err, "failed to remove context %s", name)
 	}
 	if err := s.tls.remove(name); err != nil {
-		return fmt.Errorf("failed to remove context %s: %w", name, err)
+		return errors.Wrapf(err, "failed to remove context %s", name)
 	}
 	return nil
 }
@@ -220,41 +222,10 @@ func ValidateContextName(name string) error {
 	if name == "default" {
 		return errors.New(`"default" is a reserved context name`)
 	}
-	if !isValidName(name) {
-		return fmt.Errorf("context name %q is invalid, names are validated against regexp %q", name, validNameFormat)
+	if !restrictedNameRegEx.MatchString(name) {
+		return errors.Errorf("context name %q is invalid, names are validated against regexp %q", name, restrictedNamePattern)
 	}
 	return nil
-}
-
-// validNameFormat is used as part of errors for invalid context-names.
-// We should consider making this less technical ("must start with "a-z",
-// and only consist of alphanumeric characters and separators").
-const validNameFormat = `^[a-zA-Z0-9][a-zA-Z0-9_.+-]+$`
-
-// isValidName checks if the context-name is valid ("^[a-zA-Z0-9][a-zA-Z0-9_.+-]+$").
-//
-// Names must start with an alphanumeric character (a-zA-Z0-9), followed by
-// alphanumeric or separators ("_", ".", "+", "-").
-func isValidName(s string) bool {
-	if len(s) < 2 || !isAlphaNum(s[0]) {
-		return false
-	}
-
-	for i := 1; i < len(s); i++ {
-		c := s[i]
-		if isAlphaNum(c) || c == '_' || c == '.' || c == '+' || c == '-' {
-			continue
-		}
-		return false
-	}
-
-	return true
-}
-
-func isAlphaNum(c byte) bool {
-	return (c >= 'a' && c <= 'z') ||
-		(c >= 'A' && c <= 'Z') ||
-		(c >= '0' && c <= '9')
 }
 
 // Export exports an existing namespace into an opaque data stream
@@ -382,7 +353,7 @@ func isValidFilePath(p string) error {
 }
 
 func importTar(name string, s Writer, reader io.Reader) error {
-	tr := tar.NewReader(&limitedReader{R: reader, N: maxAllowedFileSizeToImport})
+	tr := tar.NewReader(&LimitedReader{R: reader, N: maxAllowedFileSizeToImport})
 	tlsData := ContextTLSData{
 		Endpoints: map[string]EndpointTLSData{},
 	}
@@ -400,7 +371,7 @@ func importTar(name string, s Writer, reader io.Reader) error {
 			continue
 		}
 		if err := isValidFilePath(hdr.Name); err != nil {
-			return fmt.Errorf("%s: %w", hdr.Name, err)
+			return errors.Wrap(err, hdr.Name)
 		}
 		if hdr.Name == metaFile {
 			data, err := io.ReadAll(tr)
@@ -426,13 +397,13 @@ func importTar(name string, s Writer, reader io.Reader) error {
 		}
 	}
 	if !importedMetaFile {
-		return invalidParameter(errors.New("invalid context: no metadata found"))
+		return errdefs.InvalidParameter(errors.New("invalid context: no metadata found"))
 	}
 	return s.ResetTLSMaterial(name, &tlsData)
 }
 
 func importZip(name string, s Writer, reader io.Reader) error {
-	body, err := io.ReadAll(&limitedReader{R: reader, N: maxAllowedFileSizeToImport})
+	body, err := io.ReadAll(&LimitedReader{R: reader, N: maxAllowedFileSizeToImport})
 	if err != nil {
 		return err
 	}
@@ -452,7 +423,7 @@ func importZip(name string, s Writer, reader io.Reader) error {
 			continue
 		}
 		if err := isValidFilePath(zf.Name); err != nil {
-			return fmt.Errorf("%s: %w", zf.Name, err)
+			return errors.Wrap(err, zf.Name)
 		}
 		if zf.Name == metaFile {
 			f, err := zf.Open()
@@ -460,7 +431,7 @@ func importZip(name string, s Writer, reader io.Reader) error {
 				return err
 			}
 
-			data, err := io.ReadAll(&limitedReader{R: f, N: maxAllowedFileSizeToImport})
+			data, err := io.ReadAll(&LimitedReader{R: f, N: maxAllowedFileSizeToImport})
 			defer f.Close()
 			if err != nil {
 				return err
@@ -490,7 +461,7 @@ func importZip(name string, s Writer, reader io.Reader) error {
 		}
 	}
 	if !importedMetaFile {
-		return invalidParameter(errors.New("invalid context: no metadata found"))
+		return errdefs.InvalidParameter(errors.New("invalid context: no metadata found"))
 	}
 	return s.ResetTLSMaterial(name, &tlsData)
 }

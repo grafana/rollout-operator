@@ -4,18 +4,16 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
-	"fmt"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/docker/cli/cli/connhelper"
 	"github.com/docker/cli/cli/context"
 	"github.com/docker/cli/cli/context/store"
+	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/tlsconfig"
-	"github.com/moby/moby/client"
+	"github.com/pkg/errors"
 )
 
 // EndpointMeta is a typed wrapper around a context-store generic endpoint describing
@@ -69,7 +67,7 @@ func (ep *Endpoint) tlsConfig() (*tls.Config, error) {
 
 		x509cert, err := tls.X509KeyPair(ep.TLSData.Cert, keyBytes)
 		if err != nil {
-			return nil, fmt.Errorf("failed to retrieve context tls info: %w", err)
+			return nil, errors.Wrap(err, "failed to retrieve context tls info")
 		}
 		tlsOpts = append(tlsOpts, func(cfg *tls.Config) {
 			cfg.Certificates = []tls.Certificate{x509cert}
@@ -92,34 +90,14 @@ func (ep *Endpoint) ClientOpts() ([]client.Opt, error) {
 			return nil, err
 		}
 		if helper == nil {
-			// Check if we're connecting over a socket, because there's no
-			// need to configure TLS for a socket connection.
-			//
-			// TODO(thaJeztah); make resolveDockerEndpoint and resolveDefaultDockerEndpoint not load TLS data,
-			//  and load TLS files lazily; see https://github.com/docker/cli/pull/1581
-			if !isSocket(ep.Host) {
-				tlsConfig, err := ep.tlsConfig()
-				if err != nil {
-					return nil, err
-				}
-
-				// If there's no tlsConfig available, we use the default HTTPClient.
-				if tlsConfig != nil {
-					result = append(result,
-						client.WithHTTPClient(&http.Client{
-							Transport: &http.Transport{
-								TLSClientConfig: tlsConfig,
-								DialContext: (&net.Dialer{
-									KeepAlive: 30 * time.Second,
-									Timeout:   30 * time.Second,
-								}).DialContext,
-							},
-							CheckRedirect: client.CheckRedirect,
-						}),
-					)
-				}
+			tlsConfig, err := ep.tlsConfig()
+			if err != nil {
+				return nil, err
 			}
-			result = append(result, client.WithHost(ep.Host))
+			result = append(result,
+				withHTTPClient(tlsConfig),
+				client.WithHost(ep.Host),
+			)
 		} else {
 			result = append(result,
 				client.WithHTTPClient(&http.Client{
@@ -134,18 +112,26 @@ func (ep *Endpoint) ClientOpts() ([]client.Opt, error) {
 		}
 	}
 
-	result = append(result, client.WithAPIVersionFromEnv())
+	result = append(result, client.WithVersionFromEnv(), client.WithAPIVersionNegotiation())
 	return result, nil
 }
 
-// isSocket checks if the given address is a Unix-socket (linux),
-// named pipe (Windows), or file-descriptor.
-func isSocket(addr string) bool {
-	switch proto, _, _ := strings.Cut(addr, "://"); proto {
-	case "unix", "npipe", "fd":
-		return true
-	default:
-		return false
+func withHTTPClient(tlsConfig *tls.Config) func(*client.Client) error {
+	return func(c *client.Client) error {
+		if tlsConfig == nil {
+			// Use the default HTTPClient
+			return nil
+		}
+		return client.WithHTTPClient(&http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: tlsConfig,
+				DialContext: (&net.Dialer{
+					KeepAlive: 30 * time.Second,
+					Timeout:   30 * time.Second,
+				}).DialContext,
+			},
+			CheckRedirect: client.CheckRedirect,
+		})(c)
 	}
 }
 
@@ -157,7 +143,7 @@ func EndpointFromContext(metadata store.Metadata) (EndpointMeta, error) {
 	}
 	typed, ok := ep.(EndpointMeta)
 	if !ok {
-		return EndpointMeta{}, fmt.Errorf("endpoint %q is not of type EndpointMeta", DockerEndpoint)
+		return EndpointMeta{}, errors.Errorf("endpoint %q is not of type EndpointMeta", DockerEndpoint)
 	}
 	return typed, nil
 }

@@ -3,13 +3,13 @@ package connhelper
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/url"
 	"strings"
 
 	"github.com/docker/cli/cli/connhelper/commandconn"
 	"github.com/docker/cli/cli/connhelper/ssh"
+	"github.com/pkg/errors"
 )
 
 // ConnectionHelper allows to connect to a remote host with custom stream provider binary.
@@ -41,25 +41,19 @@ func getConnectionHelper(daemonURL string, sshFlags []string) (*ConnectionHelper
 		return nil, err
 	}
 	if u.Scheme == "ssh" {
-		sp, err := ssh.NewSpec(u)
+		sp, err := ssh.ParseURL(daemonURL)
 		if err != nil {
-			return nil, fmt.Errorf("ssh host connection is not valid: %w", err)
-		}
-		sshFlags = addSSHTimeout(sshFlags)
-		sshFlags = disablePseudoTerminalAllocation(sshFlags)
-
-		remoteCommand := []string{"docker", "system", "dial-stdio"}
-		socketPath := sp.Path
-		if strings.Trim(sp.Path, "/") != "" {
-			remoteCommand = []string{"docker", "--host=unix://" + socketPath, "system", "dial-stdio"}
-		}
-		sshArgs, err := sp.Command(sshFlags, remoteCommand...)
-		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "ssh host connection is not valid")
 		}
 		return &ConnectionHelper{
 			Dialer: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return commandconn.New(ctx, "ssh", sshArgs...)
+				args := []string{"docker"}
+				if sp.Path != "" {
+					args = append(args, "--host", "unix://"+sp.Path)
+				}
+				sshFlags = addSSHTimeout(sshFlags)
+				args = append(args, "system", "dial-stdio")
+				return commandconn.New(ctx, "ssh", append(sshFlags, sp.Args(args...)...)...)
 			},
 			Host: "http://docker.example.com",
 		}, nil
@@ -84,15 +78,4 @@ func addSSHTimeout(sshFlags []string) []string {
 		sshFlags = append(sshFlags, "-o ConnectTimeout=30")
 	}
 	return sshFlags
-}
-
-// disablePseudoTerminalAllocation disables pseudo-terminal allocation to
-// prevent SSH from executing as a login shell
-func disablePseudoTerminalAllocation(sshFlags []string) []string {
-	for _, flag := range sshFlags {
-		if flag == "-T" {
-			return sshFlags
-		}
-	}
-	return append(sshFlags, "-T")
 }
