@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Update to Go `1.26`. #376
+* [ENHANCEMENT] Update to Go `1.26` and indirect dependencies for integration tests. #376
 
 ## v0.28.3
 
