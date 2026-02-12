@@ -9,6 +9,7 @@
   * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.64.0` to `v0.65.0`
   * `go.opentelemetry.io/otel/trace` from `v1.39.0` to `v1.40.0`
   * `go.opentelemetry.io/otel` from `v1.39.0` to `v1.40.0`
+* [ENHANCEMENT] Update Go to `1.26` #375
 * [BUGFIX] Zone-aware PDB: deny evictions when cross-zone pod peers are not found in partitioned environments. #370
 
 ## v0.34.0
