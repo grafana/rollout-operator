@@ -23,8 +23,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
-
-	"github.com/grafana/rollout-operator/integration/k3t"
 )
 
 // These manifest files are generated via jsonnet-integration-tests
@@ -66,6 +64,7 @@ func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Cl
 
 	deployment := loadFromDisk[appsv1.Deployment](t, directory+yamlDeployment, &appsv1.Deployment{})
 	deployment.Spec.Template.Spec.Containers[0].Image = "rollout-operator:latest"
+	deployment.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullNever
 
 	_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Create(ctx, deployment, metav1.CreateOptions{})
 	require.NoError(t, err)
@@ -179,7 +178,7 @@ func createValidatingWebhookConfiguration(t *testing.T, api *kubernetes.Clientse
 	return obj
 }
 
-func createZoneAwarePodDisruptionBudget(t *testing.T, cluster k3t.Cluster, ctx context.Context, path string) (*unstructured.Unstructured, error) {
+func createZoneAwarePodDisruptionBudget(cluster *kindCluster, ctx context.Context, path string) (*unstructured.Unstructured, error) {
 	obj := map[string]interface{}{}
 	err := loadToMapFromDisk(path, obj)
 	if err != nil {

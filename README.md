@@ -549,3 +549,21 @@ Note - `maxUnavailable` can be set to 0. In this case no voluntary evictions in 
 Note - a validating webhook configuration is provided in [development](./development/zone-aware-pod-disruption-budget-validating-webhook.yaml) which allows the `rollout-operator` to verify a `ZoneAwarePodDisruptionBudget` configuration being created or updated. This will ensure that no invalid configuration can be applied.
 
 Note - the `podNameRegexGroup` allows for the capture group index to be set. This is required if the partition regex has more than one set of groupings `(...)` in the expression. 1-based indexing is used, such that 1 will match the first parenthesized capture group.
+
+## Development
+
+### Running Integration Tests
+
+Integration tests require Docker and kind (Kubernetes in Docker).
+
+To run all integration tests:
+```bash
+make build-image
+make integration
+```
+
+To run a specific integration test (in this example `TestNoDownscale_UpdatingScaleSubresource`):
+```bash
+make build-test-images
+go test -v -tags requires_docker -timeout 30m ./integration -run TestNoDownscale_UpdatingScaleSubresource
+```

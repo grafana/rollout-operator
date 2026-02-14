@@ -56,6 +56,9 @@ build-image-boringcrypto: clean ## Build the rollout-operator image with boringc
 	# Tags with the regular image repo for integration testing
 	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) -f Dockerfile.boringcrypto .
 
+.PHONY: build-test-images
+build-test-images: build-image integration/mock-service/.uptodate ## Build both rollout-operator and mock-service images for testing
+
 .PHONY: publish-images
 publish-images: publish-standard-image publish-boringcrypto-image ## Build and publish both the standard and boringcrypto images
 
@@ -104,7 +107,7 @@ doc-lint:
 
 .PHONY: clean
 clean: ## Run go clean and remove the rollout-operator binary
-	rm -f rollout-operator
+	rm -f rollout-operator mock-service
 	rm -rf integration/jsonnet-integration-tests
 	go clean ./...
 
