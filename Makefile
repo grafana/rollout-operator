@@ -84,7 +84,7 @@ test-boringcrypto: ## Run tests with GOEXPERIMENT=boringcrypto
 	GOEXPERIMENT=boringcrypto go test ./...
 
 .PHONY: check-kind
-check-kind:
+check-kind: ## Check if kind is installed
 	@which kind >/dev/null 2>&1 || (echo "Error: kind binary not found. Please install kind: https://kind.sigs.k8s.io/docs/user/quick-start/#installation" && exit 1)
 
 .PHONY: integration
