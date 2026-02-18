@@ -83,9 +83,13 @@ test: ## Run tests
 test-boringcrypto: ## Run tests with GOEXPERIMENT=boringcrypto
 	GOEXPERIMENT=boringcrypto go test ./...
 
+.PHONY: check-kind
+check-kind:
+	@which kind >/dev/null 2>&1 || (echo "Error: kind binary not found. Please install kind: https://kind.sigs.k8s.io/docs/user/quick-start/#installation" && exit 1)
+
 .PHONY: integration
 integration: ## Run integration tests
-integration: integration/mock-service/.uptodate
+integration: check-kind integration/mock-service/.uptodate
 	go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
 
 integration/mock-service/.uptodate:
