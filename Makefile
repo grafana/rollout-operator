@@ -49,7 +49,7 @@ rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary 
 
 .PHONY: build-image
 build-image: clean ## Build the rollout-operator image
-	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --load --platform linux/$(GOARCH) --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: build-image-boringcrypto
 build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto
@@ -93,8 +93,8 @@ integration: check-kind integration/mock-service/.uptodate
 	go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
 
 integration/mock-service/.uptodate:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
-	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
+	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
+	docker buildx build --load --platform linux/$(GOARCH) --build-arg revision=$(GIT_REVISION) -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
 
 .PHONY: lint
 lint: ## Run lints to check for style issues.
@@ -111,7 +111,7 @@ doc-lint:
 
 .PHONY: clean
 clean: ## Run go clean and remove the rollout-operator binary
-	rm -f rollout-operator mock-service
+	rm -f rollout-operator integration/mock-service/mock-service
 	rm -rf integration/jsonnet-integration-tests
 	go clean ./...
 
