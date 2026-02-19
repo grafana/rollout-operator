@@ -16,14 +16,13 @@ import (
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/kubernetes/scheme"
 
-	"github.com/grafana/rollout-operator/integration/k3t"
 	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 func TestRolloutHappyCase(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	path := initManifestFiles(t, "webhooks-not-enabled")
@@ -77,7 +76,7 @@ func TestRolloutHappyCase(t *testing.T) {
 func TestRolloutHappyCaseWithZpdb(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	path := initManifestFiles(t, "max-unavailable-1")
@@ -179,7 +178,7 @@ func awaitCABundleAssignment(webhookCnt int, ctx context.Context, api *kubernete
 func TestWebHookInformer(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	path := initManifestFiles(t, "webhooks-enabled")
@@ -234,7 +233,7 @@ func TestWebHookInformer(t *testing.T) {
 func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	path := initManifestFiles(t, "max-unavailable-1")
@@ -318,7 +317,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	path := initManifestFiles(t, "max-unavailable-2")
@@ -379,7 +378,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	path := initManifestFiles(t, "max-unavailable-1-with-regex")
@@ -463,7 +462,7 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	path := initManifestFiles(t, "webhooks-enabled")
@@ -504,7 +503,7 @@ func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 
 	{
 		t.Log("Scale down using /scale subresource, we should be able as it's not labeled with grafana/no-downscale.")
-		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, false)
+		err := patchStatefulSetScale(ctx, t, api, "mock", 1, false)
 		require.NoError(t, err)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
 	}
@@ -513,7 +512,7 @@ func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 func TestNoDownscale_DownscaleUpdatingStatefulSet(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	path := initManifestFiles(t, "webhooks-enabled")
@@ -564,7 +563,7 @@ func TestNoDownscale_DownscaleUpdatingStatefulSet(t *testing.T) {
 func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	path := initManifestFiles(t, "webhooks-enabled")
@@ -591,22 +590,22 @@ func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 	}
 
 	{
-		t.Log("Downscale using /scale subresource update, this should be rejected.")
-		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, false)
+		t.Log("Downscale by patching /scale subresource, this should be rejected.")
+		err := patchStatefulSetScale(ctx, t, api, "mock", 1, false)
 		require.Error(t, err, "Downscale should fail")
 		require.ErrorContains(t, err, `downscale of statefulsets/mock in default from 2 to 1 replicas is not allowed because it has the label 'grafana.com/no-downscale=true'`)
 	}
 
 	{
 		t.Log("Dry run is also rejected.")
-		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, true)
+		err := patchStatefulSetScale(ctx, t, api, "mock", 1, true)
 		require.Error(t, err, "Downscale should fail")
 		require.ErrorContains(t, err, `downscale of statefulsets/mock in default from 2 to 1 replicas is not allowed because it has the label 'grafana.com/no-downscale=true'`)
 	}
 
 	{
 		t.Log("Upscaling should still work correctly.")
-		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 3, false)
+		err := patchStatefulSetScale(ctx, t, api, "mock", 3, false)
 		require.NoError(t, err)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 3)
 	}
@@ -642,9 +641,9 @@ func awaitPodRunning(t *testing.T, ctx context.Context, api *kubernetes.Clientse
 	require.Eventually(t, awaitReadyRunning, 30*time.Second, time.Millisecond*50)
 }
 
-func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context, cluster k3t.Cluster, configFile string) {
+func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context, cluster *kindCluster, configFile string) {
 	task := func() bool {
-		_, err := createZoneAwarePodDisruptionBudget(t, cluster, ctx, configFile)
+		_, err := createZoneAwarePodDisruptionBudget(cluster, ctx, configFile)
 		return err == nil
 	}
 	// note - this retry should not be needed, as the rollout-operator pod should be ready and running
