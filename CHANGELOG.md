@@ -2,6 +2,14 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #377
+  * `github.com/grafana/dskit` from `v0.0.0-20260209132809-8d1c6d34bb5a` to `v0.0.0-20260218151138-6352488fe08f`
+  * `golang.org/x/mod` from `v0.32.0` to `v0.33.0`
+  * `k8s.io/api` from `v0.35.0` to `v0.35.1`
+  * `k8s.io/apiextensions-apiserver` from `v0.35.0` to `v0.35.1`
+  * `k8s.io/apimachinery` from `v0.35.0` to `v0.35.1`
+  * `k8s.io/client-go` from `v0.35.0` to `v0.35.1`
+
 ## v0.35.0
 
 * [FEATURE] Add `grafana.com/rollout-force-replicas` annotation to manually override the replica count for a StatefulSet, bypassing the operator's normal scaling logic. #371

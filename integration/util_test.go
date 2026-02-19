@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	kindImage            string = "kindest/node:v1.35.0"
+	kindImage            string = "kindest/node:v1.35.1"
 	nodePortMockServiceA int32  = 30080 + iota
 	nodePortMockServiceB
 	nodePortMockServiceC
