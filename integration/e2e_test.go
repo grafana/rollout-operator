@@ -9,14 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/grafana/rollout-operator/integration/k3t"
 )
 
 func TestRolloutHappyCase(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	// Create rollout operator and check it's running and ready.
@@ -67,7 +65,7 @@ func TestRolloutHappyCase(t *testing.T) {
 func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	{
@@ -107,7 +105,7 @@ func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 
 	{
 		t.Log("Scale down using /scale subresource, we should be able as it's not labeled with grafana/no-downscale.")
-		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, false)
+		err := patchStatefulSetScale(ctx, t, api, "mock", 1, false)
 		require.NoError(t, err)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
 	}
@@ -116,7 +114,7 @@ func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 func TestNoDownscale_DownscaleUpdatingStatefulSet(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	{
@@ -166,7 +164,7 @@ func TestNoDownscale_DownscaleUpdatingStatefulSet(t *testing.T) {
 func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 	ctx := context.Background()
 
-	cluster := k3t.NewCluster(ctx, t, k3t.WithImages("rollout-operator:latest", "mock-service:latest"))
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
 
 	{
@@ -193,21 +191,21 @@ func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 
 	{
 		t.Log("Downscale using /scale subresource update, this should be rejected.")
-		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, false)
+		err := patchStatefulSetScale(ctx, t, api, "mock", 1, false)
 		require.Error(t, err, "Downscale should fail")
 		require.ErrorContains(t, err, `downscale of statefulsets/mock in default from 2 to 1 replicas is not allowed because it has the label 'grafana.com/no-downscale=true'`)
 	}
 
 	{
 		t.Log("Dry run is also rejected.")
-		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 1, true)
+		err := patchStatefulSetScale(ctx, t, api, "mock", 1, true)
 		require.Error(t, err, "Downscale should fail")
 		require.ErrorContains(t, err, `downscale of statefulsets/mock in default from 2 to 1 replicas is not allowed because it has the label 'grafana.com/no-downscale=true'`)
 	}
 
 	{
 		t.Log("Upscaling should still work correctly.")
-		err := getAndUpdateStatefulSetScale(ctx, t, api, "mock", 3, false)
+		err := patchStatefulSetScale(ctx, t, api, "mock", 3, false)
 		require.NoError(t, err)
 		requireEventuallyPodCount(ctx, t, api, "name=mock", 3)
 	}
