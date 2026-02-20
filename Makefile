@@ -34,12 +34,15 @@ rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary 
 
 .PHONY: build-image
 build-image: clean ## Build the rollout-operator image
-	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --load --platform linux/$(GOARCH) --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
 .PHONY: build-image-boringcrypto
 build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto
 	# Tags with the regular image repo for integration testing
-	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) --build-arg BASEIMAGE=$(BORINGCRYPTO_BASE_IMAGE) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --load --platform linux/$(GOARCH) --build-arg revision=$(GIT_REVISION) --build-arg BASEIMAGE=$(BORINGCRYPTO_BASE_IMAGE) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+
+.PHONY: build-test-images
+build-test-images: build-image integration/mock-service/.uptodate ## Build both rollout-operator and mock-service images for testing
 
 .PHONY: publish-images
 publish-images: publish-standard-image publish-boringcrypto-image ## Build and publish both the standard and boringcrypto images
@@ -65,14 +68,18 @@ test: ## Run tests
 test-boringcrypto: ## Run tests with GOEXPERIMENT=boringcrypto
 	GOEXPERIMENT=boringcrypto go test ./...
 
+.PHONY: check-kind
+check-kind: ## Check if kind is installed
+	@which kind >/dev/null 2>&1 || (echo "Error: kind binary not found. Please install kind: https://kind.sigs.k8s.io/docs/user/quick-start/#installation" && exit 1)
+
 .PHONY: integration
 integration: ## Run integration tests
-integration: integration/mock-service/.uptodate
+integration: check-kind integration/mock-service/.uptodate
 	go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
 
 integration/mock-service/.uptodate:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
-	docker buildx build --load --platform linux/amd64 --build-arg revision=$(GIT_REVISION) -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
+	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
+	docker buildx build --load --platform linux/$(GOARCH) --build-arg revision=$(GIT_REVISION) -t mock-service:latest -f ./integration/mock-service/Dockerfile ./integration/mock-service
 
 .PHONY: lint
 lint: ## Run golangci-lint
@@ -84,5 +91,5 @@ fix-lint: ## Automatically fix linting issues where possible
 
 .PHONY: clean
 clean: ## Run go clean and remove the rollout-operator binary
-	rm -f rollout-operator
+	rm -f rollout-operator integration/mock-service/mock-service
 	go clean ./...

@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
@@ -24,22 +23,26 @@ func createMockServiceZone(t *testing.T, ctx context.Context, api *kubernetes.Cl
 	}
 
 	{
-		_, err := api.CoreV1().Services(namespace).Create(ctx, mockServiceService(name), metav1.CreateOptions{})
+		svc, err := mockServiceService(name)
+		require.NoError(t, err, "Can't create mock service manifest")
+		_, err = api.CoreV1().Services(namespace).Create(ctx, svc, metav1.CreateOptions{})
 		require.NoError(t, err, "Can't create Service")
-	}
-	{
-		_, err := api.NetworkingV1().Ingresses(namespace).Create(ctx, mockServiceIngress(name), metav1.CreateOptions{})
-		require.NoError(t, err, "Can't create Ingress")
 	}
 }
 
-func mockServiceService(name string) *corev1.Service {
+func mockServiceService(name string) (*corev1.Service, error) {
+	// Assign NodePort based on service name to match kind cluster port mappings
+	nodePort, err := serviceNameToNodePort(name)
+	if err != nil {
+		return nil, err
+	}
+
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 		Spec: corev1.ServiceSpec{
-			Type: corev1.ServiceTypeClusterIP,
+			Type: corev1.ServiceTypeNodePort,
 			Selector: map[string]string{
 				"name": name,
 			},
@@ -49,45 +52,12 @@ func mockServiceService(name string) *corev1.Service {
 					Protocol:   corev1.ProtocolTCP,
 					Port:       8080,
 					TargetPort: intstr.FromInt(8080),
+					NodePort:   nodePort,
 				},
 			},
 			PublishNotReadyAddresses: true, // We want to control them even if they're not ready.
 		},
-	}
-}
-
-func mockServiceIngress(name string) *networkingv1.Ingress {
-	path := networkingv1.HTTPIngressPath{
-		Path:     pathPrefix(name),
-		PathType: ptr(networkingv1.PathTypePrefix),
-		Backend: networkingv1.IngressBackend{
-			Service: &networkingv1.IngressServiceBackend{
-				Name: name,
-				Port: networkingv1.ServiceBackendPort{
-					Number: 8080,
-				},
-			},
-		},
-	}
-	rule := networkingv1.IngressRule{
-		IngressRuleValue: networkingv1.IngressRuleValue{
-			HTTP: &networkingv1.HTTPIngressRuleValue{
-				Paths: []networkingv1.HTTPIngressPath{path},
-			},
-		},
-	}
-
-	return &networkingv1.Ingress{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-			Annotations: map[string]string{
-				"ingress.kubernetes.io/ssl-redirect": "false",
-			},
-		},
-		Spec: networkingv1.IngressSpec{
-			Rules: []networkingv1.IngressRule{rule},
-		},
-	}
+	}, nil
 }
 
 func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSet {
@@ -115,15 +85,15 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  "mock",
-							Image: "mock-service:latest",
+							Name:            "mock",
+							Image:           "mock-service:latest",
+							ImagePullPolicy: corev1.PullNever,
 							Ports: []corev1.ContainerPort{
 								{ContainerPort: 8080},
 							},
 							Env: []corev1.EnvVar{
 								{Name: "VERSION", Value: version},
 								{Name: "READY", Value: fmt.Sprintf("%t", ready)},
-								{Name: "PREFIX", Value: pathPrefix(name)},
 							},
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
@@ -145,7 +115,6 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 								InitialDelaySeconds: 1,
 								PeriodSeconds:       1,
 							},
-							ImagePullPolicy: corev1.PullNever,
 						},
 					},
 					RestartPolicy: corev1.RestartPolicyAlways,
@@ -158,8 +127,18 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 	}
 }
 
-func pathPrefix(svcName string) string {
-	return "/" + svcName
+// serviceNameToNodePort maps service names to their assigned NodePorts
+func serviceNameToNodePort(name string) (int32, error) {
+	switch name {
+	case "mock-zone-a":
+		return nodePortMockServiceA, nil
+	case "mock-zone-b":
+		return nodePortMockServiceB, nil
+	case "mock-zone-c":
+		return nodePortMockServiceC, nil
+	default:
+		return 0, fmt.Errorf("unknown service name: %s", name)
+	}
 }
 
 func ptr[T any](t T) *T {

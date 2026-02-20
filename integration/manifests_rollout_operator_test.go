@@ -105,7 +105,7 @@ func rolloutOperatorDeployment(namespace string, webhook bool) *appsv1.Deploymen
 							Name:            "rollout-operator",
 							Image:           "rollout-operator:latest",
 							Args:            args,
-							ImagePullPolicy: "IfNotPresent",
+							ImagePullPolicy: corev1.PullNever,
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "http-metrics",
