@@ -131,13 +131,13 @@ func mockServiceStatefulSet(name, version string, ready bool) *appsv1.StatefulSe
 func serviceNameToNodePort(name string) (int32, error) {
 	switch name {
 	case "mock-zone-a":
-			return nodePortMockServiceA, nil
+		return nodePortMockServiceA, nil
 	case "mock-zone-b":
-			return nodePortMockServiceB, nil
+		return nodePortMockServiceB, nil
 	case "mock-zone-c":
-			return nodePortMockServiceC, nil
+		return nodePortMockServiceC, nil
 	default:
-			return 0, fmt.Errorf("unknown service name: %s", name)
+		return 0, fmt.Errorf("unknown service name: %s", name)
 	}
 }
 
