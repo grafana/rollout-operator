@@ -1,6 +1,6 @@
 ARG BASEIMAGE=gcr.io/distroless/static-debian13:nonroot
 
-FROM golang:1.25-trixie AS build
+FROM golang:1.26-trixie AS build
 
 ARG TARGETOS
 ARG TARGETARCH
