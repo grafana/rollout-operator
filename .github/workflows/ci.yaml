@@ -48,7 +48,7 @@ jobs:
           check-latest: true
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - name: Install kind
-        uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
         with:
           install_only: true
       - name: Install jsonnet
@@ -81,7 +81,7 @@ jobs:
           check-latest: true
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - name: Install kind
-        uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
         with:
           install_only: true
       - name: Install jsonnet
