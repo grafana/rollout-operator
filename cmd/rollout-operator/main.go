@@ -125,6 +125,9 @@ func (cfg config) validate() error {
 	if cfg.useZoneTracker && cfg.zoneTrackerConfigMapName == "" {
 		return errors.New("-use-zone-tracker is true, but -zone-tracker.config-map-name has not been specified")
 	}
+	if cfg.kubeClientBurst < 0 {
+		return errors.New("-kubernetes.client-burst must be non-negative")
+	}
 	if err := cfg.clusterValidationCfg.Validate("http", cfg.kubeNamespace); err != nil {
 		return err
 	}
