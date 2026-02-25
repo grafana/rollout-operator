@@ -190,9 +190,6 @@ func main() {
 	if cfg.kubeClientBurst > 0 {
 		kubeConfig.Burst = cfg.kubeClientBurst
 	}
-	if cfg.kubeClientQPS > 0 && kubeConfig.Burst == 0 {
-		kubeConfig.Burst = 10
-	}
 	if kubeConfig.UserAgent == "" {
 		kubeConfig.UserAgent = rest.DefaultKubernetesUserAgent()
 	}
