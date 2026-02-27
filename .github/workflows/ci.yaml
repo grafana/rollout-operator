@@ -53,7 +53,7 @@ jobs:
           install_only: true
       - name: Install jsonnet
         run: |
-          JSONNET_VERSION=0.21.0
+          JSONNET_VERSION="0.21.0"
           curl -sL "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/go-jsonnet_Linux_x86_64.tar.gz" \
             | sudo tar -xz -C /usr/local/bin
       - name: Install tk
@@ -86,7 +86,7 @@ jobs:
           install_only: true
       - name: Install jsonnet
         run: |
-          JSONNET_VERSION=0.21.0
+          JSONNET_VERSION="0.21.0"
           curl -sL "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/go-jsonnet_Linux_x86_64.tar.gz" \
             | sudo tar -xz -C /usr/local/bin
       - name: Install tk
@@ -131,13 +131,13 @@ jobs:
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - name: Install jsonnet
         run: |
-          JSONNET_VERSION=0.21.0
+          JSONNET_VERSION="0.21.0"
           curl -sL "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/go-jsonnet_Linux_x86_64.tar.gz" \
             | sudo tar -xz -C /usr/local/bin
       - name: Install conftest
         run: |
-          CONTEST_VERSION="0.62.0"
-          curl -sL "https://github.com/open-policy-agent/conftest/releases/download/v${CONTEST_VERSION}/conftest_${CONTEST_VERSION}_Linux_x86_64.tar.gz" \
+          CONFTEST_VERSION="0.62.0"
+          curl -sL "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" \
             | sudo tar -xz -C /usr/local/bin
       - name: Install tk
         run: |
