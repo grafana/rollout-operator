@@ -8,6 +8,69 @@
     "postUpdateOptions": [
         "gomodTidy"
     ],
+    "customManagers": [
+      {
+        "customType": "regex",
+        "description": "Update kind image used in integration tests",
+        "managerFilePatterns": ["^integration/util_test\\.go$"],
+        "matchStrings": [
+          "kindest/node:(?<currentValue>v[\\d.]+)"
+        ],
+        "depNameTemplate": "kindest/node",
+        "datasourceTemplate": "docker"
+      },
+      {
+        "customType": "regex",
+        "description": "Update Kubernetes version in test Tanka init",
+        "managerFilePatterns": ["^(integration/jsonnet-integration|operations/rollout-operator-tests)/build\\.sh$"],
+        "matchStrings": [
+          "tk init --k8s=\"(?<currentValue>[\\d.]+)\""
+        ],
+        "depNameTemplate": "kubernetes",
+        "datasourceTemplate": "endoflife-date",
+        "versioningTemplate": "semver-coerced"
+      },
+      {
+        "customType": "regex",
+        "description": "Update go-jsonnet version in CI workflow",
+        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
+        "matchStrings": [
+          "JSONNET_VERSION=\"(?<currentValue>[\\d.]+)\""
+        ],
+        "depNameTemplate": "google/go-jsonnet",
+        "datasourceTemplate": "github-releases"
+      },
+      {
+        "customType": "regex",
+        "description": "Update Tanka version in CI workflow",
+        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
+        "matchStrings": [
+          "TANKA_VERSION=\"(?<currentValue>[\\d.]+)\""
+        ],
+        "depNameTemplate": "grafana/tanka",
+        "datasourceTemplate": "github-releases"
+      },
+      {
+        "customType": "regex",
+        "description": "Update jsonnet-bundler version in CI workflow",
+        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
+        "matchStrings": [
+          "JSONNET_BUNDLER_VERSION=\"(?<currentValue>[\\d.]+)\""
+        ],
+        "depNameTemplate": "jsonnet-bundler/jsonnet-bundler",
+        "datasourceTemplate": "github-releases"
+      },
+      {
+        "customType": "regex",
+        "description": "Update conftest version in CI workflow",
+        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
+        "matchStrings": [
+          "CONFTEST_VERSION=\"(?<currentValue>[\\d.]+)\""
+        ],
+        "depNameTemplate": "open-policy-agent/conftest",
+        "datasourceTemplate": "github-releases"
+      }
+    ],
     "branchPrefix": "grafanarenovatebot/",
     "platformCommit": "enabled",
     "dependencyDashboard": false,
@@ -26,6 +89,13 @@
                 "github-actions"
             ],
             "groupName": "github actions"
+        },
+        {
+            "description": "Group all custom manager dependencies together to reduce noise",
+            "matchManagers": [
+                "custom.regex"
+            ],
+            "groupName": "custom manager dependencies"
         },
         {
             "description": "Disable Docker updates",
