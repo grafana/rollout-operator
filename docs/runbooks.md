@@ -120,7 +120,7 @@ Check that the rollout-operator error logs to gain insight into why the eviction
 
 ### kube_customresource_zpdb_spec_max_unavailable
 
-This is a guage metric which tracks the configured max unavailable setting for each rollout-group. For instance `kube_customresource_zpdb_spec_max_unavailable{name="ingester-rollout"}`.
+This is a gauge metric which tracks the configured max unavailable setting for each rollout-group. For instance `kube_customresource_zpdb_spec_max_unavailable{name="ingester-rollout"}`.
 
 Use this metric to track that your `ZPDB` configurations are correctly set to the expected value.
 
