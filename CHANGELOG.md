@@ -9,6 +9,8 @@
   * `k8s.io/apiextensions-apiserver` from `v0.35.0` to `v0.35.1`
   * `k8s.io/apimachinery` from `v0.35.0` to `v0.35.1`
   * `k8s.io/client-go` from `v0.35.0` to `v0.35.1`
+* [ENHANCEMENT] Add `-kubernetes.client-qps` and `-kubernetes.client-burst` flags to configure Kubernetes API client rate limiting. #385
+
 
 ## v0.35.0
 
