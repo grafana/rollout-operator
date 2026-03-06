@@ -87,7 +87,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "HTTP client timeout. This applies to requests issued to both the Kubernetes API and Kubernetes resource endpoints.")
 	fs.Float64Var(&cfg.kubeClientQPS, "kubernetes.client-qps", 0, "Maximum QPS to the API server from this client. If zero, the client-go default (5) is used.")
-	fs.IntVar(&cfg.kubeClientBurst, "kubernetes.client-burst", 0, "Maximum burst for throttle. If zero, the client-go default (10) is used, or 10 when only QPS is set.")
+	fs.IntVar(&cfg.kubeClientBurst, "kubernetes.client-burst", 0, "Maximum burst for throttle. If zero, the client-go default (10) is used.")
 	fs.StringVar(&cfg.kubeClusterDomain, "kubernetes.cluster-domain", "cluster.local.", "The Kubernetes cluster domain.")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
