@@ -187,7 +187,7 @@ func main() {
 	if kubeConfig.Timeout == 0 {
 		kubeConfig.Timeout = cfg.kubeClientTimeout
 	}
-	if cfg.kubeClientQPS > 0 {
+	if cfg.kubeClientQPS != 0 {
 		kubeConfig.QPS = float32(cfg.kubeClientQPS)
 	}
 	if cfg.kubeClientBurst > 0 {
