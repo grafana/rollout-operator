@@ -118,6 +118,12 @@ Use this metric to monitor for abnormal high volumes of in-flight requests. Sinc
 
 Check that the rollout-operator error logs to gain insight into why the eviction is being delayed.
 
+### kube_customresource_zpdb_spec_max_unavailable
+
+This is a guage metric which tracks the configured max unavailable setting for each rollout-group. For instance `kube_customresource_zpdb_spec_max_unavailable{name="ingester-rollout"}`.
+
+Use this metric to track that your `ZPDB` configurations are correctly set to the expected value.
+
 ## Configuration
 
 See [rollout-operator.libsonnet](https://github.com/grafana/rollout-operator/blob/main/operations/rollout-operator/rollout-operator.libsonnet).
