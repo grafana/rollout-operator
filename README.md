@@ -135,6 +135,26 @@ spec:
 
 To resume normal behavior, remove the annotation.
 
+## Pausing rollouts
+
+The `grafana.com/rollout-paused` label allows you to temporarily prevent the operator from deleting pods in a StatefulSet to roll out changes. While paused, the operator skips the StatefulSet during reconciliation and moves on to the next one in the rollout group, so other StatefulSets in the same group can continue rolling out normally.
+
+To pause rollouts for a StatefulSet, add the label with the value `true`:
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ingester-zone-a
+  labels:
+    rollout-group: ingester
+    grafana.com/rollout-paused: "true"
+spec:
+  # ...
+```
+
+To resume normal rollout behavior, remove the label or set it to any value other than `true`.
+
 ## Operations
 
 ### HTTP endpoints
