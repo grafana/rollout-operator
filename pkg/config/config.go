@@ -52,4 +52,10 @@ const (
 	// In leader/follower mode, scaling is immediate. In mirror-replicas mode, delayed
 	// downscale is still respected if configured.
 	RolloutForceReplicasAnnotationKey = "grafana.com/rollout-force-replicas"
+
+	// RolloutPausedLabelKey pauses pod rollouts for a StatefulSet when set to RolloutPausedLabelValue.
+	// The operator will skip deleting pods for that StatefulSet while allowing other
+	// StatefulSets in the same rollout group to continue rolling out.
+	RolloutPausedLabelKey   = "grafana.com/rollout-paused"
+	RolloutPausedLabelValue = "true"
 )

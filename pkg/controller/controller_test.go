@@ -719,6 +719,48 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			expectedPatchedSets:               map[string][]string{"ingester-zone-d": {`{"spec":{"replicas":5}}`}},
 			expectedPatchedResources:          map[string][]string{"my.group/v1/customresources/test/status": {`{"status":{"replicas":5}}`}},
 		},
+		"should not delete pods for a paused StatefulSet": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withLabels(map[string]string{
+					config.RolloutPausedLabelKey: config.RolloutPausedLabelValue,
+				})),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+			},
+		},
+		"should skip paused StatefulSet and roll out the next one in the group": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withLabels(map[string]string{
+					config.RolloutPausedLabelKey: config.RolloutPausedLabelValue,
+				})),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
+		},
+		"should roll out normally if rollout-paused label is not set to true": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withLabels(map[string]string{
+					config.RolloutPausedLabelKey: "false",
+				})),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-a-0", "ingester-zone-a-1"},
+		},
 	}
 
 	for testName, testData := range tests {
