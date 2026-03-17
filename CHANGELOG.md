@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [FEATURE] Add `grafana.com/rollout-paused` annotation to temporarily prevent the operator from deleting pods in a StatefulSet to roll out changes. Other StatefulSets in the same rollout group continue rolling out normally. #396
 * [ENHANCEMENT] Updated dependencies, including: #377 #388 #393 #397
   * `github.com/grafana/dskit` from `v0.0.0-20260209132809-8d1c6d34bb5a` to `v0.0.0-20260312141034-c3cfcb4a37bc`
   * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.65.0` to `v0.67.0`
