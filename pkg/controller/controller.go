@@ -549,7 +549,7 @@ func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error)
 func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.StatefulSet) (bool, error) {
 	level.Debug(c.logger).Log("msg", "reconciling StatefulSet", "statefulset", sts.Name)
 
-	if sts.Labels[config.RolloutPausedLabelKey] == config.RolloutPausedLabelValue {
+	if sts.Annotations[config.RolloutPausedAnnotationKey] == config.RolloutPausedAnnotationValue {
 		level.Info(c.logger).Log("msg", "StatefulSet rollout is paused, skipping pod updates", "statefulset", sts.Name)
 		return false, nil
 	}

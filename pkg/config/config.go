@@ -53,9 +53,9 @@ const (
 	// downscale is still respected if configured.
 	RolloutForceReplicasAnnotationKey = "grafana.com/rollout-force-replicas"
 
-	// RolloutPausedLabelKey pauses pod rollouts for a StatefulSet when set to RolloutPausedLabelValue.
+	// RolloutPausedAnnotationKey pauses pod rollouts for a StatefulSet when set to RolloutPausedAnnotationValue.
 	// The operator will skip deleting pods for that StatefulSet while allowing other
 	// StatefulSets in the same rollout group to continue rolling out.
-	RolloutPausedLabelKey   = "grafana.com/rollout-paused"
-	RolloutPausedLabelValue = "true"
+	RolloutPausedAnnotationKey   = "grafana.com/rollout-paused"
+	RolloutPausedAnnotationValue = "true"
 )

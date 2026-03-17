@@ -721,8 +721,8 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		},
 		"should not delete pods for a paused StatefulSet": {
 			statefulSets: []runtime.Object{
-				mockStatefulSet("ingester-zone-a", withPrevRevision(), withLabels(map[string]string{
-					config.RolloutPausedLabelKey: config.RolloutPausedLabelValue,
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withAnnotations(map[string]string{
+					config.RolloutPausedAnnotationKey: config.RolloutPausedAnnotationValue,
 				})),
 			},
 			pods: []runtime.Object{
@@ -733,8 +733,8 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		},
 		"should skip paused StatefulSet and roll out the next one in the group": {
 			statefulSets: []runtime.Object{
-				mockStatefulSet("ingester-zone-a", withPrevRevision(), withLabels(map[string]string{
-					config.RolloutPausedLabelKey: config.RolloutPausedLabelValue,
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withAnnotations(map[string]string{
+					config.RolloutPausedAnnotationKey: config.RolloutPausedAnnotationValue,
 				})),
 				mockStatefulSet("ingester-zone-b", withPrevRevision()),
 			},
@@ -748,10 +748,10 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
 		},
-		"should roll out normally if rollout-paused label is not set to true": {
+		"should roll out normally if rollout-paused annotation is not set to true": {
 			statefulSets: []runtime.Object{
-				mockStatefulSet("ingester-zone-a", withPrevRevision(), withLabels(map[string]string{
-					config.RolloutPausedLabelKey: "false",
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withAnnotations(map[string]string{
+					config.RolloutPausedAnnotationKey: "false",
 				})),
 			},
 			pods: []runtime.Object{
