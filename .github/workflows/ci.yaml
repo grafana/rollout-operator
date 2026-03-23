@@ -115,7 +115,7 @@ jobs:
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9
         with:
-          version: v2.9.0
+          version: v2.11.3
           args: --timeout=5m
 
   lint-jsonnet:
