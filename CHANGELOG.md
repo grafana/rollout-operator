@@ -2,6 +2,12 @@
 
 ## main / unreleased
 
+## v0.28.5
+
+* [ENHANCEMENT] Updated dependencies to resolve CVEs: #404
+  * `go.opentelemetry.io/otel/sdk` from `v1.36.0` to `v1.42.0`
+  * `google.golang.org/grpc` from `v1.72.2` to `v1.79.3`
+
 ## v0.28.4
 
 * [ENHANCEMENT] Update to Go `1.26`. #382
