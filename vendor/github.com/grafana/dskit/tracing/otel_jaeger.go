@@ -31,6 +31,7 @@ const (
 	envJaegerTags                      = "JAEGER_TAGS"
 	envJaegerSamplerManagerHostPort    = "JAEGER_SAMPLER_MANAGER_HOST_PORT"
 	envJaegerSamplerParam              = "JAEGER_SAMPLER_PARAM"
+	envJaegerSamplerNotParentBased     = "JAEGER_SAMPLER_NOT_PARENT_BASED"
 	envJaegerEndpoint                  = "JAEGER_ENDPOINT"
 	envJaegerAgentPort                 = "JAEGER_AGENT_PORT"
 	envJaegerSamplerType               = "JAEGER_SAMPLER_TYPE"
@@ -39,6 +40,8 @@ const (
 	envJaegerDefaultSamplingServerPort = 5778
 	envJaegerDefaultUDPSpanServerHost  = "localhost"
 	envJaegerDefaultUDPSpanServerPort  = "6831"
+
+	jaegerDebugIdHeader string = "Jaeger-Debug-Id"
 )
 
 // NewOTelOrJaegerFromEnv is a convenience function to allow OTel tracing configuration via environment variables.
@@ -55,9 +58,14 @@ func NewOTelOrJaegerFromEnv(serviceName string, logger log.Logger, opts ...OTelO
 		return newOTelFromJaegerEnv(serviceName, logger, opts...)
 	}
 
-	level.Info(logger).Log("msg", "Configuring tracing with OTel auto exporter")
+	if env, found := findNonEmptyEnv("OTEL_TRACES_EXPORTER", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"); found {
+		level.Info(logger).Log("msg", "Configuring OpenTelemetry tracing", "detected_env_var", env)
+		return NewOTelFromEnv(serviceName, logger, opts...)
+	}
 
-	return NewOTelFromEnv(serviceName, logger, opts...)
+	// No tracing is configured, so don't initialize the tracer as it would complain on every span about localhost:4718 not accepting traces.
+	return ioCloser(func() error { return nil }), nil
+
 }
 
 func findNonEmptyEnv(envVars ...string) (string, bool) {
@@ -119,15 +127,16 @@ func parseJaegerTags(sTags string) ([]attribute.KeyValue, error) {
 }
 
 type otelJaegerConfig struct {
-	agentHost            string
-	jaegerEndpoint       string
-	agentPort            string
-	samplerType          string
-	samplingServerURL    string
-	samplerParam         float64
-	jaegerTags           []attribute.KeyValue
-	agentHostPort        string
-	reporterMaxQueueSize int
+	agentHost             string
+	jaegerEndpoint        string
+	agentPort             string
+	samplerType           string
+	samplingServerURL     string
+	samplerParam          float64
+	samplerNotParentBased bool
+	jaegerTags            []attribute.KeyValue
+	agentHostPort         string
+	reporterMaxQueueSize  int
 }
 
 // parseOTelJaegerConfig facilitates initialization that is compatible with Jaeger's InitGlobalTracer method.
@@ -204,6 +213,15 @@ func parseOTelJaegerConfig() (otelJaegerConfig, error) {
 			return cfg, errors.Wrapf(err, "cannot parse env var %s=%s", envJaegerReporterMaxQueueSize, e)
 		}
 	}
+
+	if e := os.Getenv(envJaegerSamplerNotParentBased); e != "" {
+		if value, err := strconv.ParseBool(e); err == nil {
+			cfg.samplerNotParentBased = value
+		} else {
+			return cfg, errors.Wrapf(err, "cannot parse env var %s=%s", envJaegerSamplerNotParentBased, e)
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -238,7 +256,7 @@ func (cfg otelJaegerConfig) initJaegerTracerProvider(serviceName string, logger 
 			sampler = tracesdk.NeverSample()
 		}
 	} else if cfg.samplerType == "probabilistic" {
-		tracesdk.TraceIDRatioBased(cfg.samplerParam)
+		sampler = tracesdk.TraceIDRatioBased(cfg.samplerParam)
 	} else if cfg.samplerType == "remote" {
 		sampler = jaegerremote.New(serviceName, jaegerremote.WithSamplingServerURL(cfg.samplingServerURL),
 			jaegerremote.WithInitialSampler(tracesdk.TraceIDRatioBased(cfg.samplerParam)))
@@ -252,6 +270,11 @@ func (cfg otelJaegerConfig) initJaegerTracerProvider(serviceName string, logger 
 		attribute.String("samplingServerURL", cfg.samplingServerURL),
 	)
 	customAttrs = append(customAttrs, otelCfg.resourceAttributes...)
+	if !cfg.samplerNotParentBased {
+		sampler = tracesdk.ParentBased(sampler)
+	} else {
+		customAttrs = append(customAttrs, attribute.Bool("samplerNotParentBased", true))
+	}
 
 	res, err := NewResource(serviceName, customAttrs)
 	if err != nil {
@@ -292,4 +315,49 @@ func (cfg otelJaegerConfig) initJaegerTracerProvider(serviceName string, logger 
 		}
 		return nil
 	}), nil
+}
+
+type contextKey int
+
+var jaegerDebugIdKey = contextKey(0)
+
+type JaegerDebuggingPropagator struct{}
+
+func (j JaegerDebuggingPropagator) Inject(ctx context.Context, carrier propagation.TextMapCarrier) {
+	// Nothing to do, we don't want to propagate the header.
+}
+
+func (j JaegerDebuggingPropagator) Extract(ctx context.Context, carrier propagation.TextMapCarrier) context.Context {
+	debugId := carrier.Get(jaegerDebugIdHeader)
+
+	if debugId == "" {
+		return ctx
+	}
+
+	return context.WithValue(ctx, jaegerDebugIdKey, debugId)
+}
+
+func (j JaegerDebuggingPropagator) Fields() []string {
+	return []string{jaegerDebugIdHeader}
+}
+
+type JaegerDebuggingSampler struct {
+	inner tracesdk.Sampler
+}
+
+func (j *JaegerDebuggingSampler) ShouldSample(parameters tracesdk.SamplingParameters) tracesdk.SamplingResult {
+	debugID, haveDebugID := parameters.ParentContext.Value(jaegerDebugIdKey).(string)
+	innerResult := j.inner.ShouldSample(parameters)
+	if !haveDebugID {
+		return innerResult
+	}
+
+	innerResult.Decision = tracesdk.RecordAndSample
+	attr := attribute.String("jaeger-debug-id", debugID)
+	innerResult.Attributes = append(innerResult.Attributes, attr)
+	return innerResult
+}
+
+func (j *JaegerDebuggingSampler) Description() string {
+	return "JaegerDebuggingSampler"
 }

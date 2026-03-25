@@ -10,13 +10,12 @@ import (
 	_ "net/http/pprof" // anonymous import to get the pprof handler registered
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/grafana/dskit/flagext"
+	"github.com/grafana/dskit/clusterutil"
 	"github.com/grafana/dskit/middleware"
 	"github.com/grafana/dskit/tracing"
 	"github.com/pkg/errors"
@@ -49,15 +48,13 @@ type config struct {
 	logFormat string
 	logLevel  string
 
-	serverPort                      int
-	kubeAPIURL                      string
-	kubeConfigFile                  string
-	kubeNamespace                   string
-	kubeClientTimeout               time.Duration
-	reconcileInterval               time.Duration
-	enableNamespaceValidation       bool
-	softNamespaceValidation         bool
-	namespaceValidationExcludePaths flagext.StringSliceCSV
+	serverPort           int
+	kubeAPIURL           string
+	kubeConfigFile       string
+	kubeNamespace        string
+	kubeClientTimeout    time.Duration
+	reconcileInterval    time.Duration
+	clusterValidationCfg clusterutil.ClusterValidationProtocolConfigForHTTP
 
 	serverTLSEnabled bool
 	serverTLSPort    int
@@ -82,12 +79,10 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.IntVar(&cfg.serverPort, "server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
 	fs.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "Timeout for requests made to the Kubernetes API")
+	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "HTTP client timeout. This applies to requests issued to both the Kubernetes API and Kubernetes resource endpoints.")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
-	fs.BoolVar(&cfg.enableNamespaceValidation, "server.cluster-validation.http.enabled", false, "Enable validation of HTTP requests targeting this namespace?")
-	fs.BoolVar(&cfg.softNamespaceValidation, "server.cluster-validation.http.soft-validation", false, "Enable soft validation of HTTP requests targeting this namespace?")
-	fs.Var(&cfg.namespaceValidationExcludePaths, "server.cluster-validation.http.exclude-paths", fmt.Sprintf("Comma-separated list of URL paths that are excluded from the cluster validation check. Default: %s.", strings.Join(defaultClusterValidationExcludePaths, ",")))
+	cfg.clusterValidationCfg.RegisterFlagsWithPrefix("server.cluster-validation.http.", fs)
 
 	fs.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
 	fs.IntVar(&cfg.serverTLSPort, "server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
@@ -118,6 +113,9 @@ func (cfg config) validate() error {
 	if cfg.useZoneTracker && cfg.zoneTrackerConfigMapName == "" {
 		return errors.New("the zone tracker ConfigMap name has not been specified")
 	}
+	if err := cfg.clusterValidationCfg.Validate("http", cfg.kubeNamespace); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -128,9 +126,9 @@ func main() {
 	fs := flag.NewFlagSet("rollout-operator", flag.ExitOnError)
 	cfg.register(fs)
 	check(fs.Parse(os.Args[1:]))
-	if len(cfg.namespaceValidationExcludePaths) == 0 {
+	if len(cfg.clusterValidationCfg.ExcludedPaths) == 0 {
 		// Apply default.
-		cfg.namespaceValidationExcludePaths = defaultClusterValidationExcludePaths
+		cfg.clusterValidationCfg.ExcludedPaths = defaultClusterValidationExcludePaths
 	}
 	check(cfg.validate())
 
@@ -165,10 +163,13 @@ func main() {
 	check(srv.Start())
 
 	// Build the Kubernetes client config.
-	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile, cfg.kubeClientTimeout)
+	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile)
 	check(errors.Wrap(err, "failed to build Kubernetes client config"))
 	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
 
+	if kubeConfig.Timeout == 0 {
+		kubeConfig.Timeout = cfg.kubeClientTimeout
+	}
 	if kubeConfig.UserAgent == "" {
 		kubeConfig.UserAgent = rest.DefaultKubernetesUserAgent()
 	}
@@ -305,13 +306,12 @@ func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, resta
 
 }
 
-func buildKubeConfig(apiURL, cfgFile string, timeout time.Duration) (*rest.Config, error) {
+func buildKubeConfig(apiURL, cfgFile string) (*rest.Config, error) {
 	if cfgFile != "" {
 		config, err := clientcmd.BuildConfigFromFlags(apiURL, cfgFile)
 		if err != nil {
 			return nil, err
 		}
-		config.Timeout = timeout
 		return config, nil
 	}
 
