@@ -174,6 +174,23 @@ func awaitCABundleAssignment(webhookCnt int, ctx context.Context, api *kubernete
 	}
 }
 
+// TestOTELTracingInitialization tests to see if the rollout-operator pod can start with OTEL_EXPORTER_OTLP_TRACES_ENDPOINT set
+func TestOTELTracingInitialization(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := createKindCluster(t, "rollout-operator:latest")
+	api := cluster.API()
+
+	path := initManifestFiles(t, "webhooks-not-enabled")
+
+	createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, false,
+		corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", Value: "http://127.0.0.1:12345"},
+		corev1.EnvVar{Name: "OTEL_TRACES_SAMPLER", Value: "always_off"},
+	)
+	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+}
+
 // TestWebHookInformer validates that we can add validating webhooks before or after the rollout-operator has started, and they will have their CABundle decorated
 func TestWebHookInformer(t *testing.T) {
 	ctx := context.Background()

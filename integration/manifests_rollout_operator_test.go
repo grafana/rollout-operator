@@ -59,12 +59,13 @@ func initManifestFiles(t *testing.T, test string) string {
 	return fmt.Sprintf(yamlPathTemplate, test)
 }
 
-func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook bool) {
+func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook bool, extraEnv ...corev1.EnvVar) {
 	createRolloutOperatorDependencies(t, ctx, api, extApi, directory, webhook)
 
 	deployment := loadFromDisk[appsv1.Deployment](t, directory+yamlDeployment, &appsv1.Deployment{})
 	deployment.Spec.Template.Spec.Containers[0].Image = "rollout-operator:latest"
 	deployment.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullNever
+	deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, extraEnv...)
 
 	_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Create(ctx, deployment, metav1.CreateOptions{})
 	require.NoError(t, err)

@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #408
+  * `github.com/grafana/dskit` from `v0.0.0-20260319123529-d1a3353450a7` to `v0.0.0-20260331143437-59c9c0f93cdd`
+* [BUGFIX] Fix crash when `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set due to conflicting OpenTelemetry schema URL. #408
+
 ## v0.36.0
 
 * [FEATURE] Add `grafana.com/rollout-paused` annotation to temporarily prevent the operator from deleting pods in a StatefulSet to roll out changes. Other StatefulSets in the same rollout group continue rolling out normally. #396
