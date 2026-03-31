@@ -185,7 +185,6 @@ func TestOTELTracingInitialization(t *testing.T) {
 
 	createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, false,
 		corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", Value: "http://127.0.0.1:12345"},
-		// Ensures traces aren't actually sent to the endpoint
 		corev1.EnvVar{Name: "OTEL_TRACES_SAMPLER", Value: "always_off"},
 	)
 	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
