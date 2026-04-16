@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/pkg/errors"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -88,7 +87,7 @@ func (c *WebhookObserver) Init(onEvent *WebhookConfigurationListener) error {
 				c.onWebHookConfigurationObserved(new)
 			},
 		}); err != nil {
-			return errors.Wrap(err, "failed to add webhook listener")
+			return fmt.Errorf("failed to add webhook listener: %w", err)
 		}
 	}
 
