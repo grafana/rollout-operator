@@ -2,6 +2,7 @@ package zpdb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -9,7 +10,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/spanlogger"
-	"github.com/pkg/errors"
 	v1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -81,10 +81,10 @@ func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynami
 
 func (c *EvictionController) Start() error {
 	if err := c.cfgObserver.start(); err != nil {
-		return errors.Wrap(err, "failed to start zpdb config observer")
+		return fmt.Errorf("failed to start zpdb config observer: %w", err)
 	}
 	if err := c.podObserver.start(); err != nil {
-		return errors.Wrap(err, "failed to start zpdb pod observer")
+		return fmt.Errorf("failed to start zpdb pod observer: %w", err)
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -18,7 +19,6 @@ import (
 	"github.com/grafana/dskit/clusterutil"
 	"github.com/grafana/dskit/middleware"
 	"github.com/grafana/dskit/tracing"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/model"
@@ -181,7 +181,9 @@ func main() {
 
 	// Build the Kubernetes client config.
 	kubeConfig, err := buildKubeConfig(cfg.kubeAPIURL, cfg.kubeConfigFile)
-	check(errors.Wrap(err, "failed to build Kubernetes client config"))
+	if err != nil {
+		fatal(fmt.Errorf("failed to build Kubernetes client config: %w", err))
+	}
 	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
 
 	if kubeConfig.Timeout == 0 {
@@ -211,22 +213,32 @@ func main() {
 
 	// share the transport between all clients
 	httpClient, err := rest.HTTPClientFor(kubeConfig)
-	check(errors.Wrap(err, "failed to create Kubernetes client"))
+	if err != nil {
+		fatal(fmt.Errorf("failed to create Kubernetes HTTP client: %w", err))
+	}
 
 	kubeClient, err := kubernetes.NewForConfigAndClient(kubeConfig, httpClient)
-	check(errors.Wrap(err, "failed to create Kubernetes client"))
+	if err != nil {
+		fatal(fmt.Errorf("failed to create Kubernetes client: %w", err))
+	}
 
 	restMapper, err := apiutil.NewDynamicRESTMapper(kubeConfig, httpClient)
-	check(errors.Wrap(err, "failed to create REST Mapper"))
+	if err != nil {
+		fatal(fmt.Errorf("failed to create REST Mapper: %w", err))
+	}
 
 	// we don't use cached discovery because DiscoveryScaleKindResolver does its own caching,
 	// so we want to re-fetch every time when we actually ask for it
 	scaleKindResolver := scale.NewDiscoveryScaleKindResolver(kubeClient.Discovery())
 	scaleClient, err := scale.NewForConfig(kubeConfig, restMapper, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
-	check(errors.Wrap(err, "failed to init scaleClient"))
+	if err != nil {
+		fatal(fmt.Errorf("failed to init scaleClient: %w", err))
+	}
 
 	dynamicClient, err := dynamic.NewForConfigAndClient(kubeConfig, httpClient)
-	check(errors.Wrap(err, "failed to init dynamicClient"))
+	if err != nil {
+		fatal(fmt.Errorf("failed to init dynamicClient: %w", err))
+	}
 
 	// watches for validating webhooks being added - this is only started if the TLS server is started
 	webhookObserver := tlscert.NewWebhookObserver(kubeClient, cfg.kubeNamespace, logger)
@@ -245,13 +257,17 @@ func main() {
 	var webhookCollector *webhooks.WebhookCollector
 	if cfg.serverTLSEnabled {
 		webhookCollector = webhooks.NewWebhookCollector(kubeClient, cfg.kubeNamespace, logger)
-		check(errors.Wrap(webhookCollector.Start(), "failed to start webhook collector"))
+		if err := webhookCollector.Start(); err != nil {
+			fatal(fmt.Errorf("failed to start webhook collector: %w", err))
+		}
 		check(reg.Register(webhookCollector))
 	}
 
 	// Init the controller
 	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger, evictionController)
-	check(errors.Wrap(c.Init(), "failed to init controller"))
+	if err := c.Init(); err != nil {
+		fatal(fmt.Errorf("failed to init controller: %w", err))
+	}
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).
 	go func() {
@@ -299,13 +315,17 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 		certProvider = tlscert.NewKubeSecretPersistedCertProvider(selfSignedProvider, logger, kubeClient, cfg.kubeNamespace, cfg.serverSelfSignedCertSecretName)
 	} else if cfg.serverCertFile != "" && cfg.serverKeyFile != "" {
 		certProvider, err = tlscert.NewFileCertProvider(cfg.serverCertFile, cfg.serverKeyFile)
-		check(errors.Wrap(err, "failed to create file cert provider"))
+		if err != nil {
+			fatal(fmt.Errorf("failed to create file cert provider: %w", err))
+		}
 	} else {
 		fatal(errors.New("either self-signed certificate should be enabled or path to the certificate and key should be provided"))
 	}
 
 	cert, err := certProvider.Certificate(context.Background())
-	check(errors.Wrap(err, "failed to get certificate"))
+	if err != nil {
+		fatal(fmt.Errorf("failed to get certificate: %w", err))
+	}
 
 	checkAndWatchCertificate(cert, logger, restart)
 
@@ -340,17 +360,23 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 	}
 
 	tlsSrv, err := newTLSServer(cfg, logger, cert, metrics)
-	check(errors.Wrap(err, "failed to create tls server"))
+	if err != nil {
+		fatal(fmt.Errorf("failed to create tls server: %w", err))
+	}
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, kubeClient))
 	tlsSrv.Handle(zpdb.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, kubeClient))
 	tlsSrv.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(zpdbValidationFunc, logger, kubeClient))
-	check(errors.Wrap(tlsSrv.Start(), "failed to start tls server"))
+	if err := tlsSrv.Start(); err != nil {
+		fatal(fmt.Errorf("failed to start tls server: %w", err))
+	}
 }
 
 func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, restart chan string) {
 	pair, err := tls.X509KeyPair(cert.Cert, cert.Key)
-	check(errors.Wrap(err, "failed to parse the provided certificate"))
+	if err != nil {
+		fatal(fmt.Errorf("failed to parse the provided certificate: %w", err))
+	}
 
 	for i, bytes := range pair.Certificate {
 		c, err := x509.ParseCertificate(bytes)

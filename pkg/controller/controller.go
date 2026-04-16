@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,7 +11,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/hashicorp/go-multierror"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.opentelemetry.io/otel"
@@ -337,7 +337,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	for _, sts := range sets {
 		hasNotReadyPods, err := c.hasStatefulSetNotReadyPods(sts)
 		if err != nil {
-			return errors.Wrapf(err, "unable to check if StatefulSet %s has not ready pods", sts.Name)
+			return fmt.Errorf("unable to check if StatefulSet %s has not ready pods: %w", sts.Name, err)
 		}
 
 		if hasNotReadyPods {
@@ -366,7 +366,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 		if err != nil {
 			// Do not continue with other StatefulSets because this StatefulSet
 			// is expected to be successfully updated before proceeding.
-			return errors.Wrapf(err, "failed to update StatefulSet %s", sts.Name)
+			return fmt.Errorf("failed to update StatefulSet %s: %w", sts.Name, err)
 		}
 
 		if ongoing {
@@ -446,7 +446,7 @@ func (c *RolloutController) listStatefulSetsWithRolloutGroup() ([]*v1.StatefulSe
 	// the StatefulSets having a rollout group label).
 	sets, err := c.statefulSetLister.StatefulSets(c.namespace).List(labels.Everything())
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to list StatefulSets")
+		return nil, fmt.Errorf("failed to list StatefulSets: %w", err)
 	} else if len(sets) == 0 {
 		return nil, nil
 	}
@@ -540,7 +540,7 @@ func notRunningAndReady(pods []*corev1.Pod) []*corev1.Pod {
 func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error) {
 	pods, err := c.podLister.Pods(c.namespace).List(sel)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to list Pods")
+		return nil, fmt.Errorf("failed to list Pods: %w", err)
 	}
 
 	return pods, nil
@@ -556,7 +556,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	podsToUpdate, err := c.podsNotMatchingUpdateRevision(sts)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to get pods to update")
+		return false, fmt.Errorf("failed to get pods to update: %w", err)
 	}
 
 	if len(podsToUpdate) > 0 {
@@ -589,7 +589,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 		hasPartitionAwarePdb, err := c.zpdbController.HasPartitionAwarePdb(podsToUpdate[0])
 		if err != nil {
 			// Note if we ignored this error and continued processing, the same error would be raised from the MarkPodAsDeleted() below.
-			return false, errors.Wrapf(err, "failed to determine pod zpdb configuration %s", podsToUpdate[0].Name)
+			return false, fmt.Errorf("failed to determine pod zpdb configuration %s: %w", podsToUpdate[0].Name, err)
 		}
 
 		// If the pods are covered by a partition aware ZPDB then the override is set to 1
@@ -634,7 +634,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 			level.Info(c.logger).Log("msg", "terminating pod (does not violate any relevant ZPDBs)", "pod", pod.Name)
 			if err := c.kubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
-				return false, errors.Wrapf(err, "failed to delete pod %s", pod.Name)
+				return false, fmt.Errorf("failed to delete pod %s: %w", pod.Name, err)
 			}
 		}
 
@@ -644,7 +644,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 	// Ensure all pods in this StatefulSet are Ready, otherwise we consider a rollout is in progress
 	// (in any case, it's not safe to proceed with other StatefulSets).
 	if hasNotReadyPods, err := c.hasStatefulSetNotReadyPods(sts); err != nil {
-		return true, errors.Wrapf(err, "unable to check if StatefulSet %s has not ready pods", sts.Name)
+		return true, fmt.Errorf("unable to check if StatefulSet %s has not ready pods: %w", sts.Name, err)
 	} else if hasNotReadyPods {
 		level.Info(c.logger).Log(
 			"msg", "StatefulSet pods are all updated but StatefulSet has some not-Ready replicas",
@@ -662,7 +662,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 		level.Debug(c.logger).Log("msg", "updating StatefulSet current revision", "old_current_revision", oldRev, "new_current_revision", sts.Status.UpdateRevision)
 		if sts, err = c.kubeClient.AppsV1().StatefulSets(sts.Namespace).UpdateStatus(ctx, sts, metav1.UpdateOptions{}); err != nil {
-			return false, errors.Wrapf(err, "failed to update StatefulSet %s", sts.Name)
+			return false, fmt.Errorf("failed to update StatefulSet %s: %w", sts.Name, err)
 		}
 		level.Info(c.logger).Log("msg", "updated StatefulSet current revision", "old_current_revision", oldRev, "new_current_revision", sts.Status.UpdateRevision)
 	}
