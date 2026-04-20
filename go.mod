@@ -8,7 +8,7 @@ require (
 	github.com/go-logfmt/logfmt v0.6.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
-	github.com/grafana/dskit v0.0.0-20260413135140-f8fd8e188362
+	github.com/grafana/dskit v0.0.0-20260417113503-29a3c41c2ad7
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/common v0.67.5
@@ -20,10 +20,10 @@ require (
 	go.uber.org/atomic v1.11.0
 	golang.org/x/mod v0.35.0
 	golang.org/x/sync v0.20.0
-	k8s.io/api v0.35.3
-	k8s.io/apiextensions-apiserver v0.35.3
-	k8s.io/apimachinery v0.35.3
-	k8s.io/client-go v0.35.3
+	k8s.io/api v0.35.4
+	k8s.io/apiextensions-apiserver v0.35.4
+	k8s.io/apimachinery v0.35.4
+	k8s.io/client-go v0.35.4
 	sigs.k8s.io/controller-runtime v0.23.3
 )
 
