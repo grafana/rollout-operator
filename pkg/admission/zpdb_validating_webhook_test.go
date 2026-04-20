@@ -17,6 +17,12 @@ func TestZoneAwarePdbValidatorHandlerSuccess(t *testing.T) {
 	assertAllowResponse(t, request)
 }
 
+// TestZoneAwarePdbValidatorHandlerSuccessWithCrossZoneEvictionDelay tests with a valid configuration including crossZoneEvictionDelay
+func TestZoneAwarePdbValidatorHandlerSuccessWithCrossZoneEvictionDelay(t *testing.T) {
+	request := createValidatingWebHookAdmissionReviewWithCrossZoneEvictionDelay()
+	assertAllowResponse(t, request)
+}
+
 // TestZoneAwarePdbValidatorHandlerBadConfig tests with an invalid configuration
 // See other test files for in-depth config validation
 func TestZoneAwarePdbValidatorHandlerBadConfig(t *testing.T) {
@@ -63,6 +69,34 @@ func createValidatingWebHookAdmissionReviewValid() admissionv1.AdmissionReview {
 								"rollout-group": "test-app"
 							}
 						}
+					}
+				}`),
+			},
+		},
+	}
+}
+
+func createValidatingWebHookAdmissionReviewWithCrossZoneEvictionDelay() admissionv1.AdmissionReview {
+	return admissionv1.AdmissionReview{
+		Request: &admissionv1.AdmissionRequest{
+			UID: "test-request-uid",
+			Object: runtime.RawExtension{
+				Raw: []byte(`{
+					"apiVersion": "rollout-operator.grafana.com/v1",
+					"kind": "ZoneAwarePodDisruptionBudget",
+					"metadata": {
+						"name": "test",
+						"namespace": "test"
+					},
+					"spec": {
+						"maxUnavailable": 1,
+						"selector": {
+							"matchLabels": {
+								"rollout-group": "test-app"
+							}
+						},
+						"podNamePartitionRegex": "[a-z\\-]+-zone-[a-z]-([0-9]+)",
+						"crossZoneEvictionDelay": "20m"
 					}
 				}`),
 			},

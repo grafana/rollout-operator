@@ -552,6 +552,7 @@ spec:
       rollout-group: ingester
   # podNamePartitionRegex: "[a-z\\-]+-zone-[a-z]-([0-9]+)"
   # podNameRegexGroup: 1
+  # crossZoneEvictionDelay: "20m"
 ```
 
 ### Configuration options
@@ -564,6 +565,7 @@ Functionality includes the ability to;
 * set the unavailable pod threshold as a percentage. This can only be used in classic zones and can not be used with partition awareness. The percentage is calculated against the StatefulSet's `spec.Replica` count. 
 * set the selector to match the applicable Pods and StatefulSets
 * set the regular expression to determine a partition name from a pod name (if using partition awareness)
+* set a cross-zone eviction delay to enforce a minimum time before a pod in another zone for the same partition can be evicted (requires partition awareness). The value must be a valid Go duration string (e.g. `20m`, `1h`).
 
 Note - `maxUnavailable` can be set to 0. In this case no voluntary evictions in any zone will be allowed.
 
