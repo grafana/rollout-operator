@@ -22,7 +22,7 @@ You can use the StatefulSets to exercise the operator across a multi-zone `test-
 
 Included is a `ZoneAwarePodDisruptionBudget` which can be used to enforce a multi-zone pod disruption budget.
 
-By default, this will be applied to the `test-app` Pods and StatefulSets.
+By default, this will be applied to the `test-app` Pods and StatefulSets. The configuration file includes commented-out examples for partition awareness (`podNamePartitionRegex`, `podNameRegexGroup`) and cross-zone eviction delay (`crossZoneEvictionDelay`).
 
 To disable this functionality from the `test-app`;
 

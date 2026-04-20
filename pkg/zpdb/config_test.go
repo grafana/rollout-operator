@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -216,6 +217,44 @@ func TestParseAndValidate(t *testing.T) {
 	require.NotNil(t, cfg.podNamePartitionRegexGroup)
 }
 
+func TestParseAndValidateCrossZoneEvictionDelay(t *testing.T) {
+	name := "test-zpdb"
+	rolloutGroup := "test"
+	partitionRegex := "[a-z]+\\-([0-9]+)"
+
+	// valid delay with partition regex
+	cfg, err := ParseAndValidate(rawConfigWithCrossZoneEvictionDelay(name, rolloutGroup, int64(1), int64(1), partitionRegex, "20m"))
+	require.NoError(t, err)
+	require.Equal(t, 20*time.Minute, cfg.crossZoneEvictionDelay)
+
+	// valid delay with different duration format
+	cfg, err = ParseAndValidate(rawConfigWithCrossZoneEvictionDelay(name, rolloutGroup, int64(1), int64(1), partitionRegex, "1h30m"))
+	require.NoError(t, err)
+	require.Equal(t, 90*time.Minute, cfg.crossZoneEvictionDelay)
+
+	// zero delay is valid
+	cfg, err = ParseAndValidate(rawConfigWithCrossZoneEvictionDelay(name, rolloutGroup, int64(1), int64(1), partitionRegex, "0s"))
+	require.NoError(t, err)
+	require.Equal(t, time.Duration(0), cfg.crossZoneEvictionDelay)
+
+	// no delay field is valid (omitted)
+	cfg, err = ParseAndValidate(rawConfig(name, rolloutGroup, int64(1), int64(1), partitionRegex))
+	require.NoError(t, err)
+	require.Equal(t, time.Duration(0), cfg.crossZoneEvictionDelay)
+
+	// invalid duration string
+	_, err = ParseAndValidate(rawConfigWithCrossZoneEvictionDelay(name, rolloutGroup, int64(1), int64(1), partitionRegex, "notaduration"))
+	require.ErrorContains(t, err, "invalid value: crossZoneEvictionDelay is not a valid duration")
+
+	// negative duration
+	_, err = ParseAndValidate(rawConfigWithCrossZoneEvictionDelay(name, rolloutGroup, int64(1), int64(1), partitionRegex, "-5m"))
+	require.ErrorContains(t, err, "invalid value: crossZoneEvictionDelay must be >= 0")
+
+	// delay without partition regex is invalid
+	_, err = ParseAndValidate(rawConfigWithCrossZoneEvictionDelay(name, rolloutGroup, int64(1), int64(1), "", "20m"))
+	require.ErrorContains(t, err, "invalid value: crossZoneEvictionDelay requires podNamePartitionRegex to be set")
+}
+
 // newSts returns a minimal StatefulSet which only has a name and replica count attributes set
 func newSts(name string) *appsv1.StatefulSet {
 	replicas := int32(3)
@@ -305,6 +344,30 @@ func rawConfigMultipleUnavailable(name string, rolloutGroup string, generation i
 						rolloutconfig.RolloutGroupLabelKey: rolloutGroup,
 					},
 				},
+			},
+		},
+	}
+}
+
+func rawConfigWithCrossZoneEvictionDelay(name string, rolloutGroup string, generation int64, maxUnavailable int64, podNamePartitionRegex string, crossZoneEvictionDelay string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": fmt.Sprintf("%s/%s", ZoneAwarePodDisruptionBudgetsSpecGroup, ZoneAwarePodDisruptionBudgetsVersion),
+			"kind":       ZoneAwarePodDisruptionBudgetName,
+			"metadata": map[string]interface{}{
+				"name":       name,
+				"namespace":  testNamespace,
+				"generation": generation,
+			},
+			"spec": map[string]interface{}{
+				FieldMaxUnavailable:           maxUnavailable,
+				FieldSelector: map[string]interface{}{
+					FieldMatchLabels: map[string]interface{}{
+						rolloutconfig.RolloutGroupLabelKey: rolloutGroup,
+					},
+				},
+				FieldPodNamePartitionRegex:  podNamePartitionRegex,
+				FieldCrossZoneEvictionDelay: crossZoneEvictionDelay,
 			},
 		},
 	}

@@ -326,9 +326,10 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
 	}
 
-	// mark the pod as evicted
+	// mark the pod as recently evicted
 	// this entry will self expire and will be removed when a pod state change is observed
-	c.podObserver.podEvictCache.recordEviction(pod)
+	// If the crossZoneEvictionDelay is set, the record will remain in the eviction cache until this time expires regardless of pod state changes.
+	c.podObserver.podEvictCache.recordEviction(pod, pdbConfig.crossZoneEvictionDelay)
 
 	level.Info(request.log).Log("msg", logAllowMesg, "reason", pdb.successMessage())
 	c.metrics.EvictionRequests.WithLabelValues("allowed", fmt.Sprintf("%d", http.StatusOK)).Inc()
