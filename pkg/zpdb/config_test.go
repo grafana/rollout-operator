@@ -360,7 +360,7 @@ func rawConfigWithCrossZoneEvictionDelay(name string, rolloutGroup string, gener
 				"generation": generation,
 			},
 			"spec": map[string]interface{}{
-				FieldMaxUnavailable:           maxUnavailable,
+				FieldMaxUnavailable: maxUnavailable,
 				FieldSelector: map[string]interface{}{
 					FieldMatchLabels: map[string]interface{}{
 						rolloutconfig.RolloutGroupLabelKey: rolloutGroup,
