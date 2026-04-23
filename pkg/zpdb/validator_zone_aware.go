@@ -80,7 +80,7 @@ func (v *validatorZoneAware) isReady(pod *corev1.Pod) bool {
 	if !ok {
 		// We should always expect there to be a cached value since the readyCache is populated from the pod_observer and the process
 		// starting up waits for the informer caches have been synced before progressing.
-		// We return true since the pod is reporting ready + running we just can not verify the eviction delay.
+		// We return true since the pod is reporting ready + running - we just can not verify the eviction delay.
 		level.Error(v.logger).Log("msg", "No ready cache record for pod - cross zone eviction delay can not be enforced", "pod", pod.Name)
 		return true
 	}
@@ -88,6 +88,14 @@ func (v *validatorZoneAware) isReady(pod *corev1.Pod) bool {
 		// We do not have any history for this pod being evicted and then recovering.
 		// evicted will be false when the rollout-operator first starts, and it has not observed any eviction lifecycles.
 		// As such we need to consider this pod as ready since we do not have the history of when it transitioned to ready/running.
+		// This is ok from the zpdb perspective as the usual flow would be;
+		// * pods (a,b) in each zone for a given partition are ready + running - all have readyRecord.evicted=false
+		// * pod a is requested to be evicted
+		// * pod b is tested here. It will be allowed since b is ready+running and we do not have the history to know when it last reached ready
+		// * pod a is evicted
+		// * whilst pod a is restarting it will not pass this ready test, so pod b can not be evicted
+		// * pod a returns to ready+running. If pod b is tested for eviction, pod a will be tested here and fail since not enough time has elapsed
+		// * pod b can not be evicted until pod a's time in ready elapses
 		level.Info(v.logger).Log("msg", "No eviction record in ready cache for pod - cross zone eviction delay can not be enforced", "pod", pod.Name)
 		return true
 	}
