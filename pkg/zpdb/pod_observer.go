@@ -140,6 +140,15 @@ func (c *podObserver) onPodDeleted(obj interface{}) {
 	c.podReadinessCache.deleted(pod)
 }
 
+// recordEviction will mark the pod as recently evicted.
+// Both the eviction cache and pod readiness cache will be updated.
+// The eviction cache will self expire and will be removed when a pod state change is observed.
+// The recordEviction will retain the knowledge that this pod has been evicted for the remainder of its lifecycle.
+func (c *podObserver) recordEviction(pod *corev1.Pod) {
+	c.podEvictCache.recordEviction(pod)
+	c.podReadinessCache.recordEviction(pod)
+}
+
 func (c *podObserver) stop() {
 	close(c.stopCh)
 }
