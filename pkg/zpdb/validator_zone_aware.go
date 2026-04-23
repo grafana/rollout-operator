@@ -92,16 +92,17 @@ func (v *validatorZoneAware) isReady(pod *corev1.Pod) bool {
 		return true
 	}
 
+	now := time.Now()
 	// Ensure that enough time has elapsed since this pod became ready
 	// Why do we check readyRunning again? This avoids a race between this test being run
 	// and a pod being observed as changing to a ready/running state. We need to ensure
 	// we are using the time since becoming ready and not a time since becoming not ready.
 	// It is possible that util.IsPodRunningAndReady() returns true but the readyCache has the pod not ready.
 	// The cached record will be updated once the pod observer notifies the readyCache of the update.
-	if readyRecord.readyRunning && time.Now().After(readyRecord.since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
+	if readyRecord.readyRunning && now.After(readyRecord.since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
 		return true
 	}
 
-	level.Info(v.logger).Log("msg", "Pod not considered ready - not enough time has elapsed since this pod became ready", "pod", pod.Name)
+	level.Info(v.logger).Log("msg", "Pod not considered ready - not enough time has elapsed since this pod became ready", "pod", pod.Name, "time-until-ready", readyRecord.since.Add(v.pdbConfig.crossZoneEvictionDelay).Sub(now))
 	return false
 }
