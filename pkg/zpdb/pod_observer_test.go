@@ -63,21 +63,21 @@ func TestObserver_PodEvents(t *testing.T) {
 			pod := createTestPod("test-pod", testNamespace)
 
 			// Add pod to fake client - this should trigger the informer and invalidate the cache
-			observer.podEvictCache.recordEviction(pod, delay)
+			observer.podEvictCache.recordEviction(pod)
 			require.True(t, observer.podEvictCache.hasPendingEviction(pod))
 			_, err := client.CoreV1().Pods(testNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
 			require.NoError(t, err)
 			awaitEviction(t, pod, observer)
 
 			// Update pod to fake client - this should trigger the informer and invalidate the cache
-			observer.podEvictCache.recordEviction(pod, 0)
+			observer.podEvictCache.recordEviction(pod)
 			require.True(t, observer.podEvictCache.hasPendingEviction(pod))
 			_, err = client.CoreV1().Pods(testNamespace).Update(context.Background(), pod, metav1.UpdateOptions{})
 			require.NoError(t, err)
 			awaitEviction(t, pod, observer)
 
 			// Delete pod to fake client - this should trigger the informer and invalidate the cache
-			observer.podEvictCache.recordEviction(pod, 0)
+			observer.podEvictCache.recordEviction(pod)
 			require.True(t, observer.podEvictCache.hasPendingEviction(pod))
 			err = client.CoreV1().Pods(testNamespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
 			require.NoError(t, err)
@@ -109,7 +109,7 @@ func TestObserver_IgnorePodEvents(t *testing.T) {
 	pod := createTestPod("test-pod", testNamespace)
 	pod.Status.Phase = corev1.PodRunning
 
-	observer.podEvictCache.recordEviction(pod, 0)
+	observer.podEvictCache.recordEviction(pod)
 	require.True(t, observer.podEvictCache.hasPendingEviction(pod))
 	observer.onPodAdded(pod)
 	require.True(t, observer.podEvictCache.hasPendingEviction(pod))

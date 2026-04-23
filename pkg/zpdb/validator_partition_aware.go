@@ -8,19 +8,22 @@ import (
 	"github.com/grafana/dskit/spanlogger"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 type validatorPartitionAware struct {
-	sts       *appsv1.StatefulSet
-	result    *zoneStatusResult
-	partition string
-	matcher   partitionMatcher
-	zones     int
-	pdbConfig *config
-	log       *spanlogger.SpanLogger
+	sts           *appsv1.StatefulSet
+	result        *zoneStatusResult
+	partition     string
+	matcher       partitionMatcher
+	zones         int
+	pdbConfig     *config
+	evictionCache *podEvictionCache
+	log           *spanlogger.SpanLogger
 }
 
-func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config, log *spanlogger.SpanLogger) *validatorPartitionAware {
+func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config, evictionCache *podEvictionCache, log *spanlogger.SpanLogger) *validatorPartitionAware {
 	partitionMatcher := func(pd *corev1.Pod) bool {
 		thisPartition, err := pdbConfig.podPartition(pd)
 		if err != nil {
@@ -33,13 +36,14 @@ func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones
 	}
 
 	return &validatorPartitionAware{
-		sts:       sts,
-		partition: partition,
-		zones:     zones,
-		pdbConfig: pdbConfig,
-		log:       log,
-		result:    &zoneStatusResult{},
-		matcher:   partitionMatcher,
+		sts:           sts,
+		partition:     partition,
+		zones:         zones,
+		pdbConfig:     pdbConfig,
+		evictionCache: evictionCache,
+		log:           log,
+		result:        &zoneStatusResult{},
+		matcher:       partitionMatcher,
 	}
 }
 
@@ -76,4 +80,8 @@ func (v *validatorPartitionAware) successMessage() string {
 
 func (v *validatorPartitionAware) considerPod() partitionMatcher {
 	return v.matcher
+}
+
+func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
+	return !v.evictionCache.hasPendingEviction(pod) && util.IsPodRunningAndReady(pod)
 }

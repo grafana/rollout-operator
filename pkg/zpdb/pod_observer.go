@@ -15,12 +15,13 @@ import (
 
 // An podObserver listens for pod changes, invalidating the pod eviction cache on a pod state change.
 type podObserver struct {
-	podsFactory   informers.SharedInformerFactory
-	podLister     corelisters.PodLister
-	podsInformer  k8cache.SharedIndexInformer
-	podEvictCache *podEvictionCache
-	logger        log.Logger
-	stopCh        chan struct{}
+	podsFactory       informers.SharedInformerFactory
+	podLister         corelisters.PodLister
+	podsInformer      k8cache.SharedIndexInformer
+	podEvictCache     *podEvictionCache
+	podReadinessCache *podReadinessCache
+	logger            log.Logger
+	stopCh            chan struct{}
 }
 
 func newPodObserver(kubeClient kubernetes.Interface, namespace string, logger log.Logger) *podObserver {
@@ -31,12 +32,13 @@ func newPodObserver(kubeClient kubernetes.Interface, namespace string, logger lo
 	podsInformer := podsFactory.Core().V1().Pods()
 
 	c := &podObserver{
-		podsFactory:   podsFactory,
-		podLister:     podsInformer.Lister(),
-		podsInformer:  podsInformer.Informer(),
-		podEvictCache: newPodEvictionCache(),
-		logger:        logger,
-		stopCh:        make(chan struct{}),
+		podsFactory:       podsFactory,
+		podLister:         podsInformer.Lister(),
+		podsInformer:      podsInformer.Informer(),
+		podEvictCache:     newPodEvictionCache(),
+		podReadinessCache: newPodReadinessCache(),
+		logger:            logger,
+		stopCh:            make(chan struct{}),
 	}
 
 	return c
@@ -64,13 +66,7 @@ func (c *podObserver) start() error {
 	return nil
 }
 
-func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string) {
-	pod, isPod := obj.(*corev1.Pod)
-	if !isPod {
-		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
-		return
-	}
-
+func (c *podObserver) invalidatePodEvictionCache(pod *corev1.Pod, action string) {
 	// reduce logging noise as this code path will be run on any pod update
 	// this is cheaper than finding the zpdb config for a pod
 	// and worst case if we miss an eviction configCache removal it self-expires
@@ -112,15 +108,36 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 }
 
 func (c *podObserver) onPodAdded(obj interface{}) {
-	c.invalidatePodEvictionCache(obj, "added")
+	pod, isPod := obj.(*corev1.Pod)
+	if !isPod {
+		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
+		return
+	}
+
+	c.invalidatePodEvictionCache(pod, "added")
+	c.podReadinessCache.observed(pod)
 }
 
 func (c *podObserver) onPodUpdated(_, new interface{}) {
-	c.invalidatePodEvictionCache(new, "updated")
+	pod, isPod := new.(*corev1.Pod)
+	if !isPod {
+		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(new))
+		return
+	}
+
+	c.invalidatePodEvictionCache(pod, "updated")
+	c.podReadinessCache.observed(pod)
 }
 
 func (c *podObserver) onPodDeleted(obj interface{}) {
-	c.invalidatePodEvictionCache(obj, "deleted")
+	pod, isPod := obj.(*corev1.Pod)
+	if !isPod {
+		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
+		return
+	}
+
+	c.invalidatePodEvictionCache(pod, "deleted")
+	c.podReadinessCache.deleted(pod)
 }
 
 func (c *podObserver) stop() {
