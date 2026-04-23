@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/grafana/rollout-operator/pkg/util"
@@ -24,15 +26,17 @@ type podReadinessCache struct {
 	// pod name --> [ since time, generation ]
 	entries map[string]podReadinessCacheValue
 	lock    sync.RWMutex
+	logger  log.Logger
 }
 
 // newPodReadinessCache returns a new podReadinessCache
 // The purpose of this cache is to track the time when a pod last became ready and running.
-func newPodReadinessCache() *podReadinessCache {
+func newPodReadinessCache(logger log.Logger) *podReadinessCache {
 	return &podReadinessCache{
 		// no pre-allocation as this will not grow significantly
 		entries: map[string]podReadinessCacheValue{},
 		lock:    sync.RWMutex{},
+		logger:  logger,
 	}
 }
 
@@ -42,6 +46,8 @@ func newPodReadinessCache() *podReadinessCache {
 func (c *podReadinessCache) recordEviction(pod *corev1.Pod) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
+
+	level.Info(c.logger).Log("msg", "recordEviction", "pod", pod.Name)
 
 	c.entries[pod.Name] = podReadinessCacheValue{
 		since:        time.Now(),
@@ -75,6 +81,8 @@ func (c *podReadinessCache) addOrUpdate(pod *corev1.Pod, readyRunning bool) {
 	defer c.lock.Unlock()
 
 	cachedValue, existingInCache := c.entries[pod.Name]
+
+	level.Info(c.logger).Log("msg", "addOrUpdate", "pod", pod.Name, "readyRunning", readyRunning, "generation", pod.Generation, "cached", cachedValue)
 
 	// discard stale update
 	if existingInCache && pod.Generation < cachedValue.generation {

@@ -31,7 +31,6 @@ func TestRolloutHappyCase(t *testing.T) {
 	createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, false)
 	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-	streamPodLogs(ctx, t, api, rolloutOperatorPod)
 
 	// Create mock service, and check that it is in the desired state.
 	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", 1)
@@ -91,7 +90,6 @@ func TestRolloutHappyCaseWithZpdb(t *testing.T) {
 
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-		streamPodLogs(ctx, t, api, rolloutOperatorPod)
 
 		t.Log("Await CABundle assignment")
 		require.Eventually(t, awaitCABundleAssignment(2, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
@@ -191,7 +189,6 @@ func TestOTELTracingInitialization(t *testing.T) {
 	)
 	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-	streamPodLogs(ctx, t, api, rolloutOperatorPod)
 }
 
 // TestWebHookInformer validates that we can add validating webhooks before or after the rollout-operator has started, and they will have their CABundle decorated
@@ -215,7 +212,6 @@ func TestWebHookInformer(t *testing.T) {
 
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-		streamPodLogs(ctx, t, api, rolloutOperatorPod)
 
 		t.Log("Await CABundle assignment")
 		require.Eventually(t, awaitCABundleAssignment(1, ctx, api), time.Second*60, time.Millisecond*10, "New webhooks have CABundle added")
@@ -271,7 +267,6 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-		streamPodLogs(ctx, t, api, rolloutOperatorPod)
 
 		t.Log("Await CABundle assignment")
 		require.Eventually(t, awaitCABundleAssignment(2, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
@@ -356,7 +351,6 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
 
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-		streamPodLogs(ctx, t, api, rolloutOperatorPod)
 
 		t.Log("Await CABundle assignment")
 		require.Eventually(t, awaitCABundleAssignment(2, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
@@ -418,7 +412,6 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-		streamPodLogs(ctx, t, api, rolloutOperatorPod)
 
 		t.Log("Await CABundle assignment")
 		require.Eventually(t, awaitCABundleAssignment(2, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
@@ -587,7 +580,6 @@ func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
 		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-		streamPodLogs(ctx, t, api, rolloutOperatorPod)
 	}
 
 	mock := mockServiceStatefulSet("mock", "1", true, 1)
@@ -638,7 +630,6 @@ func TestNoDownscale_DownscaleUpdatingStatefulSet(t *testing.T) {
 		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-		streamPodLogs(ctx, t, api, rolloutOperatorPod)
 	}
 
 	mock := mockServiceStatefulSet("mock", "1", true, 1)
@@ -690,7 +681,6 @@ func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-		streamPodLogs(ctx, t, api, rolloutOperatorPod)
 	}
 
 	mock := mockServiceStatefulSet("mock", "1", true, 1)
