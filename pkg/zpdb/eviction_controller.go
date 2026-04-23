@@ -292,10 +292,10 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 
 	if len(partition) > 0 {
 		// partition mode - the pod tallies are applied to all pods in other zones which relate to this partition
-		pdb = newValidatorPartitionAware(sts, partition, len(allStatefulSets.Items), pdbConfig, request.log)
+		pdb = newValidatorPartitionAware(sts, partition, len(allStatefulSets.Items), pdbConfig, c.podObserver.podEvictCache, request.log)
 	} else {
 		// zone mode - we allow the eviction if no other zone is disrupted and the max unavailable within the eviction zone is not exceeded
-		pdb = newValidatorZoneAware(sts, len(allStatefulSets.Items))
+		pdb = newValidatorZoneAware(sts, len(allStatefulSets.Items), c.podObserver.podEvictCache, c.podObserver.podReadinessCache, pdbConfig, request.log)
 	}
 
 	for _, otherSts := range allStatefulSets.Items {
@@ -304,7 +304,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 			continue
 		}
 
-		result, err := request.client.podsNotRunningAndReady(&otherSts, pod, pdb.considerPod(), c.podObserver.podEvictCache)
+		result, err := request.client.podsNotRunningAndReady(&otherSts, pod, pdb)
 		if err != nil {
 			level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to determine pod status in related StatefulSet", "sts", otherSts.Name)
 			c.metrics.EvictionRequests.WithLabelValues("err: sts-pod-status-not-determined", fmt.Sprintf("%d", http.StatusInternalServerError)).Inc()
@@ -329,7 +329,8 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	// mark the pod as recently evicted
 	// this entry will self expire and will be removed when a pod state change is observed
 	// If the crossZoneEvictionDelay is set, the record will remain in the eviction cache until this time expires regardless of pod state changes.
-	c.podObserver.podEvictCache.recordEviction(pod, pdbConfig.crossZoneEvictionDelay)
+	c.podObserver.podEvictCache.recordEviction(pod)
+	c.podObserver.podReadinessCache.recordEviction(pod)
 
 	level.Info(request.log).Log("msg", logAllowMesg, "reason", pdb.successMessage())
 	c.metrics.EvictionRequests.WithLabelValues("allowed", fmt.Sprintf("%d", http.StatusOK)).Inc()

@@ -22,6 +22,8 @@ type validator interface {
 	// validate is called after all the StatefulSets have been tested - this function validates that the PDB will not be breached
 	validate(maxUnavailable int) error
 
+	isReady(pod *corev1.Pod) bool
+
 	// successMessage returns a success message we return in the eviction response
 	successMessage() string
 }
