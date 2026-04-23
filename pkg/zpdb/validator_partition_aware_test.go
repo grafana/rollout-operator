@@ -1,19 +1,24 @@
 package zpdb
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/go-kit/log"
+	"github.com/grafana/dskit/spanlogger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
-func newTestValidatorZoneAware(delay time.Duration) (*validatorZoneAware, *podEvictionCache, *podReadinessCache) {
+func newTestValidatorPartitionAware(delay time.Duration) (*validatorPartitionAware, *podEvictionCache, *podReadinessCache) {
 	evictionCache := newPodEvictionCache()
-	readyCache := newPodReadinessCache(newDummyLogger())
+	readyCache := newPodReadinessCache(log.NewNopLogger())
 	cfg := &config{crossZoneEvictionDelay: delay}
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -21,12 +26,13 @@ func newTestValidatorZoneAware(delay time.Duration) (*validatorZoneAware, *podEv
 			UID:  types.UID("test-uid"),
 		},
 	}
-	v := newValidatorZoneAware(sts, 3, evictionCache, readyCache, cfg, newDummyLogger())
+	logger, _ := spanlogger.New(context.Background(), log.NewNopLogger(), "test", util.NoTenantResolver{})
+	v := newValidatorPartitionAware(sts, "0", 3, cfg, evictionCache, readyCache, logger)
 	return v, evictionCache, readyCache
 }
 
 func TestIsReady_PodWithPendingEviction(t *testing.T) {
-	v, evictionCache, _ := newTestValidatorZoneAware(0)
+	v, evictionCache, _ := newTestValidatorPartitionAware(0)
 	pod := readyRunningPod("pod-1", 1)
 
 	evictionCache.recordEviction(pod)
@@ -35,14 +41,14 @@ func TestIsReady_PodWithPendingEviction(t *testing.T) {
 }
 
 func TestIsReady_PodNotRunningAndReady(t *testing.T) {
-	v, _, _ := newTestValidatorZoneAware(0)
+	v, _, _ := newTestValidatorPartitionAware(0)
 	pod := notReadyPod("pod-1", 1)
 
 	assert.False(t, v.isReady(pod), "pod not running and ready should not be ready")
 }
 
 func TestIsReady_NoCacheRecord(t *testing.T) {
-	v, _, _ := newTestValidatorZoneAware(time.Minute)
+	v, _, _ := newTestValidatorPartitionAware(time.Minute)
 	pod := readyRunningPod("pod-1", 1)
 
 	// No entry in the readyCache at all
@@ -50,7 +56,7 @@ func TestIsReady_NoCacheRecord(t *testing.T) {
 }
 
 func TestIsReady_CacheRecordNotEvicted(t *testing.T) {
-	v, _, readyCache := newTestValidatorZoneAware(time.Minute)
+	v, _, readyCache := newTestValidatorPartitionAware(time.Minute)
 	pod := readyRunningPod("pod-1", 1)
 
 	// Observed but never evicted - evicted flag is false
@@ -61,7 +67,7 @@ func TestIsReady_CacheRecordNotEvicted(t *testing.T) {
 
 func TestIsReady_EvictedAndReadyWithinDelay(t *testing.T) {
 	delay := 5 * time.Second
-	v, _, readyCache := newTestValidatorZoneAware(delay)
+	v, _, readyCache := newTestValidatorPartitionAware(delay)
 	pod := readyRunningPod("pod-1", 1)
 
 	// Simulate: pod was evicted, then came back ready just now
@@ -77,7 +83,7 @@ func TestIsReady_EvictedAndReadyWithinDelay(t *testing.T) {
 }
 
 func TestIsReady_EvictedButNotYetReadyRunning(t *testing.T) {
-	v, _, readyCache := newTestValidatorZoneAware(time.Millisecond)
+	v, _, readyCache := newTestValidatorPartitionAware(time.Millisecond)
 	pod := readyRunningPod("pod-1", 1)
 
 	// Eviction recorded, pod comes back but readyCache still has it not ready
@@ -92,7 +98,7 @@ func TestIsReady_EvictedButNotYetReadyRunning(t *testing.T) {
 }
 
 func TestIsReady_ZeroDelay(t *testing.T) {
-	v, _, readyCache := newTestValidatorZoneAware(0)
+	v, _, readyCache := newTestValidatorPartitionAware(0)
 	pod := readyRunningPod("pod-1", 1)
 
 	readyCache.recordEviction(pod)
@@ -103,7 +109,7 @@ func TestIsReady_ZeroDelay(t *testing.T) {
 }
 
 func TestIsReady_PendingEvictionTakesPrecedenceOverReadyCache(t *testing.T) {
-	v, evictionCache, readyCache := newTestValidatorZoneAware(0)
+	v, evictionCache, readyCache := newTestValidatorPartitionAware(0)
 	pod := readyRunningPod("pod-1", 1)
 
 	// Pod has history in readyCache and is ready
@@ -118,7 +124,7 @@ func TestIsReady_PendingEvictionTakesPrecedenceOverReadyCache(t *testing.T) {
 func TestFullLifecycle(t *testing.T) {
 	delay := 5 * time.Second
 
-	v, evictionCache, readyCache := newTestValidatorZoneAware(delay)
+	v, evictionCache, readyCache := newTestValidatorPartitionAware(delay)
 
 	// rollout-operator starts and observes running pods
 	pod := readyRunningPod("pod-1", 1)
