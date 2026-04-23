@@ -59,7 +59,7 @@ func TestObserved(t *testing.T) {
 	}
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			cache := newPodReadinessCache()
+			cache := newPodReadinessCache(newDummyLogger())
 
 			_, ok := cache.get(tc.pod)
 			require.False(t, ok)
@@ -88,7 +88,7 @@ func TestObserved(t *testing.T) {
 }
 
 func TestObserved_StaleGenerationDiscarded(t *testing.T) {
-	cache := newPodReadinessCache()
+	cache := newPodReadinessCache(newDummyLogger())
 
 	pod := notReadyPod("pod-1", 1)
 	cache.observed(pod)
@@ -102,7 +102,7 @@ func TestObserved_StaleGenerationDiscarded(t *testing.T) {
 }
 
 func TestDeleted_StaleGenerationDiscarded(t *testing.T) {
-	cache := newPodReadinessCache()
+	cache := newPodReadinessCache(newDummyLogger())
 
 	pod := readyRunningPod("pod-1", 3)
 	cache.observed(pod)
@@ -115,7 +115,7 @@ func TestDeleted_StaleGenerationDiscarded(t *testing.T) {
 }
 
 func TestDeleted(t *testing.T) {
-	cache := newPodReadinessCache()
+	cache := newPodReadinessCache(newDummyLogger())
 
 	pod := readyRunningPod("pod-1", 1)
 	// First observe as ready
@@ -131,7 +131,7 @@ func TestDeleted(t *testing.T) {
 }
 
 func TestRecordEviction(t *testing.T) {
-	cache := newPodReadinessCache()
+	cache := newPodReadinessCache(newDummyLogger())
 	pod := readyRunningPod("pod-1", 1)
 
 	cache.observed(pod)
@@ -150,7 +150,7 @@ func TestRecordEviction(t *testing.T) {
 }
 
 func TestAddOrUpdate_SameStatePreservesSinceTime(t *testing.T) {
-	cache := newPodReadinessCache()
+	cache := newPodReadinessCache(newDummyLogger())
 	pod := readyRunningPod("pod-1", 1)
 	cache.observed(pod)
 
@@ -167,7 +167,7 @@ func TestAddOrUpdate_SameStatePreservesSinceTime(t *testing.T) {
 }
 
 func TestAddOrUpdate_InheritsEvictedFlag(t *testing.T) {
-	cache := newPodReadinessCache()
+	cache := newPodReadinessCache(newDummyLogger())
 	pod := readyRunningPod("pod-1", 1)
 
 	// Record eviction first
@@ -186,7 +186,7 @@ func TestAddOrUpdate_InheritsEvictedFlag(t *testing.T) {
 }
 
 func TestMultiplePods(t *testing.T) {
-	cache := newPodReadinessCache()
+	cache := newPodReadinessCache(newDummyLogger())
 	pod1 := readyRunningPod("pod-1", 1)
 	pod2 := notReadyPod("pod-2", 1)
 
@@ -203,7 +203,7 @@ func TestMultiplePods(t *testing.T) {
 }
 
 func TestDeleted_InheritsEvictedFlag(t *testing.T) {
-	cache := newPodReadinessCache()
+	cache := newPodReadinessCache(newDummyLogger())
 	pod := readyRunningPod("pod-1", 1)
 
 	cache.recordEviction(pod)
@@ -222,7 +222,7 @@ func TestDeleted_InheritsEvictedFlag(t *testing.T) {
 }
 
 func TestAddOrUpdate_EqualGenerationAllowed(t *testing.T) {
-	cache := newPodReadinessCache()
+	cache := newPodReadinessCache(newDummyLogger())
 	pod := readyRunningPod("pod-1", 1)
 	cache.observed(pod)
 
