@@ -76,6 +76,11 @@ func (v *validatorZoneAware) isReady(pod *corev1.Pod) bool {
 		return false
 	}
 
+	// No change to existing zpdb logic where this value is not set
+	if v.pdbConfig.crossZoneEvictionDelay == 0 {
+		return true
+	}
+
 	readyRecord, ok := v.readyCache.get(pod)
 	if !ok {
 		// We should always expect there to be a cached value since the readyCache is populated from the pod_observer and the process
