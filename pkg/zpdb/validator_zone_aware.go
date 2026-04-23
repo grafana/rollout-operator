@@ -116,8 +116,6 @@ func (v *validatorZoneAware) isReady(pod *corev1.Pod) bool {
 	// The cached record will be updated once the pod observer notifies the readyCache of the update.
 	if readyRecord.readyRunning && now.After(readyRecord.since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
 
-
-
 		return true
 	}
 

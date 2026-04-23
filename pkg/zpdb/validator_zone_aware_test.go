@@ -13,7 +13,7 @@ import (
 
 func newTestValidatorZoneAware(delay time.Duration) (*validatorZoneAware, *podEvictionCache, *podReadinessCache) {
 	evictionCache := newPodEvictionCache()
-	readyCache := newPodReadinessCache()
+	readyCache := newPodReadinessCache(newDummyLogger())
 	cfg := &config{crossZoneEvictionDelay: delay}
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
