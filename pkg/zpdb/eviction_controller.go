@@ -292,10 +292,10 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 
 	if len(partition) > 0 {
 		// partition mode - the pod tallies are applied to all pods in other zones which relate to this partition
-		pdb = newValidatorPartitionAware(sts, partition, len(allStatefulSets.Items), pdbConfig, c.podObserver.podEvictCache, request.log)
+		pdb = newValidatorPartitionAware(sts, partition, len(allStatefulSets.Items), pdbConfig, c.podObserver.podEvictCache, c.podObserver.podReadinessCache, request.log)
 	} else {
 		// zone mode - we allow the eviction if no other zone is disrupted and the max unavailable within the eviction zone is not exceeded
-		pdb = newValidatorZoneAware(sts, len(allStatefulSets.Items), c.podObserver.podEvictCache, c.podObserver.podReadinessCache, pdbConfig, request.log)
+		pdb = newValidatorZoneAware(sts, len(allStatefulSets.Items), c.podObserver.podEvictCache, pdbConfig)
 	}
 
 	for _, otherSts := range allStatefulSets.Items {
