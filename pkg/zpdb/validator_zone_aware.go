@@ -76,6 +76,8 @@ func (v *validatorZoneAware) isReady(pod *corev1.Pod) bool {
 		return false
 	}
 
+	level.Info(v.logger).Log("msg", "Testing if pod is ready", "pod", pod.Name, "delay", v.pdbConfig.crossZoneEvictionDelay)
+
 	// No change to existing zpdb logic where this value is not set
 	if v.pdbConfig.crossZoneEvictionDelay == 0 {
 		return true
@@ -113,6 +115,9 @@ func (v *validatorZoneAware) isReady(pod *corev1.Pod) bool {
 	// It is possible that util.IsPodRunningAndReady() returns true but the readyCache has the pod not ready.
 	// The cached record will be updated once the pod observer notifies the readyCache of the update.
 	if readyRecord.readyRunning && now.After(readyRecord.since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
+
+
+
 		return true
 	}
 

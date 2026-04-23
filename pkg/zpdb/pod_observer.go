@@ -36,7 +36,7 @@ func newPodObserver(kubeClient kubernetes.Interface, namespace string, logger lo
 		podLister:         podsInformer.Lister(),
 		podsInformer:      podsInformer.Informer(),
 		podEvictCache:     newPodEvictionCache(),
-		podReadinessCache: newPodReadinessCache(),
+		podReadinessCache: newPodReadinessCache(logger),
 		logger:            logger,
 		stopCh:            make(chan struct{}),
 	}
@@ -114,8 +114,8 @@ func (c *podObserver) onPodAdded(obj interface{}) {
 		return
 	}
 
-	c.invalidatePodEvictionCache(pod, "added")
 	c.podReadinessCache.observed(pod)
+	c.invalidatePodEvictionCache(pod, "added")
 }
 
 func (c *podObserver) onPodUpdated(_, new interface{}) {
@@ -125,8 +125,8 @@ func (c *podObserver) onPodUpdated(_, new interface{}) {
 		return
 	}
 
-	c.invalidatePodEvictionCache(pod, "updated")
 	c.podReadinessCache.observed(pod)
+	c.invalidatePodEvictionCache(pod, "updated")
 }
 
 func (c *podObserver) onPodDeleted(obj interface{}) {
@@ -136,8 +136,8 @@ func (c *podObserver) onPodDeleted(obj interface{}) {
 		return
 	}
 
-	c.invalidatePodEvictionCache(pod, "deleted")
 	c.podReadinessCache.deleted(pod)
+	c.invalidatePodEvictionCache(pod, "deleted")
 }
 
 // recordEviction will mark the pod as recently evicted.
