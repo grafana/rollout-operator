@@ -5,5 +5,5 @@ rollout_operator {
     namespace: 'default',
     zpdb_custom_resource_definition_enabled: true,
   },
-  ingester_rollout_pdb: $.newZPDB('mock-rollout', 'mock', 1, '[a-z\\-]+-zone-[a-z]-([0-9]+)', 1, '15s'),
+  ingester_rollout_pdb: $.newZPDB('mock-rollout', 'mock', 1, '[a-z\\-]+-zone-[a-z]-([0-9]+)', 1, '30s'),
 }
