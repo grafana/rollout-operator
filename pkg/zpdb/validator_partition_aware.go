@@ -92,8 +92,6 @@ func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
 		return false
 	}
 
-	level.Info(v.log).Log("msg", "Testing if pod is ready", "pod", pod.Name, "delay", v.pdbConfig.crossZoneEvictionDelay)
-
 	// No change to existing zpdb logic where this value is not set
 	if v.pdbConfig.crossZoneEvictionDelay == 0 {
 		return true
@@ -135,6 +133,6 @@ func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
 		return true
 	}
 
-	level.Info(v.log).Log("msg", "Pod not considered ready - not enough time has elapsed since this pod became ready", "pod", pod.Name, "time-until-ready", readyRecord.since.Add(v.pdbConfig.crossZoneEvictionDelay).Sub(now))
+	level.Info(v.log).Log("msg", "Pod not considered ready - not enough time has elapsed since this pod became ready", "pod", pod.Name, "readyRunning", readyRecord.readyRunning, "time-until-ready", readyRecord.since.Add(v.pdbConfig.crossZoneEvictionDelay).Sub(now))
 	return false
 }
