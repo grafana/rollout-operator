@@ -23,7 +23,7 @@ type podReadinessCacheValue struct {
 }
 
 type podReadinessCache struct {
-	// pod name --> [ since time, generation ]
+	// pod name --> [ since time, creation timestamp ]
 	entries map[string]podReadinessCacheValue
 	lock    sync.RWMutex
 	logger  log.Logger
@@ -53,7 +53,7 @@ func (c *podReadinessCache) recordEviction(pod *corev1.Pod) {
 		since:        time.Now(),
 		readyRunning: false,
 		evicted:      true,
-		// Note that we do not check for stale generations since this will be explicitly called from the
+		// Note that we do not check for stale creation timestamps since this will be explicitly called from the
 		// eviction controller. It is not being called from async informers
 		creationTimestamp: pod.CreationTimestamp.Unix(),
 	}
@@ -73,7 +73,7 @@ func (c *podReadinessCache) observed(pod *corev1.Pod) {
 
 // addOrUpdate will add/update the cached record for this pod, setting
 // ready to the given value.
-// No change is made if the pod generation is stale or the cached
+// No change is made if the pod creation timestamp is stale or the cached
 // value already indicates that there is no change in ready state.
 // Any existing evicted value is inherited.
 func (c *podReadinessCache) addOrUpdate(pod *corev1.Pod, readyRunning bool) {
@@ -82,7 +82,7 @@ func (c *podReadinessCache) addOrUpdate(pod *corev1.Pod, readyRunning bool) {
 
 	cachedValue, existingInCache := c.entries[pod.Name]
 
-	level.Info(c.logger).Log("msg", "addOrUpdate", "pod", pod.Name, "readyRunning", readyRunning, "generation", pod.Generation, "cached", cachedValue)
+	level.Info(c.logger).Log("msg", "addOrUpdate", "pod", pod.Name, "readyRunning", readyRunning, "creationTimestamp", pod.CreationTimestamp.Unix(), "cached", cachedValue)
 
 	// discard stale update
 	if existingInCache && pod.CreationTimestamp.Unix() < cachedValue.creationTimestamp {
@@ -101,10 +101,10 @@ func (c *podReadinessCache) addOrUpdate(pod *corev1.Pod, readyRunning bool) {
 	}
 
 	c.entries[pod.Name] = podReadinessCacheValue{
-		since:        time.Now(),
-		readyRunning: readyRunning,
-		evicted:      evicted,
-		creationTimestamp:   pod.CreationTimestamp.Unix(),
+		since:             time.Now(),
+		readyRunning:      readyRunning,
+		evicted:           evicted,
+		creationTimestamp: pod.CreationTimestamp.Unix(),
 	}
 }
 

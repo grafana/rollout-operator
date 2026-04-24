@@ -10,11 +10,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func readyRunningPod(name string, generation int64) *corev1.Pod {
+func readyRunningPod(name string, creationTimestamp int64) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       name,
-			Generation: generation,
+			Name:              name,
+			CreationTimestamp: metav1.Unix(creationTimestamp, 0),
 		},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
@@ -28,11 +28,11 @@ func readyRunningPod(name string, generation int64) *corev1.Pod {
 	}
 }
 
-func notReadyPod(name string, generation int64) *corev1.Pod {
+func notReadyPod(name string, creationTimestamp int64) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       name,
-			Generation: generation,
+			Name:              name,
+			CreationTimestamp: metav1.Unix(creationTimestamp, 0),
 		},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodPending,
@@ -71,23 +71,23 @@ func TestObserved(t *testing.T) {
 			require.True(t, ok)
 			assert.Equal(t, tc.running, val.readyRunning)
 			assert.False(t, val.evicted)
-			assert.Equal(t, int64(1), val.generation)
+			assert.Equal(t, int64(1), val.creationTimestamp)
 			assert.False(t, val.since.Before(before))
 
 			// validate that the original since is preserved when no state change occurs
 			since := val.since
-			tc.pod.Generation = 2
+			tc.pod.CreationTimestamp = metav1.Unix(2, 0)
 			cache.observed(tc.pod)
 			val, ok = cache.get(tc.pod)
 			require.True(t, ok)
-			assert.Equal(t, int64(1), val.generation)
+			assert.Equal(t, int64(1), val.creationTimestamp)
 			assert.Equal(t, since, val.since)
 		})
 	}
 
 }
 
-func TestObserved_StaleGenerationDiscarded(t *testing.T) {
+func TestObserved_StaleCreationTimestampDiscarded(t *testing.T) {
 	cache := newPodReadinessCache(newDummyLogger())
 
 	pod := notReadyPod("pod-1", 1)
@@ -98,10 +98,10 @@ func TestObserved_StaleGenerationDiscarded(t *testing.T) {
 	val, ok := cache.get(pod)
 	require.True(t, ok)
 	assert.True(t, val.readyRunning)
-	assert.Equal(t, int64(3), val.generation)
+	assert.Equal(t, int64(3), val.creationTimestamp)
 }
 
-func TestDeleted_StaleGenerationDiscarded(t *testing.T) {
+func TestDeleted_StaleCreationTimestampDiscarded(t *testing.T) {
 	cache := newPodReadinessCache(newDummyLogger())
 
 	pod := readyRunningPod("pod-1", 3)
@@ -111,7 +111,7 @@ func TestDeleted_StaleGenerationDiscarded(t *testing.T) {
 	val, ok := cache.get(pod)
 	require.True(t, ok)
 	assert.True(t, val.readyRunning)
-	assert.Equal(t, int64(3), val.generation)
+	assert.Equal(t, int64(3), val.creationTimestamp)
 }
 
 func TestDeleted(t *testing.T) {
@@ -146,7 +146,7 @@ func TestRecordEviction(t *testing.T) {
 	require.True(t, ok)
 	assert.False(t, val.readyRunning)
 	assert.True(t, val.evicted)
-	assert.Equal(t, int64(1), val.generation)
+	assert.Equal(t, int64(1), val.creationTimestamp)
 }
 
 func TestAddOrUpdate_SameStatePreservesSinceTime(t *testing.T) {
@@ -157,7 +157,7 @@ func TestAddOrUpdate_SameStatePreservesSinceTime(t *testing.T) {
 	val, _ := cache.get(pod)
 	originalSince := val.since
 
-	// Same state, higher generation - since time should not change
+	// Same state, later creation timestamp - since time should not change
 	pod2 := readyRunningPod("pod-1", 2)
 	cache.observed(pod2)
 
@@ -221,15 +221,15 @@ func TestDeleted_InheritsEvictedFlag(t *testing.T) {
 	assert.True(t, val.evicted, "evicted flag should persist through delete")
 }
 
-func TestAddOrUpdate_EqualGenerationAllowed(t *testing.T) {
+func TestAddOrUpdate_EqualCreationTimestampAllowed(t *testing.T) {
 	cache := newPodReadinessCache(newDummyLogger())
 	pod := readyRunningPod("pod-1", 1)
 	cache.observed(pod)
 
-	// Same generation with state change should be accepted
+	// Same creation timestamp with state change should be accepted
 	notReady := notReadyPod("pod-1", 1)
 	cache.observed(notReady)
 
 	val, _ := cache.get(pod)
-	assert.False(t, val.readyRunning, "equal generation update should be accepted")
+	assert.False(t, val.readyRunning, "equal creation timestamp update should be accepted")
 }
