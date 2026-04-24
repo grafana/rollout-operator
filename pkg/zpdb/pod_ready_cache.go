@@ -18,8 +18,8 @@ type podReadinessCacheValue struct {
 	readyRunning bool
 	// true this pod has been evicted since we started observing it
 	evicted bool
-	// the generation of the pod when we changed state
-	generation int64
+	// the creationTimestamp of the pod - so we can detect stale pod updates
+	creationTimestamp int64
 }
 
 type podReadinessCache struct {
@@ -55,7 +55,7 @@ func (c *podReadinessCache) recordEviction(pod *corev1.Pod) {
 		evicted:      true,
 		// Note that we do not check for stale generations since this will be explicitly called from the
 		// eviction controller. It is not being called from async informers
-		generation: pod.Generation,
+		creationTimestamp: pod.CreationTimestamp.Unix(),
 	}
 }
 
@@ -85,7 +85,7 @@ func (c *podReadinessCache) addOrUpdate(pod *corev1.Pod, readyRunning bool) {
 	level.Info(c.logger).Log("msg", "addOrUpdate", "pod", pod.Name, "readyRunning", readyRunning, "generation", pod.Generation, "cached", cachedValue)
 
 	// discard stale update
-	if existingInCache && pod.Generation < cachedValue.generation {
+	if existingInCache && pod.CreationTimestamp.Unix() < cachedValue.creationTimestamp {
 		return
 	}
 
@@ -104,7 +104,7 @@ func (c *podReadinessCache) addOrUpdate(pod *corev1.Pod, readyRunning bool) {
 		since:        time.Now(),
 		readyRunning: readyRunning,
 		evicted:      evicted,
-		generation:   pod.Generation,
+		creationTimestamp:   pod.CreationTimestamp.Unix(),
 	}
 }
 
