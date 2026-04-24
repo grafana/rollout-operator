@@ -16,12 +16,21 @@ type podReadinessCacheValue struct {
 	since time.Time
 	// the last observed state of the pod
 	readyRunning bool
-	// true this pod has been evicted since we started observing it
+	// true when this pod has been evicted since we started observing it
 	evicted bool
 	// the creationTimestamp of the pod - so we can detect stale pod updates
 	creationTimestamp int64
 }
 
+// podReadinessCache is a cache specific to tracking the time since
+// a pod returned to a ready + running state following an eviction.
+// Note that on process start-up, the time since the pod became ready/running
+// is not known. Only once the pod has been evicted at least once and returned
+// to service will this value be known.
+// The consumer of the podReadinessCacheValue record for a pod can use the
+// `evicted` attribute to determine if the `since` time relates to when we first
+// observed the pod on startup vs the time since the pod returned
+// to service after an eviction.
 type podReadinessCache struct {
 	// pod name --> [ since time, creation timestamp ]
 	entries map[string]podReadinessCacheValue
@@ -41,7 +50,7 @@ func newPodReadinessCache(logger log.Logger) *podReadinessCache {
 }
 
 // recordEviction will add/update the cached record for this pod, setting
-// ready to false and evicted to true.
+// `ready` to false and `evicted` to true.
 // Although the pod may still be running we know it will soon be not ready.
 func (c *podReadinessCache) recordEviction(pod *corev1.Pod) {
 	c.lock.Lock()
@@ -60,22 +69,25 @@ func (c *podReadinessCache) recordEviction(pod *corev1.Pod) {
 }
 
 // deleted will add/update the cached record for this pod, setting
-// ready to false.
+// `ready` to false.
 func (c *podReadinessCache) deleted(pod *corev1.Pod) {
 	c.addOrUpdate(pod, false)
 }
 
 // observed will add/update the cached record for this pod, setting
-// ready to util.IsPodRunningAndReady(pod).
+// `ready` to util.IsPodRunningAndReady(pod).
 func (c *podReadinessCache) observed(pod *corev1.Pod) {
 	c.addOrUpdate(pod, util.IsPodRunningAndReady(pod))
 }
 
 // addOrUpdate will add/update the cached record for this pod, setting
-// ready to the given value.
+// `ready` to the given value.
+//
 // No change is made if the pod creation timestamp is stale or the cached
 // value already indicates that there is no change in ready state.
-// Any existing evicted value is inherited.
+// Any existing `evicted` value is inherited.
+//
+// This is an internal function and should not be called directly. Use observed() or deleted().
 func (c *podReadinessCache) addOrUpdate(pod *corev1.Pod, readyRunning bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
