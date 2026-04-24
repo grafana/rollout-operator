@@ -47,7 +47,7 @@ func (c *podReadinessCache) recordEviction(pod *corev1.Pod) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	level.Info(c.logger).Log("msg", "recordEviction", "pod", pod.Name)
+	level.Debug(c.logger).Log("msg", "recordEviction", "pod", pod.Name, "creationTimestamp", pod.CreationTimestamp.Unix())
 
 	c.entries[pod.Name] = podReadinessCacheValue{
 		since:        time.Now(),
@@ -82,7 +82,7 @@ func (c *podReadinessCache) addOrUpdate(pod *corev1.Pod, readyRunning bool) {
 
 	cachedValue, existingInCache := c.entries[pod.Name]
 
-	level.Info(c.logger).Log("msg", "addOrUpdate", "pod", pod.Name, "readyRunning", readyRunning, "creationTimestamp", pod.CreationTimestamp.Unix(), "cached", cachedValue)
+	level.Debug(c.logger).Log("msg", "addOrUpdate", "pod", pod.Name, "readyRunning", readyRunning, "creationTimestamp", pod.CreationTimestamp.Unix())
 
 	// discard stale update
 	if existingInCache && pod.CreationTimestamp.Unix() < cachedValue.creationTimestamp {
