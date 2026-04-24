@@ -72,7 +72,7 @@ func TestIsReady_EvictedAndReadyWithinDelay(t *testing.T) {
 
 	// Simulate: pod was evicted, then came back ready just now
 	readyCache.recordEviction(pod)
-	pod.Generation = 2
+	pod.CreationTimestamp = metav1.Unix(2, 0)
 	readyCache.observed(pod) // transitions to readyRunning=true with evicted=true
 
 	assert.False(t, v.isReady(pod), "pod evicted and ready within delay should not be ready")
@@ -102,7 +102,7 @@ func TestIsReady_ZeroDelay(t *testing.T) {
 	pod := readyRunningPod("pod-1", 1)
 
 	readyCache.recordEviction(pod)
-	pod.Generation = 2
+	pod.CreationTimestamp = metav1.Unix(2, 0)
 	readyCache.observed(pod)
 
 	assert.True(t, v.isReady(pod), "pod with zero delay should be ready immediately after becoming ready")
