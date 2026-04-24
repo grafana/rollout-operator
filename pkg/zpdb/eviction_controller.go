@@ -295,7 +295,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		pdb = newValidatorPartitionAware(sts, partition, len(allStatefulSets.Items), pdbConfig, c.podObserver.podEvictCache, c.podObserver.podReadinessCache, request.log)
 	} else {
 		// zone mode - we allow the eviction if no other zone is disrupted and the max unavailable within the eviction zone is not exceeded
-		pdb = newValidatorZoneAware(sts, len(allStatefulSets.Items), c.podObserver.podEvictCache, pdbConfig)
+		pdb = newValidatorZoneAware(sts, len(allStatefulSets.Items), c.podObserver.podEvictCache)
 	}
 
 	for _, otherSts := range allStatefulSets.Items {

@@ -15,11 +15,10 @@ type validatorZoneAware struct {
 	result        *zoneStatusResult
 	zones         int
 	matcher       partitionMatcher
-	pdbConfig     *config
 	evictionCache *podEvictionCache
 }
 
-func newValidatorZoneAware(sts *appsv1.StatefulSet, zones int, evictionCache *podEvictionCache, pdbConfig *config) *validatorZoneAware {
+func newValidatorZoneAware(sts *appsv1.StatefulSet, zones int, evictionCache *podEvictionCache) *validatorZoneAware {
 	return &validatorZoneAware{
 		sts:   sts,
 		zones: zones,
@@ -27,7 +26,6 @@ func newValidatorZoneAware(sts *appsv1.StatefulSet, zones int, evictionCache *po
 			return true
 		},
 		evictionCache: evictionCache,
-		pdbConfig:     pdbConfig,
 	}
 }
 
