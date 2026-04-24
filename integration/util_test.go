@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -254,36 +253,6 @@ func patchStatefulSetScale(ctx context.Context, t *testing.T, api *kubernetes.Cl
 	}
 	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Patch(ctx, name, types.MergePatchType, patchData, opts, "scale")
 	return err
-}
-
-// streamPodLogs starts a background goroutine that follows the given pod's logs
-// and pipes each line to t.Log with a prefix. The stream is cancelled when the test ends.
-func streamPodLogs(ctx context.Context, t *testing.T, api *kubernetes.Clientset, podName string) {
-	t.Helper()
-
-	ctx, cancel := context.WithCancel(ctx)
-	t.Cleanup(cancel)
-
-	req := api.CoreV1().Pods(corev1.NamespaceDefault).GetLogs(podName, &corev1.PodLogOptions{
-		Follow: true,
-	})
-
-	stream, err := req.Stream(ctx)
-	if err != nil {
-		t.Logf("[rollout-operator] failed to open log stream for %s: %v", podName, err)
-		return
-	}
-
-	go func() {
-		defer stream.Close()
-		scanner := bufio.NewScanner(stream)
-		for scanner.Scan() {
-			t.Log("[rollout-operator] " + scanner.Text())
-		}
-		if err := scanner.Err(); err != nil && ctx.Err() == nil {
-			t.Logf("[rollout-operator] log stream error for %s: %v", podName, err)
-		}
-	}()
 }
 
 // kindCluster represents a kind cluster for testing

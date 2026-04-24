@@ -498,7 +498,6 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 
 		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
-		streamPodLogs(ctx, t, api, rolloutOperatorPod)
 
 		t.Log("Await CABundle assignment")
 		require.Eventually(t, awaitCABundleAssignment(2, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
