@@ -23,8 +23,8 @@ func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Cl
 	createRolloutOperatorDependencies(t, ctx, api, namespace, webhook)
 
 	deployment, err := api.AppsV1().Deployments(namespace).Create(ctx, rolloutOperatorDeployment(namespace, webhook), metav1.CreateOptions{})
-	deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, extraEnv...)
 	require.NoError(t, err)
+	deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, extraEnv...)
 }
 
 func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace string, webhook bool) {
