@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [BUGFIX] Fix crash when `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` was set. #425
+
 ## v0.28.5
 
 * [CHANGE] Backported change to rename flag `server.cluster-validation.http.exclude-paths` to `server.cluster-validation.http.excluded-paths` to align with `dskit`. #404
