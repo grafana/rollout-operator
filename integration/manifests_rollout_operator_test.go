@@ -19,10 +19,10 @@ import (
 
 const certificateSecretName = "certificate"
 
-func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace string, webhook bool) {
+func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace string, webhook bool, env ...corev1.EnvVar) {
 	createRolloutOperatorDependencies(t, ctx, api, namespace, webhook)
 
-	_, err := api.AppsV1().Deployments(namespace).Create(ctx, rolloutOperatorDeployment(namespace, webhook), metav1.CreateOptions{})
+	_, err := api.AppsV1().Deployments(namespace).Create(ctx, rolloutOperatorDeployment(namespace, webhook, env...), metav1.CreateOptions{})
 	require.NoError(t, err)
 }
 
@@ -54,7 +54,7 @@ func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *k
 	}
 }
 
-func rolloutOperatorDeployment(namespace string, webhook bool) *appsv1.Deployment {
+func rolloutOperatorDeployment(namespace string, webhook bool, env ...corev1.EnvVar) *appsv1.Deployment {
 	args := []string{
 		fmt.Sprintf("-kubernetes.namespace=%s", namespace),
 		"-reconcile.interval=1s",
@@ -105,6 +105,7 @@ func rolloutOperatorDeployment(namespace string, webhook bool) *appsv1.Deploymen
 							Name:            "rollout-operator",
 							Image:           "rollout-operator:latest",
 							Args:            args,
+							Env:             env,
 							ImagePullPolicy: corev1.PullNever,
 							Ports: []corev1.ContainerPort{
 								{
