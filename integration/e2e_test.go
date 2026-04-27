@@ -213,15 +213,15 @@ func TestNoDownscale_UpdatingScaleSubresource(t *testing.T) {
 
 // TestOTELTracingInitialization tests to see if the rollout-operator pod can start with OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
 func TestOTELTracingInitialization(t *testing.T) {
-       ctx := context.Background()
+	ctx := context.Background()
 
-       cluster := createKindCluster(t, "rollout-operator:latest")
-       api := cluster.API()
+	cluster := createKindCluster(t, "rollout-operator:latest")
+	api := cluster.API()
 
-       createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, false,
-               corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", Value: "http://127.0.0.1:12345"},
-               corev1.EnvVar{Name: "OTEL_TRACES_SAMPLER", Value: "always_off"},
-       )
-       rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
-       requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+	createRolloutOperator(t, ctx, api, corev1.NamespaceDefault, false,
+		corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", Value: "http://127.0.0.1:12345"},
+		corev1.EnvVar{Name: "OTEL_TRACES_SAMPLER", Value: "always_off"},
+	)
+	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 }
