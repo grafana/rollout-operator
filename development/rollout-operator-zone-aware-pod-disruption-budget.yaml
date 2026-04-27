@@ -12,3 +12,4 @@ spec:
       rollout-group: test-app
   # podNamePartitionRegex: "[a-z\\-]+-zone-[a-z]-([0-9]+)"
   # podNameRegexGroup: 1
+  # crossZoneEvictionDelay: 20m

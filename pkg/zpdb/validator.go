@@ -22,6 +22,11 @@ type validator interface {
 	// validate is called after all the StatefulSets have been tested - this function validates that the PDB will not be breached
 	validate(maxUnavailable int) error
 
+	// isReady should test if this pod is to be considered ready & running from a zpdb perspective.
+	// This could be a simple test such as validating if the pod is ready and running, but it could also
+	// include additional logic such as requiring a minimium time to have elapsed since the pod returned to service.
+	isReady(pod *corev1.Pod) bool
+
 	// successMessage returns a success message we return in the eviction response
 	successMessage() string
 }

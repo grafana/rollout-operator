@@ -70,7 +70,7 @@ func (c *podEvictionCache) hasPendingEvictionWithGeneration(pod *corev1.Pod) (bo
 	if !exists {
 		return false, 0
 	}
-	return exists, rec.generation
+	return exists && time.Now().Before(rec.expires), rec.generation
 }
 
 // delete removes this pod from the cache
