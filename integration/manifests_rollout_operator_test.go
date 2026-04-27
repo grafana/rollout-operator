@@ -19,10 +19,11 @@ import (
 
 const certificateSecretName = "certificate"
 
-func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace string, webhook bool) {
+func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, namespace string, webhook bool, extraEnv ...corev1.EnvVar) {
 	createRolloutOperatorDependencies(t, ctx, api, namespace, webhook)
 
-	_, err := api.AppsV1().Deployments(namespace).Create(ctx, rolloutOperatorDeployment(namespace, webhook), metav1.CreateOptions{})
+	deployment, err := api.AppsV1().Deployments(namespace).Create(ctx, rolloutOperatorDeployment(namespace, webhook), metav1.CreateOptions{})
+	deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, extraEnv...)
 	require.NoError(t, err)
 }
 
