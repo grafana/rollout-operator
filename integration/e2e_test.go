@@ -546,6 +546,12 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 	}
 
 	{
+		t.Log("Verify that an eviction in another partition (partition 1) is not affected by the cross-zone eviction delay for partition 0.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-1", Namespace: corev1.NamespaceDefault}}
+		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "Eviction in a different partition should not be affected by the cross-zone eviction delay")
+	}
+
+	{
 		t.Log("Verify that mock-zone-b-0 eviction is still denied while the cross-zone eviction delay has not expired.")
 		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
 		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request", "Eviction should still be denied while cross-zone eviction delay has not expired")
