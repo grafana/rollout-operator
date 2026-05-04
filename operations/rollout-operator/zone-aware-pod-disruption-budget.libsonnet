@@ -8,6 +8,7 @@
   // crossZoneEvictionDelay - optional Go duration (e.g. "20m") that must elapse before a pod in another zone for the same partition can be evicted. Requires podNamePartitionRegex.
   newZPDB(name, rolloutGroup, maxUnavailable, podNamePartitionRegex='', podNameRegexGroup=1, crossZoneEvictionDelay=''):: {
     assert $._config.rollout_operator_webhooks_enabled : 'zpdb configuration requires rollout_operator_webhooks_enabled=true',
+    assert crossZoneEvictionDelay == '' || podNamePartitionRegex != '' : 'crossZoneEvictionDelay requires podNamePartitionRegex to be set',
     apiVersion: $.zpdb_template.spec.group + '/v1',
     kind: $.zpdb_template.spec.names.kind,
     metadata: {
