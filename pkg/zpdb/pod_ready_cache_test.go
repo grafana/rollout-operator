@@ -71,7 +71,7 @@ func TestObserved(t *testing.T) {
 			require.True(t, ok)
 			assert.Equal(t, tc.running, val.readyRunning)
 			assert.False(t, val.evicted)
-			assert.Equal(t, int64(1), val.creationTimestamp)
+			assert.Equal(t, time.Unix(1, 0), val.creationTimestamp)
 			assert.False(t, val.since.Before(before))
 
 			// validate that the original since is preserved when no state change occurs
@@ -80,7 +80,7 @@ func TestObserved(t *testing.T) {
 			cache.observed(tc.pod)
 			val, ok = cache.get(tc.pod)
 			require.True(t, ok)
-			assert.Equal(t, int64(1), val.creationTimestamp)
+			assert.Equal(t, time.Unix(1, 0), val.creationTimestamp)
 			assert.Equal(t, since, val.since)
 		})
 	}
@@ -98,7 +98,7 @@ func TestObserved_StaleCreationTimestampDiscarded(t *testing.T) {
 	val, ok := cache.get(pod)
 	require.True(t, ok)
 	assert.True(t, val.readyRunning)
-	assert.Equal(t, int64(3), val.creationTimestamp)
+	assert.Equal(t, time.Unix(3, 0), val.creationTimestamp)
 }
 
 func TestDeleted_StaleCreationTimestampDiscarded(t *testing.T) {
@@ -111,7 +111,7 @@ func TestDeleted_StaleCreationTimestampDiscarded(t *testing.T) {
 	val, ok := cache.get(pod)
 	require.True(t, ok)
 	assert.True(t, val.readyRunning)
-	assert.Equal(t, int64(3), val.creationTimestamp)
+	assert.Equal(t, time.Unix(3, 0), val.creationTimestamp)
 }
 
 func TestDeleted(t *testing.T) {
@@ -146,7 +146,7 @@ func TestRecordEviction(t *testing.T) {
 	require.True(t, ok)
 	assert.False(t, val.readyRunning)
 	assert.True(t, val.evicted)
-	assert.Equal(t, int64(1), val.creationTimestamp)
+	assert.Equal(t, time.Unix(1, 0), val.creationTimestamp)
 }
 
 func TestAddOrUpdate_SameStatePreservesSinceTime(t *testing.T) {
