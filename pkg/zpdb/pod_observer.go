@@ -20,11 +20,12 @@ type podObserver struct {
 	podsInformer      k8cache.SharedIndexInformer
 	podEvictCache     *podEvictionCache
 	podReadinessCache *podReadinessCache
+	configObserver    *configObserver
 	logger            log.Logger
 	stopCh            chan struct{}
 }
 
-func newPodObserver(kubeClient kubernetes.Interface, namespace string, logger log.Logger) *podObserver {
+func newPodObserver(kubeClient kubernetes.Interface, namespace string, configObserver *configObserver, logger log.Logger) *podObserver {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// initialize the ZoneAwarePodDisruptionBudget custom resource watching
@@ -37,6 +38,7 @@ func newPodObserver(kubeClient kubernetes.Interface, namespace string, logger lo
 		podsInformer:      podsInformer.Informer(),
 		podEvictCache:     newPodEvictionCache(),
 		podReadinessCache: newPodReadinessCache(logger),
+		configObserver:    configObserver,
 		logger:            logger,
 		stopCh:            make(chan struct{}),
 	}
@@ -107,10 +109,29 @@ func (c *podObserver) invalidatePodEvictionCache(pod *corev1.Pod, action string)
 	c.podEvictCache.delete(pod)
 }
 
-func (c *podObserver) onPodAdded(obj interface{}) {
+// accept will return a pod and true of the given object is a pod and the is within the scope of our pdb
+func (c *podObserver) accept(obj interface{}) (*corev1.Pod, bool) {
 	pod, isPod := obj.(*corev1.Pod)
 	if !isPod {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
+		return nil, false
+	}
+	pdbConfig, err := c.configObserver.pdbCache.find(pod)
+	if err != nil {
+		level.Warn(c.logger).Log("msg", "observer ignoring pod - unable to look up configuration for pod", "pod", pod.Name, "err", err)
+		return nil, false
+	}
+	if pdbConfig == nil {
+		level.Debug(c.logger).Log("msg", "observer ignoring pod - not within zpdb scope", "pod", pod.Name)
+		return nil, false
+	}
+
+	return pod, true
+}
+
+func (c *podObserver) onPodAdded(obj interface{}) {
+	pod, ok := c.accept(obj)
+	if !ok {
 		return
 	}
 
@@ -119,9 +140,8 @@ func (c *podObserver) onPodAdded(obj interface{}) {
 }
 
 func (c *podObserver) onPodUpdated(_, new interface{}) {
-	pod, isPod := new.(*corev1.Pod)
-	if !isPod {
-		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(new))
+	pod, ok := c.accept(new)
+	if !ok {
 		return
 	}
 
@@ -130,9 +150,8 @@ func (c *podObserver) onPodUpdated(_, new interface{}) {
 }
 
 func (c *podObserver) onPodDeleted(obj interface{}) {
-	pod, isPod := obj.(*corev1.Pod)
-	if !isPod {
-		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
+	pod, ok := c.accept(obj)
+	if !ok {
 		return
 	}
 
