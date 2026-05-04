@@ -7,16 +7,28 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+
+	rolloutconfig "github.com/grafana/rollout-operator/pkg/config"
 )
 
-func newPodObserverTestCase() (*k8sfake.Clientset, *podObserver) {
+func newPodObserverTestCase(t *testing.T) (*k8sfake.Clientset, *podObserver) {
 	client := k8sfake.NewClientset()
-	observer := newPodObserver(client, testNamespace, log.NewNopLogger())
+
+	dynamicClient := newFakeDynamicClient()
+	cfgObserver := newConfigObserver(dynamicClient, testNamespace, log.NewNopLogger(), NewMetrics(prometheus.NewRegistry()))
+
+	// Seed the config cache with a config that matches the rollout-group used by createTestPod.
+	updated, _, err := cfgObserver.pdbCache.addOrUpdateRaw(newPDB("test-zpdb"))
+	require.NoError(t, err)
+	require.True(t, updated)
+
+	observer := newPodObserver(client, testNamespace, cfgObserver, log.NewNopLogger())
 	return client, observer
 }
 
@@ -26,13 +38,14 @@ func createTestPod(name, namespace string) *corev1.Pod {
 			Name:      name,
 			Namespace: namespace,
 			UID:       types.UID(fmt.Sprintf("uid-%s", name)),
+			Labels:    map[string]string{rolloutconfig.RolloutGroupLabelKey: "test-group"},
 		},
 	}
 }
 
 // TestObserver_NewPdbObserver- basic constructor and life cycle test
 func TestObserver_NewPodObserver(t *testing.T) {
-	_, observer := newPodObserverTestCase()
+	_, observer := newPodObserverTestCase(t)
 
 	require.NoError(t, observer.start())
 
@@ -55,7 +68,7 @@ func TestObserver_NewPodObserver(t *testing.T) {
 func TestObserver_PodEvents(t *testing.T) {
 	for _, delay := range []time.Duration{0, 3 * time.Second} { // 3 secs < 5 sec timeout in the awaitEviction
 		t.Run(fmt.Sprintf("delay=%s", delay), func(t *testing.T) {
-			client, observer := newPodObserverTestCase()
+			client, observer := newPodObserverTestCase(t)
 			require.NoError(t, observer.start())
 			defer observer.stop()
 
@@ -88,7 +101,7 @@ func TestObserver_PodEvents(t *testing.T) {
 
 // TestObserver_InvalidObject - tests that no panics occur if an invalid object is passed from the informers
 func TestPodObserver_InvalidObject(t *testing.T) {
-	_, observer := newPodObserverTestCase()
+	_, observer := newPodObserverTestCase(t)
 	require.NoError(t, observer.start())
 	defer observer.stop()
 
@@ -102,7 +115,7 @@ func TestPodObserver_InvalidObject(t *testing.T) {
 
 // TestObserver_IgnorePodEvents validates the pod eviction cache is not invalidated until the pod phase changes
 func TestObserver_IgnorePodEvents(t *testing.T) {
-	_, observer := newPodObserverTestCase()
+	_, observer := newPodObserverTestCase(t)
 	require.NoError(t, observer.start())
 	defer observer.stop()
 

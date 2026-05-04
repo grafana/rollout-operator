@@ -65,7 +65,7 @@ func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynami
 	cfgObserver := newConfigObserver(dynamicClient, namespace, logger, metrics)
 
 	// watches for Pod changes which are reflected into the pod eviction configCache
-	podObserver := newPodObserver(kubeClient, namespace, logger)
+	podObserver := newPodObserver(kubeClient, namespace, cfgObserver, logger)
 
 	return &EvictionController{
 		locks:       make(map[string]*sync.Mutex, 5),
