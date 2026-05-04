@@ -19,7 +19,7 @@ type podReadinessCacheValue struct {
 	// true when this pod has been evicted since we started observing it
 	evicted bool
 	// the creationTimestamp of the pod - so we can detect stale pod updates
-	creationTimestamp int64
+	creationTimestamp time.Time
 }
 
 // podReadinessCache is a cache specific to tracking the time since
@@ -56,7 +56,7 @@ func (c *podReadinessCache) recordEviction(pod *corev1.Pod) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	level.Debug(c.logger).Log("msg", "recordEviction", "pod", pod.Name, "creationTimestamp", pod.CreationTimestamp.Unix())
+	level.Debug(c.logger).Log("msg", "recordEviction", "pod", pod.Name, "creationTimestamp", pod.CreationTimestamp.Time)
 
 	c.entries[pod.Name] = podReadinessCacheValue{
 		since:        time.Now(),
@@ -64,7 +64,7 @@ func (c *podReadinessCache) recordEviction(pod *corev1.Pod) {
 		evicted:      true,
 		// Note that we do not check for stale creation timestamps since this will be explicitly called from the
 		// eviction controller. It is not being called from async informers
-		creationTimestamp: pod.CreationTimestamp.Unix(),
+		creationTimestamp: pod.CreationTimestamp.Time,
 	}
 }
 
@@ -94,10 +94,10 @@ func (c *podReadinessCache) addOrUpdate(pod *corev1.Pod, readyRunning bool) {
 
 	cachedValue, existingInCache := c.entries[pod.Name]
 
-	level.Debug(c.logger).Log("msg", "addOrUpdate", "pod", pod.Name, "readyRunning", readyRunning, "creationTimestamp", pod.CreationTimestamp.Unix())
+	level.Debug(c.logger).Log("msg", "addOrUpdate", "pod", pod.Name, "readyRunning", readyRunning, "creationTimestamp", pod.CreationTimestamp.Time)
 
 	// discard stale update
-	if existingInCache && pod.CreationTimestamp.Unix() < cachedValue.creationTimestamp {
+	if existingInCache && pod.CreationTimestamp.Time.Before(cachedValue.creationTimestamp) {
 		return
 	}
 
@@ -116,7 +116,7 @@ func (c *podReadinessCache) addOrUpdate(pod *corev1.Pod, readyRunning bool) {
 		since:             time.Now(),
 		readyRunning:      readyRunning,
 		evicted:           evicted,
-		creationTimestamp: pod.CreationTimestamp.Unix(),
+		creationTimestamp: pod.CreationTimestamp.Time,
 	}
 }
 
