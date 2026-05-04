@@ -105,6 +105,8 @@ func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
 		level.Error(v.log).Log("msg", "No ready cache record for pod - cross zone eviction delay can not be enforced", "pod", pod.Name)
 		return true
 	}
+
+	now := time.Now()
 	if !readyRecord.evicted {
 		// We do not have any history for this pod being evicted and then recovering.
 		// evicted will be false when the rollout-operator first starts, and it has not observed any eviction lifecycles.
@@ -117,11 +119,23 @@ func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
 		// * whilst pod a is restarting it will not pass this ready test, so pod b can not be evicted
 		// * pod a returns to ready+running. If pod b is tested for eviction, pod a will be tested here and fail since not enough time has elapsed
 		// * pod b can not be evicted until pod a's time in ready elapses
-		level.Info(v.log).Log("msg", "No eviction record in ready cache for pod - cross zone eviction delay can not be enforced", "pod", pod.Name)
-		return true
+		//
+		// Fall back to using pod creation time. Since the rollout-operator state is not persistent, if the rollout-operator is restarted we lose the
+		// history of when a pod restarted. Consider the following;
+		// t0 - pod a-0 starts
+		// t1 - pod a-0 is ready
+		// t2 - rollout-operator restarts
+		// t3 - pod b-0 is tested for eviction
+		// In this scenario, the delay between t3 and t1 can not be enforced. The best we can do is use t0 rather than t1.
+		if now.After(pod.CreationTimestamp.Add(v.pdbConfig.crossZoneEvictionDelay)) {
+			level.Info(v.log).Log("msg", "No eviction record in ready cache for pod - allowing since eviction delay has passed relative to pod creation time", "pod", pod.Name)
+			return true
+		}
+
+		level.Info(v.log).Log("msg", "No eviction record in ready cache for pod - denying since eviction delay has not passed relative to pod creation time", "pod", pod.Name)
+		return false
 	}
 
-	now := time.Now()
 	// Ensure that enough time has elapsed since this pod became ready
 	// Why do we check readyRunning again? This avoids a race between this test being run
 	// and a pod being observed as changing to a ready/running state. We need to ensure
