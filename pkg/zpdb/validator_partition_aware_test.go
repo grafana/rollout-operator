@@ -55,14 +55,27 @@ func TestIsReady_NoCacheRecord(t *testing.T) {
 	assert.True(t, v.isReady(pod), "pod with no cache record should be considered ready")
 }
 
-func TestIsReady_CacheRecordNotEvicted(t *testing.T) {
+func TestIsReady_CacheRecordNotEvicted_DelayElapsedSinceCreation(t *testing.T) {
 	v, _, readyCache := newTestValidatorPartitionAware(time.Minute)
 	pod := readyRunningPod("pod-1", 1)
 
-	// Observed but never evicted - evicted flag is false
+	// Observed but never evicted - evicted flag is false.
+	// Pod creation timestamp is well in the past, so the delay has elapsed since creation.
 	readyCache.observed(pod)
 
-	assert.True(t, v.isReady(pod), "pod observed but never evicted should be considered ready")
+	assert.True(t, v.isReady(pod), "pod observed but never evicted, with creation time outside the delay window, should be considered ready")
+}
+
+func TestIsReady_CacheRecordNotEvicted_DelayNotElapsedSinceCreation(t *testing.T) {
+	v, _, readyCache := newTestValidatorPartitionAware(time.Minute)
+	pod := readyRunningPod("pod-1", 1)
+	pod.CreationTimestamp = metav1.Now()
+
+	// Observed but never evicted - evicted flag is false.
+	// Pod creation timestamp is recent, so the delay has not yet elapsed since creation.
+	readyCache.observed(pod)
+
+	assert.False(t, v.isReady(pod), "pod observed but never evicted, with creation time within the delay window, should not be considered ready")
 }
 
 func TestIsReady_EvictedAndReadyWithinDelay(t *testing.T) {
