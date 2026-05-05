@@ -162,9 +162,9 @@ It requires a minimum period to elapse after a pod returns to ready+running befo
 
 For instance;
 
-* t0 - `pod-zone-a-0` is evicted
-* t1 - `pod-zone-a-0` returns to full service (ready and running)
-* t2 - `pod-zone-b-0` is tested for eviction
+- t0 - `pod-zone-a-0` is evicted
+- t1 - `pod-zone-a-0` returns to full service (ready and running)
+- t2 - `pod-zone-b-0` is tested for eviction
 
 Assuming the PDB `max-unavailable` is 1, the `pod-zone-b-0` eviction will not be allowed until at least `crossZoneEvictionDelay` has elapsed since t1 (i.e. `t2 - t1 >= crossZoneEvictionDelay`).
 
