@@ -3,24 +3,29 @@ package zpdb
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/spanlogger"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 type validatorPartitionAware struct {
-	sts       *appsv1.StatefulSet
-	result    *zoneStatusResult
-	partition string
-	matcher   partitionMatcher
-	zones     int
-	pdbConfig *config
-	log       *spanlogger.SpanLogger
+	sts           *appsv1.StatefulSet
+	result        *zoneStatusResult
+	partition     string
+	matcher       partitionMatcher
+	zones         int
+	pdbConfig     *config
+	evictionCache *podEvictionCache
+	readyTracker  *podReadinessTracker
+	log           *spanlogger.SpanLogger
 }
 
-func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config, log *spanlogger.SpanLogger) *validatorPartitionAware {
+func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config, evictionCache *podEvictionCache, readyTracker *podReadinessTracker, log *spanlogger.SpanLogger) *validatorPartitionAware {
 	partitionMatcher := func(pd *corev1.Pod) bool {
 		thisPartition, err := pdbConfig.podPartition(pd)
 		if err != nil {
@@ -33,13 +38,15 @@ func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones
 	}
 
 	return &validatorPartitionAware{
-		sts:       sts,
-		partition: partition,
-		zones:     zones,
-		pdbConfig: pdbConfig,
-		log:       log,
-		result:    &zoneStatusResult{},
-		matcher:   partitionMatcher,
+		sts:           sts,
+		partition:     partition,
+		zones:         zones,
+		pdbConfig:     pdbConfig,
+		evictionCache: evictionCache,
+		readyTracker:  readyTracker,
+		log:           log,
+		result:        &zoneStatusResult{},
+		matcher:       partitionMatcher,
 	}
 }
 
@@ -76,4 +83,30 @@ func (v *validatorPartitionAware) successMessage() string {
 
 func (v *validatorPartitionAware) considerPod() partitionMatcher {
 	return v.matcher
+}
+
+func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
+
+	// This pod has been recently evicted or is not in a ready + running state
+	if v.evictionCache.hasPendingEviction(pod) || !util.IsPodRunningAndReady(pod) {
+		return false
+	}
+
+	// No cross-zone eviction delay configured - any ready+running pod counts as ready.
+	if v.pdbConfig.crossZoneEvictionDelay == 0 {
+		return true
+	}
+
+	// Delay configured: the pod is only ready once enough time has elapsed since it last
+	// transitioned to ready+running. The transition time is read from the pod's
+	// podReadyAnnotationKey annotation (or time.Now() when the annotation is absent or invalid,
+	// which is the safe default that denies eviction until the delay window has been observed).
+	now := time.Now()
+	since := v.readyTracker.get(pod)
+	if now.After(since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
+		return true
+	}
+
+	level.Info(v.log).Log("msg", "Pod not considered ready - not enough time has elapsed since this pod became ready", "pod", pod.Name, "time-until-ready", since.Add(v.pdbConfig.crossZoneEvictionDelay).Sub(now))
+	return false
 }

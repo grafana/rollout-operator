@@ -60,7 +60,7 @@ func (a *k8sClient) findRelatedStatefulSets(namespace string, selector *labels.S
 // It is possible for pods to be in a state where they are not yet returned by the pod listing. These pods should be considered and are reported as unknown.
 // The number of unknown pods is determined as the difference between the StatefulSets Replica count minus the number of pods listed.
 // The given Pod is excluded from testing, but is included in the total of tested pods
-func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, matcher partitionMatcher, evictionCache *podEvictionCache) (*zoneStatusResult, error) {
+func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, zpdb validator) (*zoneStatusResult, error) {
 	podsSelector := labels.NewSelector().Add(
 		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
@@ -88,6 +88,8 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 		replicas = max(int(sts.Status.Replicas), int(*sts.Spec.Replicas))
 	}
 
+	matcher := zpdb.considerPod()
+
 	for _, pd := range list.Items {
 
 		// we do not consider pods which are in a different partition
@@ -95,7 +97,7 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 			continue
 		}
 
-		if pod.UID != pd.UID && (evictionCache.hasPendingEviction(&pd) || !util.IsPodRunningAndReady(&pd)) {
+		if pod.UID != pd.UID && !zpdb.isReady(&pd) {
 			// if a pod has recently been evicted then we assume it is not ready
 			// this is avoiding a possible race condition of concurrent eviction requests are occurring and an eviction has not yet caused a pod state change
 			result.notReady++

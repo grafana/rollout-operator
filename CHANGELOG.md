@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Add support for zone-aware PDB to enforce a fixed delay between evictions within the same partition. #422
 * [ENHANCEMENT] Updated dependencies, including: #411 #417 #420 #423
   * `github.com/grafana/dskit` from `v0.0.0-20260331143437-59c9c0f93cdd` to `v0.0.0-20260423105331-de42b217b3c1`
   * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.67.0` to `v0.68.0`

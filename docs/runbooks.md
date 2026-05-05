@@ -153,3 +153,32 @@ ingester_rollout_pdb+:
   local podDisruptionBudget = $.policy.v1.podDisruptionBudget;
   podDisruptionBudget.mixin.spec.withMaxUnavailable(0),
 ```
+
+### Cross-zone eviction delays
+
+The `crossZoneEvictionDelay` can be used in partition-aware `ZPDB` configurations and requires `podNamePartitionRegex` to be set.
+
+It requires a minimum period to elapse after a pod returns to ready+running before another pod in the same partition (in any zone) can be evicted.
+
+For instance;
+
+- t0 - `pod-zone-a-0` is evicted
+- t1 - `pod-zone-a-0` returns to full service (ready and running)
+- t2 - `pod-zone-b-0` is tested for eviction
+
+Assuming the PDB `max-unavailable` is 1, the `pod-zone-b-0` eviction will not be allowed until at least `crossZoneEvictionDelay` has elapsed since t1 (i.e. `t2 - t1 >= crossZoneEvictionDelay`).
+
+Note that this duration is calculated from when the `pod-zone-a-0` returned to service, not when it was evicted.
+
+When `crossZoneEvictionDelay` is unset or `0`, no delay is enforced and evictions follow the standard ZPDB logic.
+
+The time that a pod returned to service is recorded by setting a `grafana.com/ready` annotation on the pod. This ensures that
+if the `rollout-operator` restarts the last ready time is not lost. The annotation is automatically removed when a pod transitions
+out of a ready+running state, so the delay is correctly re-measured from the next ready transition. The annotation is also lost if a pod is re-created.
+
+When the annotation is missing - e.g. the first time this version of the `rollout-operator` runs, or after a pod is re-created during
+a `rollout-operator` restart - the `rollout-operator` records `time.Now()` as the ready time on its first observation of the pod. The
+delay window therefore runs from the `rollout-operator`'s first observation, not from the pod's actual ready time. Pod evictions
+(and rolling updates) within the same partition are denied until that window expires.
+
+This can be monitored in the `rollout-operator` logs via the message `Pod not considered ready - not enough time has elapsed since this pod became ready`.
