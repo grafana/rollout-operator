@@ -10,15 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 
 	"github.com/grafana/rollout-operator/pkg/util"
 )
 
-func newTestValidatorPartitionAware(delay time.Duration) (*validatorPartitionAware, *podEvictionCache, *podReadinessCache) {
+func newTestValidatorPartitionAware(delay time.Duration) (*validatorPartitionAware, *podEvictionCache, *podReadinessTracker) {
 	evictionCache := newPodEvictionCache()
-	readyCache := newPodReadinessCache(log.NewNopLogger())
+	readyTracker := newPodReadinessTracker(k8sfake.NewClientset(), testNamespace, log.NewNopLogger())
 	cfg := &config{crossZoneEvictionDelay: delay}
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -27,13 +29,24 @@ func newTestValidatorPartitionAware(delay time.Duration) (*validatorPartitionAwa
 		},
 	}
 	logger, _ := spanlogger.New(context.Background(), log.NewNopLogger(), "test", util.NoTenantResolver{})
-	v := newValidatorPartitionAware(sts, "0", 3, cfg, evictionCache, readyCache, logger)
-	return v, evictionCache, readyCache
+	v := newValidatorPartitionAware(sts, "0", 3, cfg, evictionCache, readyTracker, logger)
+	return v, evictionCache, readyTracker
+}
+
+// withReadyAnnotation sets podReadyAnnotationKey on a copy of pod's annotations.
+// The validator reads this directly via readyTracker.get, so tests for isReady drive
+// behavior by setting it on the in-memory pod.
+func withReadyAnnotation(pod *corev1.Pod, t time.Time) *corev1.Pod {
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
+	}
+	pod.Annotations[podReadyAnnotationKey] = t.UTC().Format(time.RFC3339)
+	return pod
 }
 
 func TestIsReady_PodWithPendingEviction(t *testing.T) {
 	v, evictionCache, _ := newTestValidatorPartitionAware(0)
-	pod := readyRunningPod("pod-1", 1)
+	pod := readyRunningPod("pod-1")
 
 	evictionCache.recordEviction(pod)
 
@@ -42,126 +55,76 @@ func TestIsReady_PodWithPendingEviction(t *testing.T) {
 
 func TestIsReady_PodNotRunningAndReady(t *testing.T) {
 	v, _, _ := newTestValidatorPartitionAware(0)
-	pod := notReadyPod("pod-1", 1)
+	pod := notReadyPod("pod-1")
 
-	assert.False(t, v.isReady(pod), "pod not running and ready should not be ready")
+	assert.False(t, v.isReady(pod), "pod that fails IsPodRunningAndReady should not be ready")
 }
 
-func TestIsReady_NoCacheRecord(t *testing.T) {
+func TestIsReady_ZeroDelayAlwaysReady(t *testing.T) {
+	v, _, _ := newTestValidatorPartitionAware(0)
+	pod := readyRunningPod("pod-1")
+
+	// With no delay configured, the validator short-circuits and treats any ready+running
+	// pod as ready, regardless of the annotation.
+	assert.True(t, v.isReady(pod), "ready pod with zero delay should be ready immediately")
+}
+
+func TestIsReady_PendingEvictionBeatsAnnotation(t *testing.T) {
+	v, evictionCache, _ := newTestValidatorPartitionAware(time.Minute)
+	pod := readyRunningPod("pod-1")
+	withReadyAnnotation(pod, time.Now().Add(-time.Hour)) // annotation well outside the delay window
+
+	evictionCache.recordEviction(pod)
+
+	assert.False(t, v.isReady(pod), "pending eviction should override an otherwise-ready annotation")
+}
+
+func TestIsReady_NoAnnotationDenied(t *testing.T) {
 	v, _, _ := newTestValidatorPartitionAware(time.Minute)
-	pod := readyRunningPod("pod-1", 1)
+	pod := readyRunningPod("pod-1")
 
-	// No entry in the readyCache at all
-	assert.True(t, v.isReady(pod), "pod with no cache record should be considered ready")
+	// readyTracker.get returns time.Now() when no annotation is present, so the delay window
+	// starts at "now" and isReady must deny until it expires. This is the safe default for
+	// pods seen for the first time after a rollout-operator restart.
+	assert.False(t, v.isReady(pod), "ready pod with no annotation should be denied while a delay is configured")
 }
 
-func TestIsReady_CacheRecordNotEvicted_DelayElapsedSinceCreation(t *testing.T) {
-	v, _, readyCache := newTestValidatorPartitionAware(time.Minute)
-	pod := readyRunningPod("pod-1", 1)
+func TestIsReady_AnnotationOutsideDelayWindow(t *testing.T) {
+	v, _, _ := newTestValidatorPartitionAware(time.Minute)
+	pod := readyRunningPod("pod-1")
+	withReadyAnnotation(pod, time.Now().Add(-time.Hour))
 
-	// Observed but never evicted - evicted flag is false.
-	// Pod creation timestamp is well in the past, so the delay has elapsed since creation.
-	readyCache.observed(pod)
-
-	assert.True(t, v.isReady(pod), "pod observed but never evicted, with creation time outside the delay window, should be considered ready")
+	assert.True(t, v.isReady(pod), "ready pod with annotation older than the delay should be ready")
 }
 
-func TestIsReady_CacheRecordNotEvicted_DelayNotElapsedSinceCreation(t *testing.T) {
-	v, _, readyCache := newTestValidatorPartitionAware(time.Minute)
-	pod := readyRunningPod("pod-1", 1)
-	pod.CreationTimestamp = metav1.Now()
+func TestIsReady_AnnotationInsideDelayWindow(t *testing.T) {
+	v, _, _ := newTestValidatorPartitionAware(time.Minute)
+	pod := readyRunningPod("pod-1")
+	withReadyAnnotation(pod, time.Now())
 
-	// Observed but never evicted - evicted flag is false.
-	// Pod creation timestamp is recent, so the delay has not yet elapsed since creation.
-	readyCache.observed(pod)
-
-	assert.False(t, v.isReady(pod), "pod observed but never evicted, with creation time within the delay window, should not be considered ready")
+	assert.False(t, v.isReady(pod), "ready pod with annotation inside the delay window should not be ready")
 }
 
-func TestIsReady_EvictedAndReadyWithinDelay(t *testing.T) {
-	delay := 5 * time.Second
-	v, _, readyCache := newTestValidatorPartitionAware(delay)
-	pod := readyRunningPod("pod-1", 1)
+func TestIsReady_MalformedAnnotationDenied(t *testing.T) {
+	v, _, _ := newTestValidatorPartitionAware(time.Minute)
+	pod := readyRunningPod("pod-1")
+	pod.Annotations = map[string]string{podReadyAnnotationKey: "not-a-timestamp"}
 
-	// Simulate: pod was evicted, then came back ready just now
-	readyCache.recordEviction(pod)
-	pod.CreationTimestamp = metav1.Unix(2, 0)
-	readyCache.observed(pod) // transitions to readyRunning=true with evicted=true
+	// readyTracker.get falls back to time.Now() when the annotation cannot be parsed, so the
+	// validator should treat the pod the same as one with no annotation - denied while a
+	// delay is configured.
+	assert.False(t, v.isReady(pod), "malformed annotation should fall back to now() and be denied")
+}
 
-	assert.False(t, v.isReady(pod), "pod evicted and ready within delay should not be ready")
+func TestIsReady_BecomesReadyAfterDelay(t *testing.T) {
+	delay := time.Second
+	v, _, _ := newTestValidatorPartitionAware(delay)
+	pod := readyRunningPod("pod-1")
+	withReadyAnnotation(pod, time.Now())
+
+	assert.False(t, v.isReady(pod), "ready pod just-set within the delay window should not yet be ready")
 
 	require.Eventually(t, func() bool {
 		return v.isReady(pod)
-	}, delay*2, time.Second, "pod becomes ready after delay expires")
-}
-
-func TestIsReady_EvictedButNotYetReadyRunning(t *testing.T) {
-	v, _, readyCache := newTestValidatorPartitionAware(time.Millisecond)
-	pod := readyRunningPod("pod-1", 1)
-
-	// Eviction recorded, pod comes back but readyCache still has it not ready
-	// (race between IsPodRunningAndReady and cache update)
-	readyCache.recordEviction(pod)
-	// The readyCache entry is: readyRunning=false, evicted=true
-
-	// The pod itself IS running+ready (passes IsPodRunningAndReady),
-	// but the cache hasn't been updated yet.
-	// isReady should return false because readyRecord.readyRunning is false.
-	assert.False(t, v.isReady(pod), "pod evicted but cache not yet updated to ready should not be ready")
-}
-
-func TestIsReady_ZeroDelay(t *testing.T) {
-	v, _, readyCache := newTestValidatorPartitionAware(0)
-	pod := readyRunningPod("pod-1", 1)
-
-	readyCache.recordEviction(pod)
-	pod.CreationTimestamp = metav1.Unix(2, 0)
-	readyCache.observed(pod)
-
-	assert.True(t, v.isReady(pod), "pod with zero delay should be ready immediately after becoming ready")
-}
-
-func TestIsReady_PendingEvictionTakesPrecedenceOverReadyCache(t *testing.T) {
-	v, evictionCache, readyCache := newTestValidatorPartitionAware(0)
-	pod := readyRunningPod("pod-1", 1)
-
-	// Pod has history in readyCache and is ready
-	readyCache.observed(pod)
-
-	// But also has a pending eviction
-	evictionCache.recordEviction(pod)
-
-	assert.False(t, v.isReady(pod), "pending eviction should take precedence over ready state")
-}
-
-func TestFullLifecycle(t *testing.T) {
-	delay := 5 * time.Second
-
-	v, evictionCache, readyCache := newTestValidatorPartitionAware(delay)
-
-	// rollout-operator starts and observes running pods
-	pod := readyRunningPod("pod-1", 1)
-	readyCache.observed(pod)
-	assert.True(t, v.isReady(pod), "initial state - pod is considered ready")
-
-	// the pod is evicted
-	evictionCache.recordEviction(pod)
-	readyCache.recordEviction(pod)
-	assert.False(t, v.isReady(pod), "pod is not considered ready when flagged for eviction")
-
-	// the pod is observed as not ready
-	pod = notReadyPod("pod-1", 2)
-	readyCache.observed(pod)
-	assert.False(t, v.isReady(pod), "pod is not ready")
-
-	// the pod becomes ready
-	pod = readyRunningPod("pod-1", 3)
-	evictionCache.delete(pod)
-	readyCache.observed(pod)
-	assert.False(t, v.isReady(pod), "pod is not considered ready since the delay has not elapsed")
-
-	// the validator will consider this pod ready once the delay has passed
-	require.Eventually(t, func() bool {
-		return v.isReady(pod)
-	}, delay*2, time.Second, "pod becomes ready after delay expires")
+	}, delay*4, 100*time.Millisecond, "pod becomes ready once wall-clock advances past annotation+delay")
 }

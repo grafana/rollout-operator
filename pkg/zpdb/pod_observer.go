@@ -15,14 +15,14 @@ import (
 
 // An podObserver listens for pod changes, invalidating the pod eviction cache on a pod state change.
 type podObserver struct {
-	podsFactory       informers.SharedInformerFactory
-	podLister         corelisters.PodLister
-	podsInformer      k8cache.SharedIndexInformer
-	podEvictCache     *podEvictionCache
-	podReadinessCache *podReadinessCache
-	configObserver    *configObserver
-	logger            log.Logger
-	stopCh            chan struct{}
+	podsFactory         informers.SharedInformerFactory
+	podLister           corelisters.PodLister
+	podsInformer        k8cache.SharedIndexInformer
+	podEvictCache       *podEvictionCache
+	podReadinessTracker *podReadinessTracker
+	configObserver      *configObserver
+	logger              log.Logger
+	stopCh              chan struct{}
 }
 
 func newPodObserver(kubeClient kubernetes.Interface, namespace string, configObserver *configObserver, logger log.Logger) *podObserver {
@@ -33,14 +33,14 @@ func newPodObserver(kubeClient kubernetes.Interface, namespace string, configObs
 	podsInformer := podsFactory.Core().V1().Pods()
 
 	c := &podObserver{
-		podsFactory:       podsFactory,
-		podLister:         podsInformer.Lister(),
-		podsInformer:      podsInformer.Informer(),
-		podEvictCache:     newPodEvictionCache(),
-		podReadinessCache: newPodReadinessCache(logger),
-		configObserver:    configObserver,
-		logger:            logger,
-		stopCh:            make(chan struct{}),
+		podsFactory:         podsFactory,
+		podLister:           podsInformer.Lister(),
+		podsInformer:        podsInformer.Informer(),
+		podEvictCache:       newPodEvictionCache(),
+		podReadinessTracker: newPodReadinessTracker(kubeClient, namespace, logger),
+		configObserver:      configObserver,
+		logger:              logger,
+		stopCh:              make(chan struct{}),
 	}
 
 	return c
@@ -135,7 +135,7 @@ func (c *podObserver) onPodAdded(obj interface{}) {
 		return
 	}
 
-	c.podReadinessCache.observed(pod)
+	c.podReadinessTracker.observed(pod)
 	c.invalidatePodEvictionCache(pod, "added")
 }
 
@@ -145,7 +145,7 @@ func (c *podObserver) onPodUpdated(_, new interface{}) {
 		return
 	}
 
-	c.podReadinessCache.observed(pod)
+	c.podReadinessTracker.observed(pod)
 	c.invalidatePodEvictionCache(pod, "updated")
 }
 
@@ -155,17 +155,13 @@ func (c *podObserver) onPodDeleted(obj interface{}) {
 		return
 	}
 
-	c.podReadinessCache.deleted(pod)
 	c.invalidatePodEvictionCache(pod, "deleted")
 }
 
-// recordEviction will mark the pod as recently evicted.
-// Both the eviction cache and pod readiness cache will be updated.
-// The eviction cache will self expire and will be removed when a pod state change is observed.
-// The recordEviction will retain the knowledge that this pod has been evicted for the remainder of its lifecycle.
+// recordEviction will mark the pod as recently evicted in the eviction cache.
+// The cache entry self-expires and is also cleared when a subsequent pod state change is observed.
 func (c *podObserver) recordEviction(pod *corev1.Pod) {
 	c.podEvictCache.recordEviction(pod)
-	c.podReadinessCache.recordEviction(pod)
 }
 
 func (c *podObserver) stop() {
