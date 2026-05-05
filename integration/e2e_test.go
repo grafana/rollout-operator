@@ -524,9 +524,15 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 	}
 
 	{
-		t.Log("Evict mock-zone-a-0 (partition 0).")
+		// The crossZoneEvictionDelay window starts at the rollout-operator's first observation
+		// of each pod (see runbook: "Cross-zone eviction delays"). For freshly-created pods that
+		// is now, so the very first eviction has to wait for the initial window to elapse before
+		// the validator considers any pod in the partition ready.
+		t.Log("Evict mock-zone-a-0 (partition 0). Wait for the initial cross-zone eviction delay window to elapse.")
 		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-0", Namespace: corev1.NamespaceDefault}}
-		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+		require.Eventually(t, func() bool {
+			return api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev) == nil
+		}, 45*time.Second, time.Second, "Eviction should be allowed once the initial cross-zone eviction delay expires")
 	}
 
 	{
