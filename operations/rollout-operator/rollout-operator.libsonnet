@@ -123,7 +123,7 @@
       [
         policyRule.withApiGroups('') +
         policyRule.withResources(['pods']) +
-        policyRule.withVerbs(['list', 'get', 'watch', 'delete']),
+        policyRule.withVerbs(['list', 'get', 'watch', 'delete', 'patch']),
         policyRule.withApiGroups('apps') +
         policyRule.withResources(['statefulsets']) +
         policyRule.withVerbs(['list', 'get', 'watch', 'patch']),
