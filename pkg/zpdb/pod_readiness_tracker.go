@@ -21,7 +21,7 @@ const (
 	// The value is the observation time formatted as RFC3339 (UTC).
 	// Once set, the annotation is preserved across subsequent ready observations so the original
 	// timestamp is retained. The annotation is removed when the pod transitions out of a ready+running state.
-	podReadyAnnotationKey = "grafana.com/ready"
+	podReadyAnnotationKey = "grafana.com/ready-time"
 
 	// podReadyAnnotationPatchTimeout bounds the kube API call that maintains podReadyAnnotationKey.
 	podReadyAnnotationPatchTimeout = 5 * time.Second
