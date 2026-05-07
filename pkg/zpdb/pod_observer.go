@@ -109,7 +109,7 @@ func (c *podObserver) invalidatePodEvictionCache(pod *corev1.Pod, action string)
 	c.podEvictCache.delete(pod)
 }
 
-// accept will return a pod and true of the given object is a pod and the is within the scope of our pdb
+// accept will return a pod and true if the given object is a pod and the is within the scope of our pdb
 func (c *podObserver) accept(obj interface{}) (*corev1.Pod, bool) {
 	pod, isPod := obj.(*corev1.Pod)
 	if !isPod {
