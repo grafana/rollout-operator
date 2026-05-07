@@ -172,7 +172,7 @@ Note that this duration is calculated from when the `pod-zone-a-0` becomes ready
 
 When `crossZoneEvictionDelay` is unset or `0`, no delay is enforced and evictions follow the standard ZPDB logic.
 
-The time that a pod returned to service is recorded by setting a `grafana.com/ready` annotation on the pod. This ensures that
+The time that a pod became ready is recorded by setting a `grafana.com/ready` annotation on the pod. This ensures that
 if the `rollout-operator` restarts the last ready time is not lost. The annotation is automatically removed when a pod transitions
 out of a ready+running state, so the delay is correctly re-measured from the next ready transition. The annotation is also lost if a pod is re-created.
 
