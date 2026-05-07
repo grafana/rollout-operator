@@ -168,7 +168,7 @@ For instance;
 
 Assuming the PDB `max-unavailable` is 1, the `pod-zone-b-0` eviction will not be allowed until at least `crossZoneEvictionDelay` has elapsed since t1 (i.e. `t2 - t1 >= crossZoneEvictionDelay`).
 
-Note that this duration is calculated from when the `pod-zone-a-0` returned to service, not when it was evicted.
+Note that this duration is calculated from when the `pod-zone-a-0` becomes ready, not when it was evicted.
 
 When `crossZoneEvictionDelay` is unset or `0`, no delay is enforced and evictions follow the standard ZPDB logic.
 
