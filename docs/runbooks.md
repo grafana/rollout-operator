@@ -177,7 +177,7 @@ if the `rollout-operator` restarts the last ready time is not lost. The annotati
 out of a ready+running state, so the delay is correctly re-measured from the next ready transition. The annotation is also lost if a pod is re-created.
 
 When the annotation is missing - e.g. the first time this version of the `rollout-operator` runs, or after a pod is re-created during
-a `rollout-operator` restart - the `rollout-operator` records `time.Now()` as the ready time on its first observation of the pod. The
+a `rollout-operator` restart - the `rollout-operator` records the current time as the ready time on its first observation of the pod. The
 delay window therefore runs from the `rollout-operator`'s first observation, not from the pod's actual ready time. Pod evictions
 (and rolling updates) within the same partition are denied until that window expires.
 
