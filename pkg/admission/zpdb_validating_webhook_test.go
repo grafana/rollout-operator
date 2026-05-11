@@ -30,6 +30,15 @@ func TestZoneAwarePdbValidatorHandlerBadConfig(t *testing.T) {
 	assertDenyResponse(t, request, "invalid value: max unavailable must be 0 <= val, got -1", http.StatusBadRequest)
 }
 
+// TestZoneAwarePdbValidatorHandlerCrossZoneEvictionDelayWithoutPartitionRegex confirms the
+// webhook rejects a ZPDB that sets crossZoneEvictionDelay without podNamePartitionRegex - the
+// delay is only meaningful in partition-aware mode, so the combination is rejected at admission
+// time rather than producing surprising runtime behaviour.
+func TestZoneAwarePdbValidatorHandlerCrossZoneEvictionDelayWithoutPartitionRegex(t *testing.T) {
+	request := createValidatingWebHookAdmissionReviewCrossZoneEvictionDelayWithoutPartitionRegex()
+	assertDenyResponse(t, request, "invalid value: crossZoneEvictionDelay requires podNamePartitionRegex to be set", http.StatusBadRequest)
+}
+
 // TestZoneAwarePdbValidatorHandlerParseError tests with a structural error in parsing the request object
 func TestZoneAwarePdbValidatorHandlerParseError(t *testing.T) {
 	request := createValidatingWebHookAdmissionReviewNoObject()
@@ -96,6 +105,33 @@ func createValidatingWebHookAdmissionReviewWithCrossZoneEvictionDelay() admissio
 							}
 						},
 						"podNamePartitionRegex": "[a-z\\-]+-zone-[a-z]-([0-9]+)",
+						"crossZoneEvictionDelay": "20m"
+					}
+				}`),
+			},
+		},
+	}
+}
+
+func createValidatingWebHookAdmissionReviewCrossZoneEvictionDelayWithoutPartitionRegex() admissionv1.AdmissionReview {
+	return admissionv1.AdmissionReview{
+		Request: &admissionv1.AdmissionRequest{
+			UID: "test-request-uid",
+			Object: runtime.RawExtension{
+				Raw: []byte(`{
+					"apiVersion": "rollout-operator.grafana.com/v1",
+					"kind": "ZoneAwarePodDisruptionBudget",
+					"metadata": {
+						"name": "test",
+						"namespace": "test"
+					},
+					"spec": {
+						"maxUnavailable": 1,
+						"selector": {
+							"matchLabels": {
+								"rollout-group": "test-app"
+							}
+						},
 						"crossZoneEvictionDelay": "20m"
 					}
 				}`),
