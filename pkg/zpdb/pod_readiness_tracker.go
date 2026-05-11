@@ -3,7 +3,6 @@ package zpdb
 import (
 	"context"
 	"encoding/json"
-	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -37,43 +36,22 @@ type podAnnotationsPatchMetadata struct {
 
 // podReadinessTracker maintains the podReadyAnnotationKey annotation on each observed pod
 // so that the time since a pod returned to a ready+running state survives rollout-operator
-// restarts. The annotation on the pod itself is the source of truth; this struct only
-// reflects observed pod state into that annotation.
+// restarts. The annotation on the pod itself is the source of truth; this struct holds no
+// in-memory state of its own, just the dependencies needed to read and patch pods.
 type podReadinessTracker struct {
 	logger       log.Logger
 	kubeClient   kubernetes.Interface
 	namespace    string
 	patchTimeout time.Duration
-
-	// locks by pod name
-	podLocks   map[string]*sync.Mutex
-	podLocksMu sync.Mutex
 }
 
 func newPodReadinessTracker(kubeClient kubernetes.Interface, namespace string, patchTimeout time.Duration, logger log.Logger) *podReadinessTracker {
 	return &podReadinessTracker{
-		podLocksMu:   sync.Mutex{},
 		logger:       logger,
 		kubeClient:   kubeClient,
 		namespace:    namespace,
 		patchTimeout: patchTimeout,
-		podLocks:     map[string]*sync.Mutex{},
 	}
-}
-
-// podLock returns the per-pod mutex.
-// Mutexes are created on demand and retained for the lifetime of the tracker, since pod
-// names are bounded by deployment cardinality and each mutex is small.
-func (c *podReadinessTracker) podLock(podName string) *sync.Mutex {
-	c.podLocksMu.Lock()
-	defer c.podLocksMu.Unlock()
-
-	if m, ok := c.podLocks[podName]; ok {
-		return m
-	}
-	m := &sync.Mutex{}
-	c.podLocks[podName] = m
-	return m
 }
 
 // observed reflects the pod's ready state into the `podReadyAnnotationKey` annotation on the
@@ -88,13 +66,9 @@ func (c *podReadinessTracker) podLock(podName string) *sync.Mutex {
 //
 // When the pod is not ready+running, the annotation is removed.
 //
-// observed() is dispatched serially by the SharedInformer's single processor goroutine; the
-// per-pod lock guards against any future callers outside the informer path.
+// observed() touches no in-memory tracker state and is safe to call concurrently; the
+// SharedInformer's single processor goroutine already serialises informer-driven calls.
 func (c *podReadinessTracker) observed(pod *corev1.Pod) {
-	lock := c.podLock(pod.Name)
-	lock.Lock()
-	defer lock.Unlock()
-
 	ctx, cancel := context.WithTimeout(context.Background(), c.patchTimeout)
 	defer cancel()
 
@@ -142,22 +116,19 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 // * false, true, time.Now() - we did not find the annotation but the pod is ready+running
 // * false, false, time.Now() - the pod is not ready & running
 func (c *podReadinessTracker) get(pod *corev1.Pod) (bool, bool, time.Time) {
-	lock := c.podLock(pod.Name)
-	lock.Lock()
-	defer lock.Unlock()
-
 	if util.IsPodRunningAndReady(pod) {
 		readyRunningTime, ok := pod.Annotations[podReadyAnnotationKey]
 		if ok && readyRunningTime != "" {
 			since, err := time.Parse(time.RFC3339, readyRunningTime)
 			if err == nil {
-				// found, ready-running, readyRunningTime
+				// annotation found and parsed: pod is ready+running, return the recorded since time
 				return true, true, since
 			}
 		}
-		// found, ready-running, readyRunningTime
+		// annotation missing, empty or unparseable: pod is ready+running, fall back to now
 		return false, true, time.Now()
 	}
 
+	// pod is not ready+running: nothing to report, fall back to now
 	return false, false, time.Now()
 }

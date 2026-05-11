@@ -2,7 +2,6 @@ package zpdb
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -110,37 +109,6 @@ func TestObserved_PodMissingFromAPIServer_DoesNotPanic(t *testing.T) {
 
 	pod := readyRunningPod("pod-missing")
 	tracker.observed(pod)
-}
-
-func TestObserved_DifferentPodsRunInParallel(t *testing.T) {
-	// The per-pod lock must not serialize unrelated pods. Smoke test: many concurrent observed()
-	// calls on distinct pods complete without deadlock or interference.
-	client := k8sfake.NewClientset()
-	tracker := newPodReadinessTracker(client, testNamespace, 5*time.Second, newDummyLogger())
-
-	const podCount = 16
-	pods := make([]*corev1.Pod, podCount)
-	for i := range pods {
-		pods[i] = readyRunningPod("pod-" + string(rune('a'+i)))
-		_, err := client.CoreV1().Pods(testNamespace).Create(context.Background(), pods[i], metav1.CreateOptions{})
-		require.NoError(t, err)
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(len(pods))
-	for _, p := range pods {
-		go func(p *corev1.Pod) {
-			defer wg.Done()
-			tracker.observed(p)
-		}(p)
-	}
-	wg.Wait()
-
-	for _, p := range pods {
-		got, err := client.CoreV1().Pods(testNamespace).Get(context.Background(), p.Name, metav1.GetOptions{})
-		require.NoError(t, err)
-		assert.NotEmpty(t, got.Annotations[podReadyAnnotationKey], "every ready pod should have its annotation set")
-	}
 }
 
 func TestGet_ReturnsAnnotationTimeForReadyPod(t *testing.T) {
