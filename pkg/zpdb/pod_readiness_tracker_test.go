@@ -48,7 +48,7 @@ func notReadyPod(name string) *corev1.Pod {
 func TestObserved_SetsAnnotationOnReadyPod(t *testing.T) {
 	pod := readyRunningPod("pod-1")
 	client := k8sfake.NewClientset(pod)
-	tracker := newPodReadinessTracker(client, testNamespace, newDummyLogger())
+	tracker := newPodReadinessTracker(client, testNamespace, 5*time.Second, newDummyLogger())
 
 	before := time.Now().UTC().Truncate(time.Second)
 	tracker.observed(pod)
@@ -78,7 +78,7 @@ func TestObserved_DoesNotOverwriteExistingLiveAnnotation(t *testing.T) {
 	live := readyRunningPod("pod-1")
 	live.Annotations = map[string]string{podReadyAnnotationKey: existing}
 	client := k8sfake.NewClientset(live)
-	tracker := newPodReadinessTracker(client, testNamespace, newDummyLogger())
+	tracker := newPodReadinessTracker(client, testNamespace, 5*time.Second, newDummyLogger())
 
 	inMemory := readyRunningPod("pod-1") // no annotation - simulates a stale informer view
 	tracker.observed(inMemory)
@@ -92,7 +92,7 @@ func TestObserved_RemovesAnnotationOnNotReadyPod(t *testing.T) {
 	pod := notReadyPod("pod-1")
 	pod.Annotations = map[string]string{podReadyAnnotationKey: "2026-01-01T00:00:00Z"}
 	client := k8sfake.NewClientset(pod)
-	tracker := newPodReadinessTracker(client, testNamespace, newDummyLogger())
+	tracker := newPodReadinessTracker(client, testNamespace, 5*time.Second, newDummyLogger())
 
 	tracker.observed(pod)
 
@@ -105,7 +105,7 @@ func TestObserved_RemovesAnnotationOnNotReadyPod(t *testing.T) {
 func TestObserved_PodMissingFromAPIServer_DoesNotPanic(t *testing.T) {
 	// observed() must tolerate the GET failing (e.g. NotFound for a pod being deleted).
 	client := k8sfake.NewClientset()
-	tracker := newPodReadinessTracker(client, testNamespace, newDummyLogger())
+	tracker := newPodReadinessTracker(client, testNamespace, 5*time.Second, newDummyLogger())
 
 	pod := readyRunningPod("pod-missing")
 	tracker.observed(pod)
@@ -115,7 +115,7 @@ func TestObserved_DifferentPodsRunInParallel(t *testing.T) {
 	// The per-pod lock must not serialize unrelated pods. Smoke test: many concurrent observed()
 	// calls on distinct pods complete without deadlock or interference.
 	client := k8sfake.NewClientset()
-	tracker := newPodReadinessTracker(client, testNamespace, newDummyLogger())
+	tracker := newPodReadinessTracker(client, testNamespace, 5*time.Second, newDummyLogger())
 
 	const podCount = 16
 	pods := make([]*corev1.Pod, podCount)
@@ -143,7 +143,7 @@ func TestObserved_DifferentPodsRunInParallel(t *testing.T) {
 }
 
 func TestGet_ReturnsAnnotationTimeForReadyPod(t *testing.T) {
-	tracker := newPodReadinessTracker(k8sfake.NewClientset(), testNamespace, newDummyLogger())
+	tracker := newPodReadinessTracker(k8sfake.NewClientset(), testNamespace, 5*time.Second, newDummyLogger())
 
 	want := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	pod := readyRunningPod("pod-1")
@@ -183,7 +183,7 @@ func TestGet_FallsBackToNow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tracker := newPodReadinessTracker(k8sfake.NewClientset(), testNamespace, newDummyLogger())
+			tracker := newPodReadinessTracker(k8sfake.NewClientset(), testNamespace, 5*time.Second, newDummyLogger())
 
 			if tc.annotation != nil {
 				tc.pod.Annotations = map[string]string{podReadyAnnotationKey: *tc.annotation}

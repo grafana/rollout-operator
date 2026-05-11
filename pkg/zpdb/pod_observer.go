@@ -3,6 +3,7 @@ package zpdb
 import (
 	"errors"
 	"reflect"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -25,7 +26,7 @@ type podObserver struct {
 	stopCh              chan struct{}
 }
 
-func newPodObserver(kubeClient kubernetes.Interface, namespace string, configObserver *configObserver, logger log.Logger) *podObserver {
+func newPodObserver(kubeClient kubernetes.Interface, namespace string, readyAnnotationPatchTimeout time.Duration, configObserver *configObserver, logger log.Logger) *podObserver {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// initialize the ZoneAwarePodDisruptionBudget custom resource watching
@@ -37,7 +38,7 @@ func newPodObserver(kubeClient kubernetes.Interface, namespace string, configObs
 		podLister:           podsInformer.Lister(),
 		podsInformer:        podsInformer.Informer(),
 		podEvictCache:       newPodEvictionCache(),
-		podReadinessTracker: newPodReadinessTracker(kubeClient, namespace, logger),
+		podReadinessTracker: newPodReadinessTracker(kubeClient, namespace, readyAnnotationPatchTimeout, logger),
 		configObserver:      configObserver,
 		logger:              logger,
 		stopCh:              make(chan struct{}),

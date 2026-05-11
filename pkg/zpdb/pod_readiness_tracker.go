@@ -22,9 +22,6 @@ const (
 	// Once set, the annotation is preserved across subsequent ready observations so the original
 	// timestamp is retained. The annotation is removed when the pod transitions out of a ready+running state.
 	podReadyAnnotationKey = "grafana.com/ready-time"
-
-	// podReadyAnnotationPatchTimeout bounds the kube API call that maintains podReadyAnnotationKey.
-	podReadyAnnotationPatchTimeout = 5 * time.Second
 )
 
 // podReadinessTracker maintains the podReadyAnnotationKey annotation on each observed pod
@@ -32,22 +29,24 @@ const (
 // restarts. The annotation on the pod itself is the source of truth; this struct only
 // reflects observed pod state into that annotation.
 type podReadinessTracker struct {
-	logger     log.Logger
-	kubeClient kubernetes.Interface
-	namespace  string
+	logger       log.Logger
+	kubeClient   kubernetes.Interface
+	namespace    string
+	patchTimeout time.Duration
 
 	// locks by pod name
 	podLocks   map[string]*sync.Mutex
 	podLocksMu sync.Mutex
 }
 
-func newPodReadinessTracker(kubeClient kubernetes.Interface, namespace string, logger log.Logger) *podReadinessTracker {
+func newPodReadinessTracker(kubeClient kubernetes.Interface, namespace string, patchTimeout time.Duration, logger log.Logger) *podReadinessTracker {
 	return &podReadinessTracker{
-		podLocksMu: sync.Mutex{},
-		logger:     logger,
-		kubeClient: kubeClient,
-		namespace:  namespace,
-		podLocks:   map[string]*sync.Mutex{},
+		podLocksMu:   sync.Mutex{},
+		logger:       logger,
+		kubeClient:   kubeClient,
+		namespace:    namespace,
+		patchTimeout: patchTimeout,
+		podLocks:     map[string]*sync.Mutex{},
 	}
 }
 
@@ -76,7 +75,7 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), podReadyAnnotationPatchTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), c.patchTimeout)
 	defer cancel()
 
 	var patch string

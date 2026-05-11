@@ -77,6 +77,8 @@ type config struct {
 
 	useZoneTracker           bool
 	zoneTrackerConfigMapName string
+
+	zpdbPodReadyAnnotationPatchTimeout time.Duration
 }
 
 func (cfg *config) register(fs *flag.FlagSet) {
@@ -109,6 +111,8 @@ func (cfg *config) register(fs *flag.FlagSet) {
 
 	fs.BoolVar(&cfg.useZoneTracker, "use-zone-tracker", false, "Use the zone tracker to prevent simultaneous downscales in different zones")
 	fs.StringVar(&cfg.zoneTrackerConfigMapName, "zone-tracker.config-map-name", "rollout-operator-zone-tracker", "The name of the ConfigMap to use for the zone tracker")
+
+	fs.DurationVar(&cfg.zpdbPodReadyAnnotationPatchTimeout, "zpdb.pod-ready-annotation-patch-timeout", 5*time.Second, "Timeout for the Kubernetes API calls that maintain the grafana.com/ready-time annotation on observed pods (used to enforce ZPDB crossZoneEvictionDelay).")
 }
 
 func (cfg config) validate() error {
@@ -127,6 +131,9 @@ func (cfg config) validate() error {
 	}
 	if cfg.kubeClientBurst < 0 {
 		return errors.New("-kubernetes.client-burst must be non-negative")
+	}
+	if cfg.zpdbPodReadyAnnotationPatchTimeout <= 0 {
+		return errors.New("-zpdb.pod-ready-annotation-patch-timeout must be positive")
 	}
 	if err := cfg.clusterValidationCfg.Validate("http", cfg.kubeNamespace); err != nil {
 		return err
@@ -247,7 +254,7 @@ func main() {
 	// If the TLS server is started below (webhooks registered), then this controller will handle the validating webhook requests
 	// for pod evictions and zpdb configuration changes. If the webhooks are not enabled, this controller is still started
 	// and will be used by the main controller to assist in validating pod deletion requests.
-	evictionController := zpdb.NewEvictionController(kubeClient, dynamicClient, cfg.kubeNamespace, logger, zpdbMetrics)
+	evictionController := zpdb.NewEvictionController(kubeClient, dynamicClient, cfg.kubeNamespace, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
 	check(evictionController.Start())
 
 	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, evictionController, webhookObserver)

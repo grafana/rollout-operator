@@ -20,7 +20,7 @@ import (
 
 func newTestValidatorPartitionAware(delay time.Duration) (*validatorPartitionAware, *podEvictionCache, *podReadinessTracker) {
 	evictionCache := newPodEvictionCache()
-	readyTracker := newPodReadinessTracker(k8sfake.NewClientset(), testNamespace, log.NewNopLogger())
+	readyTracker := newPodReadinessTracker(k8sfake.NewClientset(), testNamespace, 5*time.Second, log.NewNopLogger())
 	cfg := &config{crossZoneEvictionDelay: delay}
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{

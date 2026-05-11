@@ -28,7 +28,7 @@ func newPodObserverTestCase(t *testing.T) (*k8sfake.Clientset, *podObserver) {
 	require.NoError(t, err)
 	require.True(t, updated)
 
-	observer := newPodObserver(client, testNamespace, cfgObserver, log.NewNopLogger())
+	observer := newPodObserver(client, testNamespace, 5*time.Second, cfgObserver, log.NewNopLogger())
 	return client, observer
 }
 
