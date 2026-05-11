@@ -132,14 +132,16 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 
 // get returns the effective "ready since" time used by the cross-zone eviction delay check.
 //
-// For a ready+running pod, the value is parsed from the `podReadyAnnotationKey` annotation
-// (i.e. when we first observed the pod as ready). If the annotation is absent, empty, or
-// unparseable, or if the pod is not currently ready+running, get returns time.Now() - this is
-// the safe default that keeps the delay window open until a fresh observation lands.
+// The return params are as follows;
+// * found - we found the `podReadyAnnotationKey` annotation which tracks when this pod last became ready
+// * ready+running - the current state of IsPodRunningAndReady() for this pod
+// * time - the time the pod last became ready + running - defaults to time.Now() if not found
 //
-// The pod is not re-loaded; the caller is expected to pass the latest known version (typically
-// the one supplied by the informer event that prompted the eviction admission check).
-func (c *podReadinessTracker) get(pod *corev1.Pod) time.Time {
+// There are three expected return combinations;
+// * true, true, <time> - we found the annotation, the pod is ready+running, and we have the ready since time
+// * false, true, time.Now() - we did not find the annotation but the pod is ready+running
+// * false, false, time.Now() - the pod is not ready & running
+func (c *podReadinessTracker) get(pod *corev1.Pod) (bool, bool, time.Time) {
 	lock := c.podLock(pod.Name)
 	lock.Lock()
 	defer lock.Unlock()
@@ -149,10 +151,13 @@ func (c *podReadinessTracker) get(pod *corev1.Pod) time.Time {
 		if ok && readyRunningTime != "" {
 			since, err := time.Parse(time.RFC3339, readyRunningTime)
 			if err == nil {
-				return since
+				// found, ready-running, readyRunningTime
+				return true, true, since
 			}
 		}
+		// found, ready-running, readyRunningTime
+		return false, true, time.Now()
 	}
 
-	return time.Now()
+	return false, false, time.Now()
 }
