@@ -56,10 +56,8 @@ func (c *podEvictionCache) recordEviction(pod *corev1.Pod) {
 // hasPendingEviction returns true if this pod is in the cache and not expired
 func (c *podEvictionCache) hasPendingEviction(pod *corev1.Pod) bool {
 	// note that we do not clean up expired entries, as the assumption is the entry will be deleted shortly after being stored here
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-	rec, exists := c.entries[pod.Name]
-	return exists && time.Now().Before(rec.expires)
+	hasPendingEviction, _ := c.hasPendingEvictionWithGeneration(pod)
+	return hasPendingEviction
 }
 
 // hasPendingEvictionWithGeneration returns true if this pod is in the cache and not expired. It also returns the generation of the pod which was cached.
