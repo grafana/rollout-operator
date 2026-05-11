@@ -150,36 +150,49 @@ func TestGet_ReturnsAnnotationTimeForReadyPod(t *testing.T) {
 	pod := readyRunningPod("pod-1")
 	pod.Annotations = map[string]string{podReadyAnnotationKey: want.Format(time.RFC3339)}
 
-	got := tracker.get(pod)
+	found, readyRunning, got := tracker.get(pod)
+	assert.True(t, found, "get should report the annotation as found")
+	assert.True(t, readyRunning, "get should report the pod as ready+running")
 	assert.True(t, want.Equal(got), "get should return the parsed annotation time, want %s got %s", want, got)
 }
 
 func TestGet_FallsBackToNow(t *testing.T) {
 	// All these inputs route through the "return time.Now()" fallback in get(): either the pod
-	// fails the ready/running check or the annotation cannot be used.
+	// fails the ready/running check or the annotation cannot be used. found is always false in
+	// these cases (no usable annotation timestamp); readyRunning reflects the pod's actual state.
 	cases := []struct {
-		name       string
-		pod        *corev1.Pod
-		annotation *string // nil means "do not set the annotation key at all"
+		name             string
+		pod              *corev1.Pod
+		annotation       *string // nil means "do not set the annotation key at all"
+		wantFound        bool
+		wantReadyRunning bool
 	}{
 		{
-			name: "ready pod with no annotation",
-			pod:  readyRunningPod("pod-1"),
+			name:             "ready pod with no annotation",
+			pod:              readyRunningPod("pod-1"),
+			wantFound:        false,
+			wantReadyRunning: true,
 		},
 		{
-			name:       "ready pod with empty annotation value",
-			pod:        readyRunningPod("pod-1"),
-			annotation: ptrString(""),
+			name:             "ready pod with empty annotation value",
+			pod:              readyRunningPod("pod-1"),
+			annotation:       ptrString(""),
+			wantFound:        false,
+			wantReadyRunning: true,
 		},
 		{
-			name:       "ready pod with malformed annotation value",
-			pod:        readyRunningPod("pod-1"),
-			annotation: ptrString("not-a-timestamp"),
+			name:             "ready pod with malformed annotation value",
+			pod:              readyRunningPod("pod-1"),
+			annotation:       ptrString("not-a-timestamp"),
+			wantFound:        false,
+			wantReadyRunning: true,
 		},
 		{
-			name:       "not-ready pod with valid annotation",
-			pod:        notReadyPod("pod-1"),
-			annotation: ptrString("2026-01-01T00:00:00Z"),
+			name:             "not-ready pod with valid annotation",
+			pod:              notReadyPod("pod-1"),
+			annotation:       ptrString("2026-01-01T00:00:00Z"),
+			wantFound:        false,
+			wantReadyRunning: false,
 		},
 	}
 	for _, tc := range cases {
@@ -191,9 +204,11 @@ func TestGet_FallsBackToNow(t *testing.T) {
 			}
 
 			before := time.Now()
-			got := tracker.get(tc.pod)
+			found, readyRunning, got := tracker.get(tc.pod)
 			after := time.Now()
 
+			assert.Equal(t, tc.wantFound, found, "found return value")
+			assert.Equal(t, tc.wantReadyRunning, readyRunning, "readyRunning return value")
 			assert.False(t, got.Before(before), "get should fall back to now (got %s, before %s)", got, before)
 			assert.False(t, got.After(after), "get should fall back to now (got %s, after %s)", got, after)
 		})

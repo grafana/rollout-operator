@@ -99,14 +99,20 @@ func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
 
 	// Delay configured: the pod is only ready once enough time has elapsed since it last
 	// transitioned to ready+running. The transition time is read from the pod's
-	// podReadyAnnotationKey annotation (or time.Now() when the annotation is absent or invalid,
+	// `podReadyAnnotationKey` annotation (or time.Now() when the annotation is absent or invalid,
 	// which is the safe default that denies eviction until the delay window has been observed).
 	now := time.Now()
-	since := v.readyTracker.get(pod)
-	if now.After(since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
+	found, readyRunning, since := v.readyTracker.get(pod)
+	if readyRunning && now.After(since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
 		return true
 	}
 
-	level.Info(v.log).Log("msg", "Pod not considered ready - not enough time has elapsed since this pod became ready", "pod", pod.Name, "time-until-ready", since.Add(v.pdbConfig.crossZoneEvictionDelay).Sub(now))
+	reason := "Not enough time has elapsed since this pod became ready"
+	if !readyRunning {
+		reason = "Pod is not ready and running"
+	} else if !found {
+		reason = "Unable to determine when pod last became ready"
+	}
+	level.Info(v.log).Log("msg", "Pod not considered ready", "reason", reason, "pod", pod.Name, "time-until-ready", since.Add(v.pdbConfig.crossZoneEvictionDelay).Sub(now))
 	return false
 }
