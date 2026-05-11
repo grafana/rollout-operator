@@ -66,10 +66,19 @@ func (c *podReadinessTracker) podLock(podName string) *sync.Mutex {
 }
 
 // observed reflects the pod's ready state into the `podReadyAnnotationKey` annotation on the
-// live pod. If the pod is ready+running, the live pod is re-fetched and the annotation is set
-// to the current time only when it is not already set (so the original timestamp is preserved
-// across observer events and rollout-operator restarts). If the pod is not ready+running, the
-// annotation is removed. The live re-fetch defends against a stale informer view.
+// live pod.
+//
+// When the pod is ready+running:
+//   - If the in-memory pod already carries the annotation, return (fast path). This preserves
+//     the original timestamp across observer events and rollout-operator restarts, and avoids
+//     unnecessary patches for unrelated status updates and the watch event triggered by our
+//     own prior patch.
+//   - Otherwise, patch the annotation to the current time.
+//
+// When the pod is not ready+running, the annotation is removed.
+//
+// observed() is dispatched serially by the SharedInformer's single processor goroutine; the
+// per-pod lock guards against any future callers outside the informer path.
 func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 	lock := c.podLock(pod.Name)
 	lock.Lock()
@@ -81,15 +90,12 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 	var patch string
 
 	if util.IsPodRunningAndReady(pod) {
-		// Get the latest version of this pod - avoid operating on stale observations
-		current, err := c.kubeClient.CoreV1().Pods(c.namespace).Get(ctx, pod.Name, metav1.GetOptions{})
-		if err != nil {
-			level.Warn(c.logger).Log("msg", "failed to get pod for ready annotation check", "pod", pod.Name, "err", err)
-			return
-		}
-
-		// The pod already has a ready annotation set - do not override that
-		if value, ok := current.Annotations[podReadyAnnotationKey]; ok && value != "" {
+		// Fast path: the informer's in-memory pod copy already shows the annotation, so leave
+		// the live pod untouched.
+		// If there are further changes to the pod we would expect the informer to fire again
+		// and observed() called. Similarly, when the patch is applied this will trigger the
+		// informer and observed() to run again ensuring annotation convergence.
+		if value, ok := pod.Annotations[podReadyAnnotationKey]; ok && value != "" {
 			return
 		}
 
@@ -106,13 +112,15 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 	}
 }
 
-// get returns the time when this pod last transitioned to ready/running.
-// This is determined via reading the `podReadyAnnotationKey` annotation value.
-// If this annotation has not been set or the pod is not currently ready/running
-// then Now() is returned.
+// get returns the effective "ready since" time used by the cross-zone eviction delay check.
 //
-// Note that the pod is not re-loaded for a staleness check. It is assumed
-// that the caller has the latest version of the pod.
+// For a ready+running pod, the value is parsed from the `podReadyAnnotationKey` annotation
+// (i.e. when we first observed the pod as ready). If the annotation is absent, empty, or
+// unparseable, or if the pod is not currently ready+running, get returns time.Now() - this is
+// the safe default that keeps the delay window open until a fresh observation lands.
+//
+// The pod is not re-loaded; the caller is expected to pass the latest known version (typically
+// the one supplied by the informer event that prompted the eviction admission check).
 func (c *podReadinessTracker) get(pod *corev1.Pod) time.Time {
 	lock := c.podLock(pod.Name)
 	lock.Lock()
