@@ -66,26 +66,27 @@ func TestObserved_SetsAnnotationOnReadyPod(t *testing.T) {
 	assert.False(t, parsed.After(after), "annotation timestamp should be no later than the call")
 }
 
-func TestObserved_DoesNotOverwriteExistingLiveAnnotation(t *testing.T) {
-	// observed() must defer to the live state on the API server when the annotation is already
-	// set. This preserves the original ready time across rollout-operator restarts and is also
-	// the safety net when the informer view is behind the API server.
-	//
-	// The in-memory pod has no annotation - the strictest case, since observed() only reads the
-	// live pod's annotation. Confirms the live annotation wins regardless of the informer view.
+func TestObserved_FastPathSkipsAPIWhenInformerCopyAlreadyHasAnnotation(t *testing.T) {
+	// When the informer's in-memory pod copy already shows the annotation, observed() must skip
+	// the PATCH entirely. This both preserves the original timestamp across rollout-operator
+	// restarts (the informer's initial LIST captures the annotation, so the handler's pod copy
+	// has it) and avoids the API-call storm caused by unrelated status updates and by our own
+	// patch echoing back through the informer.
 	const existing = "2026-01-01T00:00:00Z"
 
-	live := readyRunningPod("pod-1")
-	live.Annotations = map[string]string{podReadyAnnotationKey: existing}
-	client := k8sfake.NewClientset(live)
+	pod := readyRunningPod("pod-1")
+	pod.Annotations = map[string]string{podReadyAnnotationKey: existing}
+	client := k8sfake.NewClientset(pod)
 	tracker := newPodReadinessTracker(client, testNamespace, 5*time.Second, newDummyLogger())
 
-	inMemory := readyRunningPod("pod-1") // no annotation - simulates a stale informer view
-	tracker.observed(inMemory)
+	client.ClearActions()
+	tracker.observed(pod)
 
-	got, err := client.CoreV1().Pods(testNamespace).Get(context.Background(), live.Name, metav1.GetOptions{})
+	assert.Empty(t, client.Actions(), "fast path should issue no kube API calls when the informer copy already has the annotation")
+
+	got, err := client.CoreV1().Pods(testNamespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	require.NoError(t, err)
-	assert.Equal(t, existing, got.Annotations[podReadyAnnotationKey], "existing live annotation must not be overwritten")
+	assert.Equal(t, existing, got.Annotations[podReadyAnnotationKey], "existing annotation must be preserved")
 }
 
 func TestObserved_RemovesAnnotationOnNotReadyPod(t *testing.T) {
