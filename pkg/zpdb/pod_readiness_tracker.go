@@ -86,6 +86,11 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 			return
 		}
 		value = new(time.Now().UTC().Format(time.RFC3339))
+	} else {
+		// Fast-path - the pod is not ready and does not have the annotation
+		if _, ok := pod.Annotations[podReadyAnnotationKey]; !ok {
+			return
+		}
 	}
 
 	patch, err := json.Marshal(podAnnotationsPatch{
