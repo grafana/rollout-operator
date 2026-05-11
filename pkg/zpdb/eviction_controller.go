@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -59,13 +60,13 @@ type EvictionController struct {
 	resolver spanlogger.TenantResolver
 }
 
-func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, logger log.Logger, metrics *Metrics) *EvictionController {
+func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, readyAnnotationPatchTimeout time.Duration, logger log.Logger, metrics *Metrics) *EvictionController {
 
 	// watches for ZoneAwarePodDisruptionBudget configurations being applied and maintains a zpdb configuration configCache
 	cfgObserver := newConfigObserver(dynamicClient, namespace, logger, metrics)
 
 	// watches for Pod changes which are reflected into the pod eviction configCache
-	podObserver := newPodObserver(kubeClient, namespace, cfgObserver, logger)
+	podObserver := newPodObserver(kubeClient, namespace, readyAnnotationPatchTimeout, cfgObserver, logger)
 
 	return &EvictionController{
 		locks:       make(map[string]*sync.Mutex, 5),

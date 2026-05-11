@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logfmt/logfmt"
 	"github.com/google/uuid"
@@ -102,7 +103,7 @@ func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawCon
 
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
-	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, testCtx.logs, zpdbMetrics)
+	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, 5*time.Second, testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {
@@ -119,7 +120,7 @@ func newTestContextWithoutAdmissionReview(t *testing.T, pdbRawConfig *unstructur
 
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
-	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, testCtx.logs, zpdbMetrics)
+	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, 5*time.Second, testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {

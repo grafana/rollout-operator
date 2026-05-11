@@ -75,6 +75,7 @@
     'kubernetes.namespace': $._config.namespace,
     'use-zone-tracker': true,
     'zone-tracker.config-map-name': 'rollout-operator-zone-tracker',
+    'zpdb.pod-ready-annotation-patch-timeout': '5s',
   } + if enableWebhooks then {
     'server-tls.enabled': 'true',
   } else {},
