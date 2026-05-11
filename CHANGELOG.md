@@ -2,6 +2,9 @@
 
 ## main / unreleased
 
+## v0.28.6
+
+* [ENHANCEMENT] Updated dependencies to resolve CVEs. #432 
 * [BUGFIX] Fix crash when `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` was set. #425
 
 ## v0.28.5
