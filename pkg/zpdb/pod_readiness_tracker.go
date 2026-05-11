@@ -2,7 +2,7 @@ package zpdb
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -23,6 +23,17 @@ const (
 	// timestamp is retained. The annotation is removed when the pod transitions out of a ready+running state.
 	podReadyAnnotationKey = "grafana.com/ready-time"
 )
+
+// podAnnotationsPatch is the strategic merge patch shape for setting or removing a single
+// pod annotation. A nil value in the map serializes to JSON null, which strategic merge
+// treats as a request to delete the annotation key.
+type podAnnotationsPatch struct {
+	Metadata podAnnotationsPatchMetadata `json:"metadata"`
+}
+
+type podAnnotationsPatchMetadata struct {
+	Annotations map[string]*string `json:"annotations"`
+}
 
 // podReadinessTracker maintains the podReadyAnnotationKey annotation on each observed pod
 // so that the time since a pod returned to a ready+running state survives rollout-operator
@@ -87,7 +98,9 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.patchTimeout)
 	defer cancel()
 
-	var patch string
+	// A nil value here means "remove the annotation" (strategic merge interprets null on a map
+	// value as a delete). A non-nil value means "set the annotation to *value".
+	var value *string
 
 	if util.IsPodRunningAndReady(pod) {
 		// Fast path: the informer's in-memory pod copy already shows the annotation, so leave
@@ -95,19 +108,24 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 		// If there are further changes to the pod we would expect the informer to fire again
 		// and observed() called. Similarly, when the patch is applied this will trigger the
 		// informer and observed() to run again ensuring annotation convergence.
-		if value, ok := pod.Annotations[podReadyAnnotationKey]; ok && value != "" {
+		if v, ok := pod.Annotations[podReadyAnnotationKey]; ok && v != "" {
 			return
 		}
-
-		// set the ready annotation value to Now()
-		patch = fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, podReadyAnnotationKey, time.Now().UTC().Format(time.RFC3339))
-
-	} else {
-		// null out the ready annotation
-		patch = fmt.Sprintf(`{"metadata":{"annotations":{%q:null}}}`, podReadyAnnotationKey)
+		value = new(time.Now().UTC().Format(time.RFC3339))
 	}
 
-	if _, err := c.kubeClient.CoreV1().Pods(c.namespace).Patch(ctx, pod.Name, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{}); err != nil {
+	patch, err := json.Marshal(podAnnotationsPatch{
+		Metadata: podAnnotationsPatchMetadata{
+			Annotations: map[string]*string{podReadyAnnotationKey: value},
+		},
+	})
+	if err != nil {
+		// Should not happen for our fixed input shape, but log defensively rather than panic.
+		level.Warn(c.logger).Log("msg", "failed to marshal pod ready annotation patch", "pod", pod.Name, "err", err)
+		return
+	}
+
+	if _, err := c.kubeClient.CoreV1().Pods(c.namespace).Patch(ctx, pod.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
 		level.Warn(c.logger).Log("msg", "failed to patch pod ready annotation", "pod", pod.Name, "err", err)
 	}
 }
