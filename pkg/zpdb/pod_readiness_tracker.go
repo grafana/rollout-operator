@@ -82,7 +82,7 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 		// If there are further changes to the pod we would expect the informer to fire again
 		// and observed() called. Similarly, when the patch is applied this will trigger the
 		// informer and observed() to run again ensuring annotation convergence.
-		if v, ok := pod.Annotations[podReadyAnnotationKey]; ok && v != "" {
+		if _, ok := pod.Annotations[podReadyAnnotationKey]; ok {
 			return
 		}
 		value = new(time.Now().UTC().Format(time.RFC3339))
