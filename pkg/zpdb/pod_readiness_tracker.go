@@ -121,19 +121,19 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 // * false, true, time.Now() - we did not find the annotation but the pod is ready+running
 // * false, false, time.Now() - the pod is not ready & running
 func (c *podReadinessTracker) get(pod *corev1.Pod) (bool, bool, time.Time) {
-	if util.IsPodRunningAndReady(pod) {
-		readyRunningTime, ok := pod.Annotations[podReadyAnnotationKey]
-		if ok && readyRunningTime != "" {
-			since, err := time.Parse(time.RFC3339, readyRunningTime)
-			if err == nil {
-				// annotation found and parsed: pod is ready+running, return the recorded since time
-				return true, true, since
-			}
-		}
-		// annotation missing, empty or unparseable: pod is ready+running, fall back to now
-		return false, true, time.Now()
+	if !util.IsPodRunningAndReady(pod) {
+		// pod is not ready+running: nothing to report, fall back to now
+		return false, false, time.Now()
 	}
 
-	// pod is not ready+running: nothing to report, fall back to now
-	return false, false, time.Now()
+	readyRunningTime, ok := pod.Annotations[podReadyAnnotationKey]
+	if ok && readyRunningTime != "" {
+		since, err := time.Parse(time.RFC3339, readyRunningTime)
+		if err == nil {
+			// annotation found and parsed: pod is ready+running, return the recorded since time
+			return true, true, since
+		}
+	}
+	// annotation missing, empty or unparseable: pod is ready+running, fall back to now
+	return false, true, time.Now()
 }
