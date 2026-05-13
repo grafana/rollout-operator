@@ -6,22 +6,26 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 type validatorZoneAware struct {
-	sts     *appsv1.StatefulSet
-	result  *zoneStatusResult
-	zones   int
-	matcher partitionMatcher
+	sts           *appsv1.StatefulSet
+	result        *zoneStatusResult
+	zones         int
+	matcher       partitionMatcher
+	evictionCache *podEvictionCache
 }
 
-func newValidatorZoneAware(sts *appsv1.StatefulSet, zones int) *validatorZoneAware {
+func newValidatorZoneAware(sts *appsv1.StatefulSet, zones int, evictionCache *podEvictionCache) *validatorZoneAware {
 	return &validatorZoneAware{
 		sts:   sts,
 		zones: zones,
 		matcher: func(pod *corev1.Pod) bool {
 			return true
 		},
+		evictionCache: evictionCache,
 	}
 }
 
@@ -54,4 +58,8 @@ func (v *validatorZoneAware) successMessage() string {
 
 func (v *validatorZoneAware) considerPod() partitionMatcher {
 	return v.matcher
+}
+
+func (v *validatorZoneAware) isReady(pod *corev1.Pod) bool {
+	return !v.evictionCache.hasPendingEviction(pod) && util.IsPodRunningAndReady(pod)
 }

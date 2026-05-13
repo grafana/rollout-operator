@@ -392,9 +392,10 @@ metadata:
   name: ingester-rollout
   namespace: default
 spec:
+  crossZoneEvictionDelay: 20m
   maxUnavailable: 1
-  podNamePartitionRegex: '[a-z\-]+-(zone-[a-z])-([0-9]+)'
-  podNameRegexGroup: 2
+  podNamePartitionRegex: '[a-z\-]+-zone-[a-z]-([0-9]+)'
+  podNameRegexGroup: 1
   selector:
     matchLabels:
       rollout-group: ingester

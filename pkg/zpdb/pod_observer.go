@@ -3,6 +3,7 @@ package zpdb
 import (
 	"errors"
 	"reflect"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -15,15 +16,17 @@ import (
 
 // An podObserver listens for pod changes, invalidating the pod eviction cache on a pod state change.
 type podObserver struct {
-	podsFactory   informers.SharedInformerFactory
-	podLister     corelisters.PodLister
-	podsInformer  k8cache.SharedIndexInformer
-	podEvictCache *podEvictionCache
-	logger        log.Logger
-	stopCh        chan struct{}
+	podsFactory         informers.SharedInformerFactory
+	podLister           corelisters.PodLister
+	podsInformer        k8cache.SharedIndexInformer
+	podEvictCache       *podEvictionCache
+	podReadinessTracker *podReadinessTracker
+	configObserver      *configObserver
+	logger              log.Logger
+	stopCh              chan struct{}
 }
 
-func newPodObserver(kubeClient kubernetes.Interface, namespace string, logger log.Logger) *podObserver {
+func newPodObserver(kubeClient kubernetes.Interface, namespace string, readyAnnotationPatchTimeout time.Duration, configObserver *configObserver, logger log.Logger) *podObserver {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// initialize the ZoneAwarePodDisruptionBudget custom resource watching
@@ -31,12 +34,14 @@ func newPodObserver(kubeClient kubernetes.Interface, namespace string, logger lo
 	podsInformer := podsFactory.Core().V1().Pods()
 
 	c := &podObserver{
-		podsFactory:   podsFactory,
-		podLister:     podsInformer.Lister(),
-		podsInformer:  podsInformer.Informer(),
-		podEvictCache: newPodEvictionCache(),
-		logger:        logger,
-		stopCh:        make(chan struct{}),
+		podsFactory:         podsFactory,
+		podLister:           podsInformer.Lister(),
+		podsInformer:        podsInformer.Informer(),
+		podEvictCache:       newPodEvictionCache(),
+		podReadinessTracker: newPodReadinessTracker(kubeClient, namespace, readyAnnotationPatchTimeout, logger),
+		configObserver:      configObserver,
+		logger:              logger,
+		stopCh:              make(chan struct{}),
 	}
 
 	return c
@@ -64,13 +69,7 @@ func (c *podObserver) start() error {
 	return nil
 }
 
-func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string) {
-	pod, isPod := obj.(*corev1.Pod)
-	if !isPod {
-		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
-		return
-	}
-
+func (c *podObserver) invalidatePodEvictionCache(pod *corev1.Pod, action string) {
 	// reduce logging noise as this code path will be run on any pod update
 	// this is cheaper than finding the zpdb config for a pod
 	// and worst case if we miss an eviction configCache removal it self-expires
@@ -111,16 +110,59 @@ func (c *podObserver) invalidatePodEvictionCache(obj interface{}, action string)
 	c.podEvictCache.delete(pod)
 }
 
+// accept will return a pod and true if the given object is a pod and the is within the scope of our pdb
+func (c *podObserver) accept(obj interface{}) (*corev1.Pod, bool) {
+	pod, isPod := obj.(*corev1.Pod)
+	if !isPod {
+		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
+		return nil, false
+	}
+	pdbConfig, err := c.configObserver.pdbCache.find(pod)
+	if err != nil {
+		level.Warn(c.logger).Log("msg", "observer ignoring pod - unable to look up configuration for pod", "pod", pod.Name, "err", err)
+		return nil, false
+	}
+	if pdbConfig == nil {
+		level.Debug(c.logger).Log("msg", "observer ignoring pod - not within zpdb scope", "pod", pod.Name)
+		return nil, false
+	}
+
+	return pod, true
+}
+
 func (c *podObserver) onPodAdded(obj interface{}) {
-	c.invalidatePodEvictionCache(obj, "added")
+	pod, ok := c.accept(obj)
+	if !ok {
+		return
+	}
+
+	c.podReadinessTracker.observed(pod)
+	c.invalidatePodEvictionCache(pod, "added")
 }
 
 func (c *podObserver) onPodUpdated(_, new interface{}) {
-	c.invalidatePodEvictionCache(new, "updated")
+	pod, ok := c.accept(new)
+	if !ok {
+		return
+	}
+
+	c.podReadinessTracker.observed(pod)
+	c.invalidatePodEvictionCache(pod, "updated")
 }
 
 func (c *podObserver) onPodDeleted(obj interface{}) {
-	c.invalidatePodEvictionCache(obj, "deleted")
+	pod, ok := c.accept(obj)
+	if !ok {
+		return
+	}
+
+	c.invalidatePodEvictionCache(pod, "deleted")
+}
+
+// recordEviction will mark the pod as recently evicted in the eviction cache.
+// The cache entry self-expires and is also cleared when a subsequent pod state change is observed.
+func (c *podObserver) recordEviction(pod *corev1.Pod) {
+	c.podEvictCache.recordEviction(pod)
 }
 
 func (c *podObserver) stop() {

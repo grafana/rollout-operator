@@ -17,11 +17,26 @@ func TestZoneAwarePdbValidatorHandlerSuccess(t *testing.T) {
 	assertAllowResponse(t, request)
 }
 
+// TestZoneAwarePdbValidatorHandlerSuccessWithCrossZoneEvictionDelay tests with a valid configuration including crossZoneEvictionDelay
+func TestZoneAwarePdbValidatorHandlerSuccessWithCrossZoneEvictionDelay(t *testing.T) {
+	request := createValidatingWebHookAdmissionReviewWithCrossZoneEvictionDelay()
+	assertAllowResponse(t, request)
+}
+
 // TestZoneAwarePdbValidatorHandlerBadConfig tests with an invalid configuration
 // See other test files for in-depth config validation
 func TestZoneAwarePdbValidatorHandlerBadConfig(t *testing.T) {
 	request := createValidatingWebHookAdmissionReviewInvalid()
 	assertDenyResponse(t, request, "invalid value: max unavailable must be 0 <= val, got -1", http.StatusBadRequest)
+}
+
+// TestZoneAwarePdbValidatorHandlerCrossZoneEvictionDelayWithoutPartitionRegex confirms the
+// webhook rejects a ZPDB that sets crossZoneEvictionDelay without podNamePartitionRegex - the
+// delay is only meaningful in partition-aware mode, so the combination is rejected at admission
+// time rather than producing surprising runtime behaviour.
+func TestZoneAwarePdbValidatorHandlerCrossZoneEvictionDelayWithoutPartitionRegex(t *testing.T) {
+	request := createValidatingWebHookAdmissionReviewCrossZoneEvictionDelayWithoutPartitionRegex()
+	assertDenyResponse(t, request, "invalid value: crossZoneEvictionDelay requires podNamePartitionRegex to be set", http.StatusBadRequest)
 }
 
 // TestZoneAwarePdbValidatorHandlerParseError tests with a structural error in parsing the request object
@@ -63,6 +78,61 @@ func createValidatingWebHookAdmissionReviewValid() admissionv1.AdmissionReview {
 								"rollout-group": "test-app"
 							}
 						}
+					}
+				}`),
+			},
+		},
+	}
+}
+
+func createValidatingWebHookAdmissionReviewWithCrossZoneEvictionDelay() admissionv1.AdmissionReview {
+	return admissionv1.AdmissionReview{
+		Request: &admissionv1.AdmissionRequest{
+			UID: "test-request-uid",
+			Object: runtime.RawExtension{
+				Raw: []byte(`{
+					"apiVersion": "rollout-operator.grafana.com/v1",
+					"kind": "ZoneAwarePodDisruptionBudget",
+					"metadata": {
+						"name": "test",
+						"namespace": "test"
+					},
+					"spec": {
+						"maxUnavailable": 1,
+						"selector": {
+							"matchLabels": {
+								"rollout-group": "test-app"
+							}
+						},
+						"podNamePartitionRegex": "[a-z\\-]+-zone-[a-z]-([0-9]+)",
+						"crossZoneEvictionDelay": "20m"
+					}
+				}`),
+			},
+		},
+	}
+}
+
+func createValidatingWebHookAdmissionReviewCrossZoneEvictionDelayWithoutPartitionRegex() admissionv1.AdmissionReview {
+	return admissionv1.AdmissionReview{
+		Request: &admissionv1.AdmissionRequest{
+			UID: "test-request-uid",
+			Object: runtime.RawExtension{
+				Raw: []byte(`{
+					"apiVersion": "rollout-operator.grafana.com/v1",
+					"kind": "ZoneAwarePodDisruptionBudget",
+					"metadata": {
+						"name": "test",
+						"namespace": "test"
+					},
+					"spec": {
+						"maxUnavailable": 1,
+						"selector": {
+							"matchLabels": {
+								"rollout-group": "test-app"
+							}
+						},
+						"crossZoneEvictionDelay": "20m"
 					}
 				}`),
 			},

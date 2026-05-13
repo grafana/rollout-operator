@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -25,6 +26,7 @@ const (
 	FieldMaxUnavailablePercentage = "maxUnavailablePercentage"
 	FieldPodNamePartitionRegex    = "podNamePartitionRegex"
 	FieldPodNameRegexGroup        = "podNameRegexGroup"
+	FieldCrossZoneEvictionDelay   = "crossZoneEvictionDelay"
 	FieldSelector                 = "selector"
 	FieldMatchLabels              = "matchLabels"
 )
@@ -49,6 +51,9 @@ type config struct {
 
 	// the group number in the regex to use for the partition name - default=1
 	podNamePartitionRegexGroup int
+
+	// an optional delay before a pod in another zone for the same partition can be evicted
+	crossZoneEvictionDelay time.Duration
 }
 
 // matchesPod returns true if this Config label Selector matches this Pod.
@@ -208,6 +213,27 @@ func ParseAndValidate(obj *unstructured.Unstructured) (*config, error) {
 	} else {
 		selector := labels.SelectorFromSet(mlMap)
 		cfg.selector = &selector
+	}
+
+	if delayVal, found := mapSpec[FieldCrossZoneEvictionDelay]; found {
+		delayStr, ok := delayVal.(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to extract value from config field %s", FieldCrossZoneEvictionDelay)
+		}
+		if len(delayStr) > 0 {
+			d, err := time.ParseDuration(delayStr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid value: %s is not a valid duration, got %v", FieldCrossZoneEvictionDelay, err)
+			}
+			if d < 0 {
+				return nil, fmt.Errorf("invalid value: %s must be >= 0, got %s", FieldCrossZoneEvictionDelay, delayStr)
+			}
+			cfg.crossZoneEvictionDelay = d
+		}
+	}
+
+	if cfg.crossZoneEvictionDelay > 0 && cfg.podNamePartition == nil {
+		return nil, errors.New("invalid value: crossZoneEvictionDelay requires podNamePartitionRegex to be set")
 	}
 
 	if cfg.maxUnavailablePercentage > 0 && cfg.podNamePartition != nil {
