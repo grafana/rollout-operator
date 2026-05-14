@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.37.0
+
 * [ENHANCEMENT] Add support for zone-aware PDB to enforce a fixed delay between evictions within the same partition. #422
 
 ## v0.36.2
