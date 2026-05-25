@@ -20,6 +20,7 @@ jobs:
           go-version: '1.26'
           check-latest: true
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
+      - run: make check-vendor
       - run: make rollout-operator
 
   test:
@@ -33,6 +34,7 @@ jobs:
           go-version: '1.26'
           check-latest: true
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
+      - run: make check-vendor
       - run: make test
       - run: make test-boringcrypto
 
@@ -53,18 +55,35 @@ jobs:
           install_only: true
       - name: Install jsonnet
         run: |
+          set -euo pipefail
           JSONNET_VERSION="0.21.0"
-          curl -sL "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/go-jsonnet_Linux_x86_64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin
+          asset="go-jsonnet_Linux_x86_64.tar.gz"
+          tmp="$(mktemp -d)"
+          curl -sL -o "${tmp}/checksums.txt" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/checksums.txt"
+          curl -sL -o "${tmp}/${asset}" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/${asset}"
+          expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
+          [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
+          (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
+          sudo tar -xzf "${tmp}/${asset}" -C /usr/local/bin
       - name: Install tk
         run: |
+          set -euo pipefail
           TANKA_VERSION="0.34.1"
-          sudo curl -sLo /usr/local/bin/tk https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64
+          # Upstream does not publish a checksum manifest; verify against pinned hash.
+          # On version bumps, recompute via: curl -sL <url> | sha256sum
+          TANKA_SHA256="dd4bdf619b4e1fc61172c390b12f6a7503d9e936b957d69c8bcebbf7285e299c"
+          sudo curl -sLo /usr/local/bin/tk "https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64"
+          echo "${TANKA_SHA256}  /usr/local/bin/tk" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/tk
       - name: Install jb
         run: |
+          set -euo pipefail
           JSONNET_BUNDLER_VERSION="0.6.0"
-          sudo curl -sLo /usr/local/bin/jb https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64
+          # Upstream does not publish a checksum manifest; verify against pinned hash.
+          # On version bumps, recompute via: curl -sL <url> | sha256sum
+          JSONNET_BUNDLER_SHA256="78e54afbbc3ff3e0942b1576b4992277df4f6beb64cddd58528a76f0cd70db54"
+          sudo curl -sLo /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
+          echo "${JSONNET_BUNDLER_SHA256}  /usr/local/bin/jb" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/jb
       - run: make build-image
       - run: make integration
@@ -86,18 +105,35 @@ jobs:
           install_only: true
       - name: Install jsonnet
         run: |
+          set -euo pipefail
           JSONNET_VERSION="0.21.0"
-          curl -sL "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/go-jsonnet_Linux_x86_64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin
+          asset="go-jsonnet_Linux_x86_64.tar.gz"
+          tmp="$(mktemp -d)"
+          curl -sL -o "${tmp}/checksums.txt" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/checksums.txt"
+          curl -sL -o "${tmp}/${asset}" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/${asset}"
+          expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
+          [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
+          (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
+          sudo tar -xzf "${tmp}/${asset}" -C /usr/local/bin
       - name: Install tk
         run: |
+          set -euo pipefail
           TANKA_VERSION="0.34.1"
-          sudo curl -sLo /usr/local/bin/tk https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64
+          # Upstream does not publish a checksum manifest; verify against pinned hash.
+          # On version bumps, recompute via: curl -sL <url> | sha256sum
+          TANKA_SHA256="dd4bdf619b4e1fc61172c390b12f6a7503d9e936b957d69c8bcebbf7285e299c"
+          sudo curl -sLo /usr/local/bin/tk "https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64"
+          echo "${TANKA_SHA256}  /usr/local/bin/tk" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/tk
       - name: Install jb
         run: |
+          set -euo pipefail
           JSONNET_BUNDLER_VERSION="0.6.0"
-          sudo curl -sLo /usr/local/bin/jb https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64
+          # Upstream does not publish a checksum manifest; verify against pinned hash.
+          # On version bumps, recompute via: curl -sL <url> | sha256sum
+          JSONNET_BUNDLER_SHA256="78e54afbbc3ff3e0942b1576b4992277df4f6beb64cddd58528a76f0cd70db54"
+          sudo curl -sLo /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
+          echo "${JSONNET_BUNDLER_SHA256}  /usr/local/bin/jb" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/jb
       - run: make build-image-boringcrypto
       - run: make integration
@@ -131,23 +167,47 @@ jobs:
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - name: Install jsonnet
         run: |
+          set -euo pipefail
           JSONNET_VERSION="0.21.0"
-          curl -sL "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/go-jsonnet_Linux_x86_64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin
+          asset="go-jsonnet_Linux_x86_64.tar.gz"
+          tmp="$(mktemp -d)"
+          curl -sL -o "${tmp}/checksums.txt" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/checksums.txt"
+          curl -sL -o "${tmp}/${asset}" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/${asset}"
+          expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
+          [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
+          (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
+          sudo tar -xzf "${tmp}/${asset}" -C /usr/local/bin
       - name: Install conftest
         run: |
+          set -euo pipefail
           CONFTEST_VERSION="0.62.0"
-          curl -sL "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin
+          asset="conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          tmp="$(mktemp -d)"
+          curl -sL -o "${tmp}/checksums.txt" "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/checksums.txt"
+          curl -sL -o "${tmp}/${asset}" "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/${asset}"
+          expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
+          [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
+          (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
+          sudo tar -xzf "${tmp}/${asset}" -C /usr/local/bin conftest
       - name: Install tk
         run: |
+          set -euo pipefail
           TANKA_VERSION="0.34.1"
-          sudo curl -sLo /usr/local/bin/tk https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64
+          # Upstream does not publish a checksum manifest; verify against pinned hash.
+          # On version bumps, recompute via: curl -sL <url> | sha256sum
+          TANKA_SHA256="dd4bdf619b4e1fc61172c390b12f6a7503d9e936b957d69c8bcebbf7285e299c"
+          sudo curl -sLo /usr/local/bin/tk "https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64"
+          echo "${TANKA_SHA256}  /usr/local/bin/tk" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/tk
       - name: Install jb
         run: |
+          set -euo pipefail
           JSONNET_BUNDLER_VERSION="0.6.0"
-          sudo curl -sLo /usr/local/bin/jb https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64
+          # Upstream does not publish a checksum manifest; verify against pinned hash.
+          # On version bumps, recompute via: curl -sL <url> | sha256sum
+          JSONNET_BUNDLER_SHA256="78e54afbbc3ff3e0942b1576b4992277df4f6beb64cddd58528a76f0cd70db54"
+          sudo curl -sLo /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
+          echo "${JSONNET_BUNDLER_SHA256}  /usr/local/bin/jb" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/jb
       - name: Install mixtool
         run: |
@@ -172,11 +232,21 @@ jobs:
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - name: Install misspell
         run: |
-          sudo curl -L -o install-misspell.sh https://git.io/misspell
-          sudo sh install-misspell.sh -b /usr/bin
+          set -euo pipefail
+          MISSPELL_VERSION="0.3.4"
+          asset="misspell_${MISSPELL_VERSION}_linux_64bit.tar.gz"
+          tmp="$(mktemp -d)"
+          curl -sL -o "${tmp}/checksums.txt" "https://github.com/client9/misspell/releases/download/v${MISSPELL_VERSION}/misspell_${MISSPELL_VERSION}_checksums.txt"
+          curl -sL -o "${tmp}/${asset}" "https://github.com/client9/misspell/releases/download/v${MISSPELL_VERSION}/${asset}"
+          expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
+          [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
+          (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
+          sudo tar -xzf "${tmp}/${asset}" -C /usr/bin misspell
       - name: Install prettier
         run: |
-          sudo npm install --global prettier
+          set -euo pipefail
+          PRETTIER_VERSION="3.8.3"
+          sudo npm install --global --ignore-scripts --no-audit --no-fund "prettier@${PRETTIER_VERSION}"
       - name: Check doc lint
         run: make doc-lint
       - name: Check doc

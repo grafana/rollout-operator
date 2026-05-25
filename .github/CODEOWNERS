@@ -1,1 +1,15 @@
+# Default ownership for everything in the repo.
 * @grafana/mimir-maintainers
+
+# Explicit ownership for supply-chain-sensitive paths.
+# Keep these listed even though they currently resolve to the default team —
+# a future ownership split must not silently drop CI/build/dependency review.
+/.github/                       @grafana/mimir-maintainers
+/.github/workflows/             @grafana/mimir-maintainers
+/.github/CODEOWNERS             @grafana/mimir-maintainers
+/go.mod                         @grafana/mimir-maintainers
+/go.sum                         @grafana/mimir-maintainers
+/vendor/                        @grafana/mimir-maintainers
+/Dockerfile                     @grafana/mimir-maintainers
+/Dockerfile.boringcrypto        @grafana/mimir-maintainers
+/Makefile                       @grafana/mimir-maintainers

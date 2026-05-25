@@ -69,6 +69,26 @@
         ],
         "depNameTemplate": "open-policy-agent/conftest",
         "datasourceTemplate": "github-releases"
+      },
+      {
+        "customType": "regex",
+        "description": "Update misspell version in CI workflow",
+        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
+        "matchStrings": [
+          "MISSPELL_VERSION=\"(?<currentValue>[\\d.]+)\""
+        ],
+        "depNameTemplate": "client9/misspell",
+        "datasourceTemplate": "github-releases"
+      },
+      {
+        "customType": "regex",
+        "description": "Update prettier version in CI workflow",
+        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
+        "matchStrings": [
+          "PRETTIER_VERSION=\"(?<currentValue>[\\d.]+)\""
+        ],
+        "depNameTemplate": "prettier",
+        "datasourceTemplate": "npm"
       }
     ],
     "branchPrefix": "grafanarenovatebot/",
@@ -101,6 +121,17 @@
             "description": "Disable Docker updates",
             "matchManagers": [
                 "dockerfile"
+            ],
+            "enabled": false
+        },
+        {
+            "description": "Disable auto-bumps for tools without an upstream checksum manifest: the SHA-256 pinned alongside the version in .github/workflows/ci.yaml is not tracked by Renovate, so an automatic version bump would land a PR that fails sha256sum -c. Update these manually: bump *_VERSION and recompute *_SHA256 via 'curl -sL <url> | sha256sum'.",
+            "matchManagers": [
+                "custom.regex"
+            ],
+            "matchDepNames": [
+                "grafana/tanka",
+                "jsonnet-bundler/jsonnet-bundler"
             ],
             "enabled": false
         }
