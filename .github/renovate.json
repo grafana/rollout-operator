@@ -42,26 +42,6 @@
       },
       {
         "customType": "regex",
-        "description": "Update Tanka version in CI workflow",
-        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
-        "matchStrings": [
-          "TANKA_VERSION=\"(?<currentValue>[\\d.]+)\""
-        ],
-        "depNameTemplate": "grafana/tanka",
-        "datasourceTemplate": "github-releases"
-      },
-      {
-        "customType": "regex",
-        "description": "Update jsonnet-bundler version in CI workflow",
-        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
-        "matchStrings": [
-          "JSONNET_BUNDLER_VERSION=\"(?<currentValue>[\\d.]+)\""
-        ],
-        "depNameTemplate": "jsonnet-bundler/jsonnet-bundler",
-        "datasourceTemplate": "github-releases"
-      },
-      {
-        "customType": "regex",
         "description": "Update conftest version in CI workflow",
         "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
         "matchStrings": [
@@ -121,17 +101,6 @@
             "description": "Disable Docker updates",
             "matchManagers": [
                 "dockerfile"
-            ],
-            "enabled": false
-        },
-        {
-            "description": "Disable auto-bumps for tools without an upstream checksum manifest: the SHA-256 pinned alongside the version in .github/workflows/ci.yaml is not tracked by Renovate, so an automatic version bump would land a PR that fails sha256sum -c. Update these manually: bump *_VERSION and recompute *_SHA256 via 'curl -sL <url> | sha256sum'.",
-            "matchManagers": [
-                "custom.regex"
-            ],
-            "matchDepNames": [
-                "grafana/tanka",
-                "jsonnet-bundler/jsonnet-bundler"
             ],
             "enabled": false
         }
