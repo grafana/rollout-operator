@@ -144,8 +144,8 @@ jsonnet-conftest-test: build-jsonnet-tests jsonnet-conftest-quick-test
 
 .PHONY: check-vendor
 check-vendor: ## Verify the module cache against go.sum and that vendor/ matches go.mod/go.sum.
-	go mod verify
 	go mod vendor
+	go mod verify
 	@./tools/find-diff-or-untracked.sh vendor go.mod go.sum || (echo "Please run 'go mod vendor' and commit the resulting changes" && false)
 
 .PHONY: check-makefiles
