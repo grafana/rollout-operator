@@ -241,7 +241,7 @@ jobs:
           expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
           [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
           (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
-          sudo tar -xzf "${tmp}/${asset}" -C /usr/bin misspell
+          sudo tar -xzf "${tmp}/${asset}" -C /usr/local/bin misspell
       - name: Install prettier
         run: |
           set -euo pipefail
