@@ -42,26 +42,6 @@
       },
       {
         "customType": "regex",
-        "description": "Update Tanka version in CI workflow",
-        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
-        "matchStrings": [
-          "TANKA_VERSION=\"(?<currentValue>[\\d.]+)\""
-        ],
-        "depNameTemplate": "grafana/tanka",
-        "datasourceTemplate": "github-releases"
-      },
-      {
-        "customType": "regex",
-        "description": "Update jsonnet-bundler version in CI workflow",
-        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
-        "matchStrings": [
-          "JSONNET_BUNDLER_VERSION=\"(?<currentValue>[\\d.]+)\""
-        ],
-        "depNameTemplate": "jsonnet-bundler/jsonnet-bundler",
-        "datasourceTemplate": "github-releases"
-      },
-      {
-        "customType": "regex",
         "description": "Update conftest version in CI workflow",
         "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
         "matchStrings": [
@@ -69,6 +49,26 @@
         ],
         "depNameTemplate": "open-policy-agent/conftest",
         "datasourceTemplate": "github-releases"
+      },
+      {
+        "customType": "regex",
+        "description": "Update misspell version in CI workflow",
+        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
+        "matchStrings": [
+          "MISSPELL_VERSION=\"(?<currentValue>[\\d.]+)\""
+        ],
+        "depNameTemplate": "client9/misspell",
+        "datasourceTemplate": "github-releases"
+      },
+      {
+        "customType": "regex",
+        "description": "Update prettier version in CI workflow",
+        "managerFilePatterns": ["^\\.github/workflows/ci\\.yaml$"],
+        "matchStrings": [
+          "PRETTIER_VERSION=\"(?<currentValue>[\\d.]+)\""
+        ],
+        "depNameTemplate": "prettier",
+        "datasourceTemplate": "npm"
       }
     ],
     "branchPrefix": "grafanarenovatebot/",
