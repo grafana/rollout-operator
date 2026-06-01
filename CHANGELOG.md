@@ -2,6 +2,20 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #439
+  * `github.com/grafana/dskit` from `v0.0.0-20260505171221-7f6e6a43e255` to `v0.0.0-20260601123808-0d4540e255b4`
+  * `github.com/prometheus/common` from `v0.67.5` to `v0.68.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.68.0` to `v0.69.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.68.0` to `v0.69.0`
+  * `go.opentelemetry.io/otel/trace` from `v1.43.0` to `v1.44.0`
+  * `go.opentelemetry.io/otel` from `v1.43.0` to `v1.44.0`
+  * `golang.org/x/mod` from `v0.35.0` to `v0.36.0`
+  * `k8s.io/api` from `v0.36.0` to `v0.36.1`
+  * `k8s.io/apiextensions-apiserver` from `v0.36.0` to `v0.36.1`
+  * `k8s.io/apimachinery` from `v0.36.0` to `v0.36.1`
+  * `k8s.io/client-go` from `v0.36.0` to `v0.36.1`
+  * `sigs.k8s.io/controller-runtime` from `v0.24.0` to `v0.24.1`
+
 ## v0.37.0
 
 * [ENHANCEMENT] Add support for zone-aware PDB to enforce a fixed delay between evictions within the same partition. #422
