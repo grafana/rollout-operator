@@ -32,6 +32,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/instrumentation"
 )
 
 func TestUpscale(t *testing.T) {
@@ -179,24 +180,26 @@ type templateParams struct {
 	RolloutGroup      string
 }
 
-type fakeHttpClient struct {
+// fakeRoundTripper is a fake transport used to back a PodHTTPClient in tests: it counts requests by method
+// and delegates to mockDo.
+type fakeRoundTripper struct {
 	mockDo func(*http.Request) (*http.Response, error)
 
 	mu            sync.Mutex
 	callsByMethod map[string]int
 }
 
-func newFakeHttpClient(mockDo func(*http.Request) (*http.Response, error)) *fakeHttpClient {
+func newFakeRoundTripper(mockDo func(*http.Request) (*http.Response, error)) *fakeRoundTripper {
 	if mockDo == nil {
 		panic("mockDo req'd")
 	}
-	return &fakeHttpClient{
+	return &fakeRoundTripper{
 		mockDo:        mockDo,
 		callsByMethod: make(map[string]int),
 	}
 }
 
-func (f *fakeHttpClient) Do(req *http.Request) (resp *http.Response, err error) {
+func (f *fakeRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	f.mu.Lock()
 	f.callsByMethod[req.Method]++
 	f.mu.Unlock()
@@ -204,7 +207,12 @@ func (f *fakeHttpClient) Do(req *http.Request) (resp *http.Response, err error) 
 	return f.mockDo(req)
 }
 
-func (f *fakeHttpClient) calls(method string) int {
+// client returns a PodHTTPClient backed by this fake transport, for passing to the code under test.
+func (f *fakeRoundTripper) client() *instrumentation.PodHTTPClient {
+	return instrumentation.NewPodHTTPClient(f, "", nil, 0, nil)
+}
+
+func (f *fakeRoundTripper) calls(method string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.callsByMethod[method]
@@ -347,7 +355,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 		})
 	}
 
-	f := newFakeHttpClient(
+	f := newFakeRoundTripper(
 		func(r *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: params.statusCode,
@@ -355,7 +363,7 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 			}, nil
 		})
 
-	admissionResponse := prepareDownscale(ctx, logger, ar, api, f, "cluster.local.")
+	admissionResponse := prepareDownscale(ctx, logger, ar, api, f.client(), "cluster.local.")
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
 	if params.stsAnnotated {
@@ -403,7 +411,7 @@ func TestSendPrepareShutdown(t *testing.T) {
 		t.Run(n, func(t *testing.T) {
 			var postCalls atomic.Int32
 
-			httpClient := newFakeHttpClient(
+			podClientRoundTripper := newFakeRoundTripper(
 				func(r *http.Request) (*http.Response, error) {
 					if r.Method == http.MethodPost {
 						calls := postCalls.Add(1)
@@ -432,7 +440,7 @@ func TestSendPrepareShutdown(t *testing.T) {
 				})
 			}
 
-			err := sendPrepareShutdownRequests(context.Background(), log.NewNopLogger(), httpClient, endpoints)
+			err := sendPrepareShutdownRequests(context.Background(), log.NewNopLogger(), podClientRoundTripper.client(), endpoints)
 			if c.expectErr {
 				assert.Error(t, err)
 			} else {
@@ -469,7 +477,7 @@ func TestUndoPrepareShutdown(t *testing.T) {
 
 	for n, c := range cases {
 		t.Run(n, func(t *testing.T) {
-			httpClient := newFakeHttpClient(
+			podClientRoundTripper := newFakeRoundTripper(
 				func(r *http.Request) (*http.Response, error) {
 					if r.Method == http.MethodDelete {
 						// Build a fresh response (with its own body) per call, since
@@ -497,8 +505,8 @@ func TestUndoPrepareShutdown(t *testing.T) {
 				})
 			}
 
-			undoPrepareShutdownRequests(context.Background(), log.NewNopLogger(), httpClient, endpoints)
-			assert.Equal(t, c.numEndpoints, httpClient.calls(http.MethodDelete), "")
+			undoPrepareShutdownRequests(context.Background(), log.NewNopLogger(), podClientRoundTripper.client(), endpoints)
+			assert.Equal(t, c.numEndpoints, podClientRoundTripper.calls(http.MethodDelete), "")
 		})
 	}
 }
@@ -822,7 +830,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 		})
 	}
 
-	f := newFakeHttpClient(func(r *http.Request) (*http.Response, error) {
+	f := newFakeRoundTripper(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: params.statusCode,
 			Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
@@ -831,7 +839,7 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 
 	zt := newZoneTracker(api, clusterDomain, namespace, "zone-tracker-test-cm")
 
-	admissionResponse := zt.prepareDownscale(ctx, logger, ar, api, f)
+	admissionResponse := zt.prepareDownscale(ctx, logger, ar, api, f.client())
 	require.Equal(t, params.allowed, admissionResponse.Allowed, "Unexpected result for allowed: got %v, expected %v", admissionResponse.Allowed, params.allowed)
 
 	if params.expectDeletes {

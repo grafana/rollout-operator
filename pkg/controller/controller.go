@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -31,6 +30,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/util"
 	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
@@ -42,10 +42,6 @@ const (
 )
 
 var tracer = otel.Tracer("pkg/controller")
-
-type httpClient interface {
-	Do(req *http.Request) (*http.Response, error)
-}
 
 type ZPDBEvictionController interface {
 	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string, override zpdb.MaxUnavailableZeroOverride) error
@@ -66,7 +62,7 @@ type RolloutController struct {
 	restMapper           meta.RESTMapper
 	scaleClient          scale.ScalesGetter
 	dynamicClient        dynamic.Interface
-	httpClient           httpClient
+	podHTTPClient        *instrumentation.PodHTTPClient
 	logger               log.Logger
 
 	zpdbController ZPDBEvictionController
@@ -88,7 +84,7 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, client httpClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController ZPDBEvictionController) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, podHTTPClient *instrumentation.PodHTTPClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController ZPDBEvictionController) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -117,7 +113,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		restMapper:           restMapper,
 		scaleClient:          scaleClient,
 		dynamicClient:        dynamic,
-		httpClient:           client,
+		podHTTPClient:        podHTTPClient,
 		zpdbController:       zpdbController,
 		logger:               logger,
 		stopCh:               make(chan struct{}),
@@ -387,7 +383,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicas(ctx context.Context,
 		return updated, err
 	}
 
-	return c.adjustStatefulSetsGroupReplicasToMirrorResource(ctx, groupName, sets, c.clusterDomain, c.httpClient)
+	return c.adjustStatefulSetsGroupReplicasToMirrorResource(ctx, groupName, sets, c.clusterDomain, c.podHTTPClient)
 }
 
 // adjustStatefulSetsGroupReplicasToFollowLeader examines each StatefulSet and adjusts the number of replicas if desired,

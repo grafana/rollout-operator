@@ -32,6 +32,7 @@ import (
 	ktesting "k8s.io/client-go/testing"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/util"
 	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
@@ -1315,14 +1316,14 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			scaleClient := createFakeScaleClient(testData.customResourceScaleSpecReplicas, testData.customResourceScaleStatusReplicas, testData.getScaleErr)
 
 			dynamicClient, _ := createFakeDynamicClient()
-			httpClient := &fakeHttpClient{
+			podClientRoundTripper := &fakeRoundTripper{
 				responses:       testData.httpResponses,
 				defaultResponse: internalErrorResponse,
 			}
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, httpClient, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, podClientRoundTripper.client(), 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -1331,7 +1332,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 			// Assert patched StatefulSets.
 			assert.Equal(t, testData.expectedPatchedSets, convertEmptyMapToNil(patchedStsNames))
-			assert.ElementsMatch(t, testData.expectedHttpRequests, httpClient.requests())
+			assert.ElementsMatch(t, testData.expectedHttpRequests, podClientRoundTripper.requests())
 		})
 	}
 }
@@ -1617,7 +1618,9 @@ var internalErrorResponse = httpResponse{
 	body:       "unknown server error",
 }
 
-type fakeHttpClient struct {
+// fakeRoundTripper is a fake transport used to back a PodHTTPClient in tests: it records the requests it
+// serves and returns canned responses.
+type fakeRoundTripper struct {
 	recordedRequestsMu sync.Mutex
 	recordedRequests   []string
 
@@ -1625,7 +1628,7 @@ type fakeHttpClient struct {
 	defaultResponse httpResponse
 }
 
-func (f *fakeHttpClient) Do(req *http.Request) (resp *http.Response, err error) {
+func (f *fakeRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	methodAndURL := fmt.Sprintf("%s %s", req.Method, req.URL.String())
 
 	f.recordedRequestsMu.Lock()
@@ -1643,7 +1646,12 @@ func (f *fakeHttpClient) Do(req *http.Request) (resp *http.Response, err error) 
 	}, r.err
 }
 
-func (f *fakeHttpClient) requests() []string {
+// client returns a PodHTTPClient backed by this fake transport, for passing to the code under test.
+func (f *fakeRoundTripper) client() *instrumentation.PodHTTPClient {
+	return instrumentation.NewPodHTTPClient(f, "", nil, 0, nil)
+}
+
+func (f *fakeRoundTripper) requests() []string {
 	f.recordedRequestsMu.Lock()
 	defer f.recordedRequestsMu.Unlock()
 

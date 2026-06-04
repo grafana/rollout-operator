@@ -211,13 +211,17 @@ func main() {
 	// spent waiting for a rate limiter token.
 	instrumentation.LimitKubernetesAPIClientPerAPIGroup(kubeConfig, float32(cfg.kubeClientQPS), cfg.kubeClientBurst, reg)
 
-	httpRT := http.DefaultTransport
-	// HTTP client side cluster validation.
+	// HTTP client side cluster validation, shared by the Kubernetes API client and the pod HTTP client.
 	reporter := func(msg string, method string) {
 		level.Warn(logger).Log("msg", msg, "method", method, "cluster_validation_label", cfg.kubeNamespace)
 		metrics.ClientInvalidClusterValidationLabelRequests.WithLabelValues(method, "http", cfg.kubeNamespace).Inc()
 	}
-	httpRT = middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, httpRT)
+
+	// Client for the HTTP endpoints the operator calls directly on pods (e.g. prepare-downscale). It uses a
+	// transport separate from the Kubernetes API client, so these calls are never subject to the
+	// per-API-group rate limiter and are tracked under their own metric. The 5s timeout matches the value
+	// previously hardcoded in the prepare-downscale webhook.
+	podHTTPClient := instrumentation.NewPodHTTPClient(nil, cfg.kubeNamespace, reporter, 5*time.Second, reg)
 
 	kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
 		return middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, rt)
@@ -270,7 +274,7 @@ func main() {
 	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
 	check(evictionController.Start())
 
-	maybeStartTLSServer(cfg, kubeConfig, httpRT, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
+	maybeStartTLSServer(cfg, kubeConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
 
 	// Monitors the validating and mutating webhook configurations and provides a metric
 	// which tracks the configured FailurePolicy
@@ -284,7 +288,7 @@ func main() {
 	}
 
 	// Init the controller
-	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger, evictionController)
+	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
 	if err := c.Init(); err != nil {
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
@@ -319,7 +323,7 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, kubeConfig *rest.Config, rt http.RoundTripper, logger log.Logger, coreKubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) {
+func maybeStartTLSServer(cfg config, kubeConfig *rest.Config, podHTTPClient *instrumentation.PodHTTPClient, logger log.Logger, coreKubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
 		return
@@ -368,7 +372,7 @@ func maybeStartTLSServer(cfg config, kubeConfig *rest.Config, rt http.RoundTripp
 	}
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
-		return admission.PrepareDownscale(ctx, rt, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName, cfg.kubeClusterDomain)
+		return admission.PrepareDownscale(ctx, podHTTPClient, logger, ar, api, cfg.useZoneTracker, cfg.zoneTrackerConfigMapName, cfg.kubeClusterDomain)
 	}
 
 	podEvictionFunc := func(ctx context.Context, _ log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {
