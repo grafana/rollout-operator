@@ -403,24 +403,22 @@ func TestSendPrepareShutdown(t *testing.T) {
 		t.Run(n, func(t *testing.T) {
 			var postCalls atomic.Int32
 
-			errResponse := &http.Response{
-				StatusCode: http.StatusInternalServerError,
-				Body:       io.NopCloser(strings.NewReader("we've had a problem")),
-			}
-			successResponse := &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader("good")),
-			}
-
 			httpClient := newFakeHttpClient(
 				func(r *http.Request) (*http.Response, error) {
 					if r.Method == http.MethodPost {
 						calls := postCalls.Add(1)
+						// Build a fresh response (with its own body) per call, since
+						// these handlers run concurrently and the response body is read.
 						if calls > int32(c.numEndpoints-c.lastPostsFail) {
-							return errResponse, nil
-						} else {
-							return successResponse, nil
+							return &http.Response{
+								StatusCode: http.StatusInternalServerError,
+								Body:       io.NopCloser(strings.NewReader("we've had a problem")),
+							}, nil
 						}
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(strings.NewReader("good")),
+						}, nil
 					}
 					panic("unexpected method")
 				},
@@ -471,23 +469,21 @@ func TestUndoPrepareShutdown(t *testing.T) {
 
 	for n, c := range cases {
 		t.Run(n, func(t *testing.T) {
-			errResponse := &http.Response{
-				StatusCode: http.StatusInternalServerError,
-				Body:       io.NopCloser(strings.NewReader("we've had a problem")),
-			}
-			successResponse := &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader("good")),
-			}
-
 			httpClient := newFakeHttpClient(
 				func(r *http.Request) (*http.Response, error) {
 					if r.Method == http.MethodDelete {
+						// Build a fresh response (with its own body) per call, since
+						// these handlers run concurrently and the response body is read.
 						if c.deletesFail {
-							return errResponse, nil
-						} else {
-							return successResponse, nil
+							return &http.Response{
+								StatusCode: http.StatusInternalServerError,
+								Body:       io.NopCloser(strings.NewReader("we've had a problem")),
+							}, nil
 						}
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(strings.NewReader("good")),
+						}, nil
 					}
 					panic("unexpected method")
 				},
