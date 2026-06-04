@@ -2,6 +2,7 @@ package instrumentation
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -174,7 +175,7 @@ func TestPerAPIGroupRateLimiter_DisabledWhenNonPositive(t *testing.T) {
 }
 
 func TestPerAPIGroupRateLimiter_PropagatesTransportError(t *testing.T) {
-	wantErr := &http.ProtocolError{ErrorString: "boom"}
+	wantErr := errors.New("boom")
 	next := roundTripperFunc(func(*http.Request) (*http.Response, error) { return nil, wantErr })
 	limiter := newPerAPIGroupRateLimiter(next, 5, 10, newTestThrottledCounter())
 
