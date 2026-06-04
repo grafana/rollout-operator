@@ -35,8 +35,8 @@ func newTLSServer(cfg config, logger log.Logger, cert tlscert.Certificate, metri
 		srv: &http.Server{
 			TLSConfig:    &tls.Config{Certificates: []tls.Certificate{pair}},
 			Handler:      handler,
-			ReadTimeout:  10 * time.Second,
-			WriteTimeout: 10 * time.Second,
+			ReadTimeout:  cfg.serverTLSRequestTimeout,
+			WriteTimeout: cfg.serverTLSRequestTimeout,
 			IdleTimeout:  3 * time.Minute,
 		},
 		logger: logger,

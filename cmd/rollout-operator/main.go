@@ -62,10 +62,11 @@ type config struct {
 	reconcileInterval    time.Duration
 	clusterValidationCfg clusterutil.ClusterValidationProtocolConfigForHTTP
 
-	serverTLSEnabled bool
-	serverTLSPort    int
-	serverCertFile   string
-	serverKeyFile    string
+	serverTLSEnabled        bool
+	serverTLSPort           int
+	serverCertFile          string
+	serverKeyFile           string
+	serverTLSRequestTimeout time.Duration
 
 	serverSelfSignedCert           bool
 	serverSelfSignedCertSecretName string
@@ -88,8 +89,8 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "HTTP client timeout. This applies to requests issued to both the Kubernetes API and Kubernetes resource endpoints.")
-	fs.Float64Var(&cfg.kubeClientQPS, "kubernetes.client-qps", 0, "Maximum QPS to the API server from this client. If zero, the client-go default (5) is used.")
-	fs.IntVar(&cfg.kubeClientBurst, "kubernetes.client-burst", 0, "Maximum burst for throttle. If zero, the client-go default (10) is used.")
+	fs.Float64Var(&cfg.kubeClientQPS, "kubernetes.client-qps", 5, "Maximum QPS to the Kubernetes API server, enforced per API group: each API group (e.g. core/v1, apps/v1, policy/v1) gets its own token bucket with this QPS. Set to 0 to disable client-side rate limiting.")
+	fs.IntVar(&cfg.kubeClientBurst, "kubernetes.client-burst", 10, "Maximum burst (token bucket capacity) for the per-API-group rate limiter (see -kubernetes.client-qps). Must be at least 1 when rate limiting is enabled, since each request consumes one token. It does not need to be greater than or equal to the QPS: a smaller burst simply allows less bursting.")
 	fs.StringVar(&cfg.kubeClusterDomain, "kubernetes.cluster-domain", "cluster.local.", "The Kubernetes cluster domain.")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
@@ -99,6 +100,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.IntVar(&cfg.serverTLSPort, "server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
 	fs.StringVar(&cfg.serverCertFile, "server-tls.cert-file", "", "Path to the TLS certificate file if not using the self-signed certificate.")
 	fs.StringVar(&cfg.serverKeyFile, "server-tls.key-file", "", "Path to the TLS private key file if not using the self-signed certificate.")
+	fs.DurationVar(&cfg.serverTLSRequestTimeout, "server-tls.request-timeout", 10*time.Second, "Time budget to handle a single TLS server (admission webhook) request: used as the server read and write timeouts, and (at 90%) as the deadline imposed on the request context passed to the webhook handler. Should be smaller than the apiserver's webhook timeout so the rollout-operator responds before the apiserver gives up.")
 
 	fs.BoolVar(&cfg.serverSelfSignedCert, "server-tls.self-signed-cert.enabled", true, "Generate a self-signed certificate for the TLS server.")
 	fs.StringVar(&cfg.serverSelfSignedCertSecretName, "server-tls.self-signed-cert.secret-name", "rollout-operator-self-signed-certificate", "Secret name to store the self-signed certificate (if enabled).")
@@ -129,8 +131,11 @@ func (cfg config) validate() error {
 	if cfg.useZoneTracker && cfg.zoneTrackerConfigMapName == "" {
 		return errors.New("-use-zone-tracker is true, but -zone-tracker.config-map-name has not been specified")
 	}
-	if cfg.kubeClientBurst < 0 {
-		return errors.New("-kubernetes.client-burst must be non-negative")
+	if cfg.kubeClientQPS > 0 && cfg.kubeClientBurst < 1 {
+		return errors.New("-kubernetes.client-burst must be at least 1 when -kubernetes.client-qps is greater than 0, since each request consumes one token")
+	}
+	if cfg.serverTLSRequestTimeout <= 0 {
+		return errors.New("-server-tls.request-timeout must be positive")
 	}
 	if cfg.zpdbPodReadyAnnotationPatchTimeout <= 0 {
 		return errors.New("-zpdb.pod-ready-annotation-patch-timeout must be positive")
@@ -191,20 +196,20 @@ func main() {
 	if err != nil {
 		fatal(fmt.Errorf("failed to build Kubernetes client config: %w", err))
 	}
-	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
-
 	if kubeConfig.Timeout == 0 {
 		kubeConfig.Timeout = cfg.kubeClientTimeout
-	}
-	if cfg.kubeClientQPS != 0 {
-		kubeConfig.QPS = float32(cfg.kubeClientQPS)
-	}
-	if cfg.kubeClientBurst > 0 {
-		kubeConfig.Burst = cfg.kubeClientBurst
 	}
 	if kubeConfig.UserAgent == "" {
 		kubeConfig.UserAgent = rest.DefaultKubernetesUserAgent()
 	}
+
+	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
+	// Enforce a client-side rate limit with an independent token bucket per Kubernetes API group.
+	// See LimitKubernetesAPIClientPerAPIGroup for why this is done at the transport level rather than
+	// via the rest.Config QPS/Burst fields. It is registered after InstrumentKubernetesAPIClient so the
+	// instrumentation transport (which measures API latency) sits inside it and does not count the time
+	// spent waiting for a rate limiter token.
+	instrumentation.LimitKubernetesAPIClientPerAPIGroup(kubeConfig, float32(cfg.kubeClientQPS), cfg.kubeClientBurst, reg)
 
 	httpRT := http.DefaultTransport
 	// HTTP client side cluster validation.
@@ -224,7 +229,7 @@ func main() {
 		fatal(fmt.Errorf("failed to create Kubernetes HTTP client: %w", err))
 	}
 
-	kubeClient, err := kubernetes.NewForConfigAndClient(kubeConfig, httpClient)
+	coreKubeClient, err := kubernetes.NewForConfigAndClient(kubeConfig, httpClient)
 	if err != nil {
 		fatal(fmt.Errorf("failed to create Kubernetes client: %w", err))
 	}
@@ -236,7 +241,7 @@ func main() {
 
 	// we don't use cached discovery because DiscoveryScaleKindResolver does its own caching,
 	// so we want to re-fetch every time when we actually ask for it
-	scaleKindResolver := scale.NewDiscoveryScaleKindResolver(kubeClient.Discovery())
+	scaleKindResolver := scale.NewDiscoveryScaleKindResolver(coreKubeClient.Discovery())
 	scaleClient, err := scale.NewForConfig(kubeConfig, restMapper, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
 	if err != nil {
 		fatal(fmt.Errorf("failed to init scaleClient: %w", err))
@@ -248,22 +253,30 @@ func main() {
 	}
 
 	// watches for validating webhooks being added - this is only started if the TLS server is started
-	webhookObserver := tlscert.NewWebhookObserver(kubeClient, cfg.kubeNamespace, logger)
+	webhookObserver := tlscert.NewWebhookObserver(coreKubeClient, cfg.kubeNamespace, logger)
 
 	// Controller for pod eviction.
 	// If the TLS server is started below (webhooks registered), then this controller will handle the validating webhook requests
 	// for pod evictions and zpdb configuration changes. If the webhooks are not enabled, this controller is still started
 	// and will be used by the main controller to assist in validating pod deletion requests.
-	evictionController := zpdb.NewEvictionController(kubeClient, dynamicClient, cfg.kubeNamespace, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
+	//
+	// The eviction controller gets a dedicated Kubernetes client so that a flood of pod eviction requests
+	// (its hot path: pod and StatefulSet get/list) is rate limited independently and cannot starve the core
+	// controller or the other webhooks. The dynamic client (used only to watch ZPDB config, a cold path) stays shared.
+	evictionKubeClient, err := newDedicatedKubeClient(kubeConfig)
+	if err != nil {
+		fatal(fmt.Errorf("failed to create pod eviction Kubernetes client: %w", err))
+	}
+	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
 	check(evictionController.Start())
 
-	maybeStartTLSServer(cfg, httpRT, logger, kubeClient, restart, metrics, evictionController, webhookObserver)
+	maybeStartTLSServer(cfg, kubeConfig, httpRT, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
 
 	// Monitors the validating and mutating webhook configurations and provides a metric
 	// which tracks the configured FailurePolicy
 	var webhookCollector *webhooks.WebhookCollector
 	if cfg.serverTLSEnabled {
-		webhookCollector = webhooks.NewWebhookCollector(kubeClient, cfg.kubeNamespace, logger)
+		webhookCollector = webhooks.NewWebhookCollector(coreKubeClient, cfg.kubeNamespace, logger)
 		if err := webhookCollector.Start(); err != nil {
 			fatal(fmt.Errorf("failed to start webhook collector: %w", err))
 		}
@@ -271,7 +284,7 @@ func main() {
 	}
 
 	// Init the controller
-	c := controller.NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger, evictionController)
+	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, httpClient, cfg.reconcileInterval, reg, logger, evictionController)
 	if err := c.Init(); err != nil {
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
@@ -306,7 +319,7 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, kubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) {
+func maybeStartTLSServer(cfg config, kubeConfig *rest.Config, rt http.RoundTripper, logger log.Logger, coreKubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
 		return
@@ -319,7 +332,7 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 			cfg.serverSelfSignedCertDNSName = fmt.Sprintf("rollout-operator.%s.svc", cfg.kubeNamespace)
 		}
 		selfSignedProvider := tlscert.NewSelfSignedCertProvider("rollout-operator", []string{cfg.serverSelfSignedCertDNSName}, []string{cfg.serverSelfSignedCertOrg}, time.Duration(cfg.serverSelfSignedCertExpiration))
-		certProvider = tlscert.NewKubeSecretPersistedCertProvider(selfSignedProvider, logger, kubeClient, cfg.kubeNamespace, cfg.serverSelfSignedCertSecretName)
+		certProvider = tlscert.NewKubeSecretPersistedCertProvider(selfSignedProvider, logger, coreKubeClient, cfg.kubeNamespace, cfg.serverSelfSignedCertSecretName)
 	} else if cfg.serverCertFile != "" && cfg.serverKeyFile != "" {
 		certProvider, err = tlscert.NewFileCertProvider(cfg.serverCertFile, cfg.serverKeyFile)
 		if err != nil {
@@ -343,10 +356,10 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 
 		webHookListener := &tlscert.WebhookConfigurationListener{
 			OnValidatingWebhookConfiguration: func(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) error {
-				return tlscert.PatchCABundleOnValidatingWebhook(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
+				return tlscert.PatchCABundleOnValidatingWebhook(logger, coreKubeClient, cfg.kubeNamespace, cert.CA, webhook)
 			},
 			OnMutatingWebhookConfiguration: func(webhook *admissionregistrationv1.MutatingWebhookConfiguration) error {
-				return tlscert.PatchCABundleOnMutatingWebhook(logger, kubeClient, cfg.kubeNamespace, cert.CA, webhook)
+				return tlscert.PatchCABundleOnMutatingWebhook(logger, coreKubeClient, cfg.kubeNamespace, cert.CA, webhook)
 			},
 		}
 
@@ -370,10 +383,30 @@ func maybeStartTLSServer(cfg config, rt http.RoundTripper, logger log.Logger, ku
 	if err != nil {
 		fatal(fmt.Errorf("failed to create tls server: %w", err))
 	}
-	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, kubeClient))
-	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, kubeClient))
-	tlsSrv.Handle(zpdb.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, kubeClient))
-	tlsSrv.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(zpdbValidationFunc, logger, kubeClient))
+
+	// Each webhook that issues Kubernetes API calls gets its own dedicated client, so that an overloaded
+	// webhook is rate limited independently (its own per-API-group buckets) and cannot throttle the other
+	// webhooks or the core controller. The pod-eviction webhook uses the eviction controller's dedicated
+	// client; the zpdb-validation webhook makes no API calls, so it is served with a nil client.
+	noDownscaleKubeClient, err := newDedicatedKubeClient(kubeConfig)
+	if err != nil {
+		fatal(fmt.Errorf("failed to create no-downscale webhook Kubernetes client: %w", err))
+	}
+	prepareDownscaleKubeClient, err := newDedicatedKubeClient(kubeConfig)
+	if err != nil {
+		fatal(fmt.Errorf("failed to create prepare-downscale webhook Kubernetes client: %w", err))
+	}
+
+	// Deadline imposed on each webhook handler's context. It must be shorter than the TLS server write
+	// timeout and the apiserver's webhook timeout so we respond before either gives up; it also bounds the
+	// client-side rate limiter's wait so a burst of concurrent webhook requests can't stall it (see
+	// instrumentation.LimitKubernetesAPIClientPerAPIGroup). We use 90% of the configured request timeout.
+	webhookHandlerTimeout := cfg.serverTLSRequestTimeout * 9 / 10
+
+	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, noDownscaleKubeClient, webhookHandlerTimeout))
+	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, prepareDownscaleKubeClient, webhookHandlerTimeout))
+	tlsSrv.Handle(zpdb.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, nil, webhookHandlerTimeout))
+	tlsSrv.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(zpdbValidationFunc, logger, nil, webhookHandlerTimeout))
 	if err := tlsSrv.Start(); err != nil {
 		fatal(fmt.Errorf("failed to start tls server: %w", err))
 	}
@@ -402,6 +435,20 @@ func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, resta
 		})
 	}
 
+}
+
+// newDedicatedKubeClient builds a *kubernetes.Clientset backed by its own HTTP transport. The per-API-group
+// client-side rate limiter lives in the transport (see instrumentation.LimitKubernetesAPIClientPerAPIGroup),
+// so each client returned here has an independent set of rate limiter buckets. This isolates components from
+// each other: an overloaded webhook exhausts only its own buckets and cannot throttle the other webhooks or
+// the core controller. The underlying TCP connection pool is still shared (client-go caches it by TLS config),
+// so the isolation is cheap.
+func newDedicatedKubeClient(cfg *rest.Config) (*kubernetes.Clientset, error) {
+	httpClient, err := rest.HTTPClientFor(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return kubernetes.NewForConfigAndClient(cfg, httpClient)
 }
 
 func buildKubeConfig(apiURL, cfgFile string) (*rest.Config, error) {

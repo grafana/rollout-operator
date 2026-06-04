@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -35,9 +36,20 @@ func delegateV1beta1AdmitToV1(f AdmitV1Func) admitv1beta1Func {
 	}
 }
 
-// Serve handles the http portion of a request prior to handing to a V1Handler.
-func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset) http.HandlerFunc {
+// Serve handles the http portion of a request prior to handing to a V1Handler. handlerTimeout, when
+// positive, bounds how long the admit function may run by imposing a deadline on its context.
+func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset, handlerTimeout time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// net/http request contexts have no deadline (they're only cancelled when the connection closes),
+		// but the client-side rate limiter needs one to bound its wait — otherwise concurrent webhook
+		// bursts make its token bucket stall.
+		ctx := r.Context()
+		if handlerTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, handlerTimeout)
+			defer cancel()
+		}
+
 		var body []byte
 		if r.Body != nil {
 			if data, err := io.ReadAll(r.Body); err == nil {
@@ -82,7 +94,7 @@ func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset) http
 			)
 			responseAdmissionReview := &v1beta1.AdmissionReview{}
 			responseAdmissionReview.SetGroupVersionKind(*gvk)
-			responseAdmissionReview.Response = delegateV1beta1AdmitToV1(admit)(r.Context(), logger, *requestedAdmissionReview, api)
+			responseAdmissionReview.Response = delegateV1beta1AdmitToV1(admit)(ctx, logger, *requestedAdmissionReview, api)
 			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 			responseObj = responseAdmissionReview
 			requestUid = requestedAdmissionReview.Request.UID
@@ -102,7 +114,7 @@ func Serve(admit AdmitV1Func, logger log.Logger, api *kubernetes.Clientset) http
 			)
 			responseAdmissionReview := &v1.AdmissionReview{}
 			responseAdmissionReview.SetGroupVersionKind(*gvk)
-			responseAdmissionReview.Response = admit(r.Context(), logger, *requestedAdmissionReview, api)
+			responseAdmissionReview.Response = admit(ctx, logger, *requestedAdmissionReview, api)
 			responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 			responseObj = responseAdmissionReview
 			requestUid = requestedAdmissionReview.Request.UID

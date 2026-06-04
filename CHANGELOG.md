@@ -2,6 +2,9 @@
 
 ## main / unreleased
 
+* [CHANGE] Client-side rate limiting to the Kubernetes API is now enforced with an independent token bucket per API group (e.g. `core/v1`, `apps/v1`, `policy/v1`), and each admission webhook gets its own dedicated client so an overloaded webhook cannot throttle the others or the core controller. As a result, the meaning of `-kubernetes.client-qps=0` changed: it previously fell back to the client-go default (~5 QPS / 10 burst per API group), but now disables client-side rate limiting entirely. The defaults of `-kubernetes.client-qps` (now `5`) and `-kubernetes.client-burst` (now `10`) preserve the previous effective throttling.
+* [FEATURE] Added `-server-tls.request-timeout` to configure the request timeout of the TLS server that serves the admission webhooks (used as the read and write timeouts). Defaults to `10s`, matching the previous hardcoded value.
+* [BUGFIX] Admission webhook handlers now run under a context deadline (90% of `-server-tls.request-timeout`). Without it, a burst of concurrent webhook requests (e.g. pod evictions during node draining) on the deadline-less webhook request contexts drove the client-side rate limiter's token-bucket reservation timeline to run away and stall, so the rollout-operator's Kubernetes API requests collapsed to near-zero throughput and webhooks failed with `context canceled`. The deadline also cancels in-flight Kubernetes API calls when it elapses.
 * [ENHANCEMENT] Updated dependencies, including: #439
   * `github.com/grafana/dskit` from `v0.0.0-20260505171221-7f6e6a43e255` to `v0.0.0-20260601123808-0d4540e255b4`
   * `github.com/prometheus/common` from `v0.67.5` to `v0.68.0`
