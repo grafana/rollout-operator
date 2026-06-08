@@ -59,6 +59,7 @@ type config struct {
 	kubeClientTimeout    time.Duration
 	kubeClientQPS        float64
 	kubeClientBurst      int
+	podClientTimeout     time.Duration
 	reconcileInterval    time.Duration
 	clusterValidationCfg clusterutil.ClusterValidationProtocolConfigForHTTP
 
@@ -88,9 +89,10 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.IntVar(&cfg.serverPort, "server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
 	fs.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
-	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "HTTP client timeout. This applies to requests issued to both the Kubernetes API and Kubernetes resource endpoints.")
+	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "HTTP client timeout. This applies to requests issued to both the Kubernetes API and Kubernetes resource endpoints. It does not apply to HTTP requests issued directly to pod endpoints (e.g. prepare-downscale): those are governed by -pods.client-timeout.")
 	fs.Float64Var(&cfg.kubeClientQPS, "kubernetes.client-qps", 5, "Maximum QPS to the Kubernetes API server, enforced per API group: each API group (e.g. core/v1, apps/v1, policy/v1) gets its own token bucket with this QPS. Set to 0 to disable client-side rate limiting.")
 	fs.IntVar(&cfg.kubeClientBurst, "kubernetes.client-burst", 10, "Maximum burst (token bucket capacity) for the per-API-group rate limiter (see -kubernetes.client-qps). Must be at least 1 when rate limiting is enabled, since each request consumes one token. It does not need to be greater than or equal to the QPS: a smaller burst simply allows less bursting.")
+	fs.DurationVar(&cfg.podClientTimeout, "pods.client-timeout", 5*time.Second, "HTTP client timeout for requests issued directly to pod endpoints (e.g. prepare-downscale). These calls do not go through the Kubernetes API, so they are not subject to -kubernetes.client-timeout nor the client-side rate limiter.")
 	fs.StringVar(&cfg.kubeClusterDomain, "kubernetes.cluster-domain", "cluster.local.", "The Kubernetes cluster domain.")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
@@ -219,9 +221,9 @@ func main() {
 
 	// Client for the HTTP endpoints the operator calls directly on pods (e.g. prepare-downscale). It uses a
 	// transport separate from the Kubernetes API client, so these calls are never subject to the
-	// per-API-group rate limiter and are tracked under their own metric. The 5s timeout matches the value
-	// previously hardcoded in the prepare-downscale webhook.
-	podHTTPClient := instrumentation.NewPodHTTPClient(nil, cfg.kubeNamespace, reporter, 5*time.Second, reg)
+	// per-API-group rate limiter and are tracked under their own metric. Its timeout is configured via
+	// -pods.client-timeout (default 5s, matching the value previously hardcoded in the prepare-downscale webhook).
+	podHTTPClient := instrumentation.NewPodHTTPClient(nil, cfg.kubeNamespace, reporter, cfg.podClientTimeout, reg)
 
 	kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
 		return middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, rt)
