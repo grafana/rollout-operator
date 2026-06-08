@@ -6,14 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptrace"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/spanlogger"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
@@ -30,6 +27,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/util"
 )
 
@@ -38,14 +36,7 @@ const (
 	maxPrepareGoroutines        = 32
 )
 
-func PrepareDownscale(ctx context.Context, rt http.RoundTripper, logger log.Logger, ar admissionv1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string, clusterDomain string) *admissionv1.AdmissionResponse {
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: otelhttp.NewTransport(rt, otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
-			return otelhttptrace.NewClientTrace(ctx)
-		})),
-	}
-
+func PrepareDownscale(ctx context.Context, client *instrumentation.PodHTTPClient, logger log.Logger, ar admissionv1.AdmissionReview, api *kubernetes.Clientset, useZoneTracker bool, zoneTrackerConfigMapName string, clusterDomain string) *admissionv1.AdmissionResponse {
 	if useZoneTracker {
 		zt := newZoneTracker(api, clusterDomain, ar.Request.Namespace, zoneTrackerConfigMapName)
 		return zt.prepareDownscale(ctx, logger, ar, api, client)
@@ -54,11 +45,7 @@ func PrepareDownscale(ctx context.Context, rt http.RoundTripper, logger log.Logg
 	return prepareDownscale(ctx, logger, ar, api, client, clusterDomain)
 }
 
-type httpClient interface {
-	Do(req *http.Request) (*http.Response, error)
-}
-
-func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.AdmissionReview, api kubernetes.Interface, client httpClient, clusterDomain string) *admissionv1.AdmissionResponse {
+func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.AdmissionReview, api kubernetes.Interface, client *instrumentation.PodHTTPClient, clusterDomain string) *admissionv1.AdmissionResponse {
 	logger, ctx := spanlogger.New(ctx, l, "admission.prepareDownscale()", tenantResolver)
 	defer logger.Finish()
 
@@ -488,7 +475,7 @@ func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInf
 	return eps
 }
 
-func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.Logger, client httpClient, ep endpoint) error {
+func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.Logger, client *instrumentation.PodHTTPClient, ep endpoint) error {
 	span := "admission.PreparePodForShutdown"
 	if method == http.MethodDelete {
 		span = "admission.UnpreparePodForShutdown"
@@ -526,7 +513,7 @@ func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.
 	return nil
 }
 
-func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) error {
+func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client *instrumentation.PodHTTPClient, eps []endpoint) error {
 	ctx, span := tracer.Start(ctx, "admission.sendPrepareShutdownRequests()")
 	defer span.End()
 
@@ -552,7 +539,7 @@ func sendPrepareShutdownRequests(ctx context.Context, logger log.Logger, client 
 }
 
 // undoPrepareShutdownRequests sends an HTTP DELETE to each of the given endpoints.
-func undoPrepareShutdownRequests(ctx context.Context, logger log.Logger, client httpClient, eps []endpoint) {
+func undoPrepareShutdownRequests(ctx context.Context, logger log.Logger, client *instrumentation.PodHTTPClient, eps []endpoint) {
 	ctx, span := tracer.Start(ctx, "admission.undoPrepareShutdownRequests()")
 	defer span.End()
 

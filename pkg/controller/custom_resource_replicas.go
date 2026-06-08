@@ -17,9 +17,10 @@ import (
 	scaleclient "k8s.io/client-go/scale"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/instrumentation"
 )
 
-func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx context.Context, groupName string, sets []*appsv1.StatefulSet, clusterDomain string, client httpClient) (bool, error) {
+func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx context.Context, groupName string, sets []*appsv1.StatefulSet, clusterDomain string, client *instrumentation.PodHTTPClient) (bool, error) {
 	// Return early no matter what after scaling up or down a single StatefulSet to make sure that rollout-operator
 	// works with up-to-date models.
 	for _, sts := range sets {

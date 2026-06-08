@@ -18,10 +18,11 @@ import (
 	v1 "k8s.io/api/apps/v1"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/util"
 )
 
-func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, clusterDomain string, httpClient httpClient, replicas int32) {
+func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, clusterDomain string, httpClient *instrumentation.PodHTTPClient, replicas int32) {
 	delay, prepareURL, err := parseDelayedDownscaleAnnotations(sts.GetAnnotations())
 	if delay == 0 || prepareURL == nil {
 		return
@@ -40,7 +41,7 @@ func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, 
 // Checks if downscale delay has been reached on replicas in [desiredReplicas, currentReplicas) range.
 // If there is a range of replicas at the end of statefulset for which delay has been reached, this function
 // returns updated desired replicas that statefulset can be scaled to.
-func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, clusterDomain string, httpClient httpClient, currentReplicas, desiredReplicas int32) (updatedDesiredReplicas int32, _ error) {
+func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, clusterDomain string, httpClient *instrumentation.PodHTTPClient, currentReplicas, desiredReplicas int32) (updatedDesiredReplicas int32, _ error) {
 	if currentReplicas == desiredReplicas {
 		// should not happen
 		return currentReplicas, nil
@@ -155,7 +156,7 @@ func createPrepareDownscaleEndpoints(namespace, statefulSetName, serviceName, cl
 	return eps
 }
 
-func callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx context.Context, logger log.Logger, client httpClient, endpoints []endpoint) (map[int]time.Duration, error) {
+func callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx context.Context, logger log.Logger, client *instrumentation.PodHTTPClient, endpoints []endpoint) (map[int]time.Duration, error) {
 	if len(endpoints) == 0 {
 		return nil, fmt.Errorf("no endpoints")
 	}
@@ -232,7 +233,7 @@ func callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx co
 	return timestamps, err
 }
 
-func callCancelDelayedDownscale(ctx context.Context, logger log.Logger, client httpClient, endpoints []endpoint) {
+func callCancelDelayedDownscale(ctx context.Context, logger log.Logger, client *instrumentation.PodHTTPClient, endpoints []endpoint) {
 	if len(endpoints) == 0 {
 		return
 	}

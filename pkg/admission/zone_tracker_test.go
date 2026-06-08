@@ -297,7 +297,7 @@ func TestLastDownscaledNonExistentZone(t *testing.T) {
 }
 
 func TestZoneTrackerConcurrentDownscale(t *testing.T) {
-	f := newFakeHttpClient(func(r *http.Request) (*http.Response, error) {
+	f := newFakeRoundTripper(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(bytes.NewBuffer([]byte(""))),
@@ -385,7 +385,7 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 	ingesterZoneAPrepDownscaleDone := make(chan struct{})
 	ingesterZoneADownscaleInitiated := atomic.Bool{}
 	go func() {
-		f := newFakeHttpClient(func(r *http.Request) (*http.Response, error) {
+		f := newFakeRoundTripper(func(r *http.Request) (*http.Response, error) {
 			ingesterZoneADownscaleInitiated.Store(true)
 			<-ingesterZoneAPrepDownscaleDone
 			return &http.Response{
@@ -395,7 +395,7 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 		})
 
 		ar := buildAdmissionRequest(rolloutGroupIngester, ingesterZoneA)
-		admissionResponse := zt.prepareDownscale(context.Background(), logger, ar, api, f)
+		admissionResponse := zt.prepareDownscale(context.Background(), logger, ar, api, f.client())
 		require.True(t, admissionResponse.Allowed, admissionResponse.Result.Message)
 	}()
 
@@ -406,7 +406,7 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 
 	// ingester-zone-b downscale request for rollout group ingester should get rejected
 	ar := buildAdmissionRequest(rolloutGroupIngester, ingesterZoneB)
-	admissionResponse := zt.prepareDownscale(context.Background(), logger, ar, api, f)
+	admissionResponse := zt.prepareDownscale(context.Background(), logger, ar, api, f.client())
 	require.False(t, admissionResponse.Allowed)
 	require.Equal(t, "downscale of statefulsets/ingester-zone-b in test from 5 to 2 replicas is not allowed because statefulset ingester-zone-a is already in process of updating replicas", admissionResponse.Result.Message)
 
@@ -416,7 +416,7 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 
 	// while downscale request for group index-gateway should pass
 	ar = buildAdmissionRequest(rolloutGroupIndexGateway, indexGatewayZoneA)
-	admissionResponse = zt.prepareDownscale(context.Background(), logger, ar, api, f)
+	admissionResponse = zt.prepareDownscale(context.Background(), logger, ar, api, f.client())
 	require.True(t, admissionResponse.Allowed)
 
 	// only index-gateway-zone-a should have been updated
@@ -430,7 +430,7 @@ func TestZoneTrackerConcurrentDownscale(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		ar = buildAdmissionRequest(rolloutGroupIngester, ingesterZoneB)
-		return zt.prepareDownscale(context.Background(), logger, ar, api, f).Allowed
+		return zt.prepareDownscale(context.Background(), logger, ar, api, f.client()).Allowed
 	}, 5*time.Second, 50*time.Millisecond)
 
 	// index-gateway-zone-a and ingester-zone-(a|b) should have been updated
