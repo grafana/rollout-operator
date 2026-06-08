@@ -59,8 +59,8 @@ jobs:
           JSONNET_VERSION="0.21.0"
           asset="go-jsonnet_Linux_x86_64.tar.gz"
           tmp="$(mktemp -d)"
-          curl -sL -o "${tmp}/checksums.txt" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/checksums.txt"
-          curl -sL -o "${tmp}/${asset}" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/${asset}"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/checksums.txt" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/checksums.txt"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/${asset}" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/${asset}"
           expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
           [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
           (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
@@ -72,7 +72,7 @@ jobs:
           # Upstream does not publish a checksum manifest; verify against pinned hash.
           # On version bumps, recompute via: curl -sL <url> | sha256sum
           TANKA_SHA256="dd4bdf619b4e1fc61172c390b12f6a7503d9e936b957d69c8bcebbf7285e299c"
-          sudo curl -sLo /usr/local/bin/tk "https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64"
+          sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/local/bin/tk "https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64"
           echo "${TANKA_SHA256}  /usr/local/bin/tk" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/tk
       - name: Install jb
@@ -82,7 +82,7 @@ jobs:
           # Upstream does not publish a checksum manifest; verify against pinned hash.
           # On version bumps, recompute via: curl -sL <url> | sha256sum
           JSONNET_BUNDLER_SHA256="78e54afbbc3ff3e0942b1576b4992277df4f6beb64cddd58528a76f0cd70db54"
-          sudo curl -sLo /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
+          sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
           echo "${JSONNET_BUNDLER_SHA256}  /usr/local/bin/jb" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/jb
       - run: make build-image
@@ -109,8 +109,8 @@ jobs:
           JSONNET_VERSION="0.21.0"
           asset="go-jsonnet_Linux_x86_64.tar.gz"
           tmp="$(mktemp -d)"
-          curl -sL -o "${tmp}/checksums.txt" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/checksums.txt"
-          curl -sL -o "${tmp}/${asset}" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/${asset}"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/checksums.txt" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/checksums.txt"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/${asset}" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/${asset}"
           expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
           [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
           (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
@@ -122,7 +122,7 @@ jobs:
           # Upstream does not publish a checksum manifest; verify against pinned hash.
           # On version bumps, recompute via: curl -sL <url> | sha256sum
           TANKA_SHA256="dd4bdf619b4e1fc61172c390b12f6a7503d9e936b957d69c8bcebbf7285e299c"
-          sudo curl -sLo /usr/local/bin/tk "https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64"
+          sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/local/bin/tk "https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64"
           echo "${TANKA_SHA256}  /usr/local/bin/tk" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/tk
       - name: Install jb
@@ -132,7 +132,7 @@ jobs:
           # Upstream does not publish a checksum manifest; verify against pinned hash.
           # On version bumps, recompute via: curl -sL <url> | sha256sum
           JSONNET_BUNDLER_SHA256="78e54afbbc3ff3e0942b1576b4992277df4f6beb64cddd58528a76f0cd70db54"
-          sudo curl -sLo /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
+          sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
           echo "${JSONNET_BUNDLER_SHA256}  /usr/local/bin/jb" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/jb
       - run: make build-image-boringcrypto
@@ -171,8 +171,8 @@ jobs:
           JSONNET_VERSION="0.21.0"
           asset="go-jsonnet_Linux_x86_64.tar.gz"
           tmp="$(mktemp -d)"
-          curl -sL -o "${tmp}/checksums.txt" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/checksums.txt"
-          curl -sL -o "${tmp}/${asset}" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/${asset}"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/checksums.txt" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/checksums.txt"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/${asset}" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/${asset}"
           expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
           [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
           (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
@@ -183,8 +183,8 @@ jobs:
           CONFTEST_VERSION="0.62.0"
           asset="conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
           tmp="$(mktemp -d)"
-          curl -sL -o "${tmp}/checksums.txt" "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/checksums.txt"
-          curl -sL -o "${tmp}/${asset}" "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/${asset}"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/checksums.txt" "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/checksums.txt"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/${asset}" "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/${asset}"
           expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
           [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
           (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
@@ -196,7 +196,7 @@ jobs:
           # Upstream does not publish a checksum manifest; verify against pinned hash.
           # On version bumps, recompute via: curl -sL <url> | sha256sum
           TANKA_SHA256="dd4bdf619b4e1fc61172c390b12f6a7503d9e936b957d69c8bcebbf7285e299c"
-          sudo curl -sLo /usr/local/bin/tk "https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64"
+          sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/local/bin/tk "https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64"
           echo "${TANKA_SHA256}  /usr/local/bin/tk" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/tk
       - name: Install jb
@@ -206,7 +206,7 @@ jobs:
           # Upstream does not publish a checksum manifest; verify against pinned hash.
           # On version bumps, recompute via: curl -sL <url> | sha256sum
           JSONNET_BUNDLER_SHA256="78e54afbbc3ff3e0942b1576b4992277df4f6beb64cddd58528a76f0cd70db54"
-          sudo curl -sLo /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
+          sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
           echo "${JSONNET_BUNDLER_SHA256}  /usr/local/bin/jb" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/jb
       - name: Install mixtool
@@ -236,8 +236,8 @@ jobs:
           MISSPELL_VERSION="0.3.4"
           asset="misspell_${MISSPELL_VERSION}_linux_64bit.tar.gz"
           tmp="$(mktemp -d)"
-          curl -sL -o "${tmp}/checksums.txt" "https://github.com/client9/misspell/releases/download/v${MISSPELL_VERSION}/misspell_${MISSPELL_VERSION}_checksums.txt"
-          curl -sL -o "${tmp}/${asset}" "https://github.com/client9/misspell/releases/download/v${MISSPELL_VERSION}/${asset}"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/checksums.txt" "https://github.com/client9/misspell/releases/download/v${MISSPELL_VERSION}/misspell_${MISSPELL_VERSION}_checksums.txt"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/${asset}" "https://github.com/client9/misspell/releases/download/v${MISSPELL_VERSION}/${asset}"
           expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
           [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
           (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
