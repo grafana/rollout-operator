@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.38.0
+
 * [CHANGE] Client-side rate limiting to the Kubernetes API is now enforced with an independent token bucket per API group (e.g. `core/v1`, `apps/v1`, `policy/v1`), and each admission webhook gets its own dedicated client so an overloaded webhook cannot throttle the others or the core controller. As a result, the meaning of `-kubernetes.client-qps=0` changed: it previously fell back to the client-go default (~5 QPS / 10 burst per API group), but now disables client-side rate limiting entirely. The defaults of `-kubernetes.client-qps` (now `5`) and `-kubernetes.client-burst` (now `10`) preserve the previous effective throttling. #441
 * [FEATURE] Added `-server-tls.request-timeout` to configure the request timeout of the TLS server that serves the admission webhooks (used as the read and write timeouts). Defaults to `10s`, matching the previous hardcoded value. #441
 * [FEATURE] Added `-pods.client-timeout` to configure the timeout of HTTP requests issued directly to pod endpoints (e.g. prepare-downscale). Defaults to `5s`, matching the previous hardcoded value. #441
