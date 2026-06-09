@@ -274,8 +274,14 @@ jobs:
           go-version: '1.26'
           check-latest: true
           cache: false
-      - name: Log in to Docker Hub
-        uses: grafana/shared-workflows/actions/dockerhub-login@ef3a62a3ca4c1a15505b4235a5a51493194da3c7 # dockerhub-login/v1.0.4
+      # The shared Docker Hub write token has been disabled. We now push to a
+      # repo-scoped GAR mirror repo via OIDC; the gar-image-mirror ops service
+      # copies the images to docker.io/grafana. See
+      # https://github.com/grafana/deployment_tools/blob/master/docs/platform/gar-image-mirror.md
+      - name: Log in to GAR
+        uses: grafana/shared-workflows/actions/login-to-gar@c7ad5f57693ac858c698d95783685a9cbfd91223 # login-to-gar/v1.0.1
+        with:
+          registry: us-docker.pkg.dev
       - name: Set up QEMU
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
       - name: Set up Docker Buildx
@@ -301,6 +307,25 @@ jobs:
           fi
         env:
           REF_TYPE: ${{ github.ref_type }}
+          IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
+          # Push to the GAR mirror repo; gar-image-mirror copies these to
+          # docker.io/grafana. The Publish release step below intentionally does
+          # not set IMAGE_PREFIX, so the release notes keep the public grafana/ name.
+          IMAGE_PREFIX: us-docker.pkg.dev/grafanalabs-global/dockerhub-rollout-operator-prod-mirror
+      # Publishing to Docker Hub via the mirror is asynchronous, so wait for the
+      # images to appear before creating the release (whose notes reference them).
+      - name: Wait for images on Docker Hub
+        if: github.ref_type == 'tag'
+        timeout-minutes: 15
+        run: |
+          for img in rollout-operator rollout-operator-boringcrypto; do
+            until docker buildx imagetools inspect "docker.io/grafana/$img:$IMAGE_TAG" >/dev/null 2>&1; do
+              echo "waiting for docker.io/grafana/$img:$IMAGE_TAG to be mirrored"
+              sleep 15
+            done
+            echo "docker.io/grafana/$img:$IMAGE_TAG is available"
+          done
+        env:
           IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
       - name: Publish release
         if: github.ref_type == 'tag'
