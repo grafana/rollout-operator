@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #443
+  * `github.com/prometheus/common` from `v0.68.0` to `v0.68.1`
+  * `golang.org/x/sync` from `v0.20.0` to `v0.21.0`
+
 ## v0.38.0
 
 * [CHANGE] Client-side rate limiting to the Kubernetes API is now enforced with an independent token bucket per API group (e.g. `core/v1`, `apps/v1`, `policy/v1`), and each admission webhook gets its own dedicated client so an overloaded webhook cannot throttle the others or the core controller. As a result, the meaning of `-kubernetes.client-qps=0` changed: it previously fell back to the client-go default (~5 QPS / 10 burst per API group), but now disables client-side rate limiting entirely. The defaults of `-kubernetes.client-qps` (now `5`) and `-kubernetes.client-burst` (now `10`) preserve the previous effective throttling. #441
