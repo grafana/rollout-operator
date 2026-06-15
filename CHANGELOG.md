@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+## v0.28.7
+
+* [ENHANCEMENT] Updated dependencies to resolve CVEs. #450
+
 ## v0.28.6
 
 * [ENHANCEMENT] Updated dependencies to resolve CVEs. #432 
