@@ -2,9 +2,11 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Updated dependencies, including: #443
+* [ENHANCEMENT] Updated dependencies, including: #443 #447
   * `github.com/prometheus/common` from `v0.68.0` to `v0.68.1`
+  * `golang.org/x/mod` from `v0.36.0` to `v0.37.0`
   * `golang.org/x/sync` from `v0.20.0` to `v0.21.0`
+  * `k8s.io/apimachinery` from `v0.36.1` to `v0.36.2`
 
 ## v0.38.0
 
