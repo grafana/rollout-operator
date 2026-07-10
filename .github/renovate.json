@@ -77,6 +77,12 @@
     "rebaseWhen": "behind-base-branch",
     "packageRules": [
         {
+            "description": "Disable updates for indirect go dependencies",
+            "matchManagers": ["gomod"],
+            "matchDepTypes": ["indirect"],
+            "enabled": false
+        },
+        {
             "description": "Group all go dependencies together to reduce noise",
             "matchDatasources": [
                 "go"
