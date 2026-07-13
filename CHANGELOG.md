@@ -2,11 +2,11 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Updated dependencies, including: #443 #447 #455
+* [ENHANCEMENT] Updated dependencies, including: #443 #447 #455 #457
   * `github.com/grafana/dskit` from `v0.0.0-20260601123808-0d4540e255b4` to `v0.0.0-20260703122047-de1ec7541c44`
-  * `github.com/prometheus/common` from `v0.68.0` to `v0.69.0`
-  * `golang.org/x/mod` from `v0.36.0` to `v0.37.0`
-  * `golang.org/x/sync` from `v0.20.0` to `v0.21.0`
+  * `github.com/prometheus/common` from `v0.68.0` to `v0.70.0`
+  * `golang.org/x/mod` from `v0.36.0` to `v0.38.0`
+  * `golang.org/x/sync` from `v0.20.0` to `v0.22.0`
   * `k8s.io/api` from `v0.36.1` to `v0.36.2`
   * `k8s.io/apiextensions-apiserver` from `v0.36.1` to `v0.36.2`
   * `k8s.io/apimachinery` from `v0.36.1` to `v0.36.2`
