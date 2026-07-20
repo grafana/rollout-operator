@@ -19,6 +19,11 @@ expected_rules = [
     "verbs": ["update"],
   },
   {
+    "apiGroups": ["apps"],
+    "resources": ["deployments"],
+    "verbs": ["list", "get", "watch", "patch"],
+  },
+  {
     "apiGroups": [""],
     "resources": ["configmaps"],
     "verbs": ["get", "update", "create"],

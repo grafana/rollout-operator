@@ -156,6 +156,52 @@ spec:
 
 To resume normal rollout behavior, remove the annotation or set it to any value other than `true`.
 
+## Phased Deployment rollouts
+
+Opt-in sequencing for Kubernetes Deployments. A dependent Deployment stays paused until its upstream Deployment finishes rolling, soaks for a configurable period (default `5m`), and passes a restart check (default: container restart deltas divided by upstream pod count must be below `10%`).
+
+### Enablement
+
+Label opted-in Deployments and stamp a shared revision from Git/jsonnet. Point followers at their upstream with `grafana.com/rollout-depends-on`:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query-frontend-zone-a
+  labels:
+    grafana.com/rollout-phased: "true"
+  annotations:
+    grafana.com/rollout-revision: "r388"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query-frontend-zone-b
+  labels:
+    grafana.com/rollout-phased: "true"
+  annotations:
+    grafana.com/rollout-depends-on: query-frontend-zone-a
+    grafana.com/rollout-revision: "r388"
+    # Optional overrides:
+    # grafana.com/rollout-soak-duration: "5m"
+    # grafana.com/rollout-restart-threshold: "10%"
+```
+
+The mutating webhook `/admission/phased-deployment` (scoped to `grafana.com/rollout-phased: "true"`) pauses the follower when the revision changes and re-applies `spec.paused: true` on later applies while the gate is active (including Flux server-side apply).
+
+Chains such as zone-a → zone-b → zone-c are supported by setting `depends-on` on each follower. Disable by removing `grafana.com/rollout-depends-on` (the webhook clears gate state and restores the prior pause intent) and optionally the `grafana.com/rollout-phased` label. If you remove only the label while the Deployment is still paused by the operator, unpause it manually.
+
+### Resume after a failed soak
+
+If the restart check fails, the follower stays paused with phase `blocked`. Resume for that revision:
+
+```bash
+kubectl annotate deployment query-frontend-zone-b grafana.com/rollout-resume=r388 --overwrite
+```
+
+The operator then marks the gate complete and unpauses immediately (no fresh soak).
+
 ## Operations
 
 ### HTTP endpoints
@@ -174,7 +220,11 @@ Prometheus metrics endpoint.
 
 #### `/admission/no-downscale`
 
-Offers a `ValidatingAdmissionWebhook` that rejects the requests that decrease the number of replicas in objects labeled as `grafana.com/no-downscale: true`. See [Webhooks](#webhooks) section below. 
+Offers a `ValidatingAdmissionWebhook` that rejects the requests that decrease the number of replicas in objects labeled as `grafana.com/no-downscale: true`. See [Webhooks](#webhooks) section below.
+
+#### `/admission/phased-deployment`
+
+Offers a `MutatingAdmissionWebhook` that pauses opted-in dependent Deployments while an upstream soak gate is active. See [Phased Deployment rollouts](#phased-deployment-rollouts).
 
 #### `/pods/eviction`
 
@@ -216,6 +266,15 @@ rules:
   - statefulsets/status
   verbs:
   - update
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - list
+  - get
+  - watch
+  - patch
 - apiGroups:
   - rollout-operator.grafana.com
   resources:
