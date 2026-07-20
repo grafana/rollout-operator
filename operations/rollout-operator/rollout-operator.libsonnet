@@ -50,6 +50,7 @@
     // block other operations that would block the service creation.
     ignore_rollout_operator_no_downscale_webhook_failures: false,
     ignore_rollout_operator_prepare_downscale_webhook_failures: false,
+    ignore_rollout_operator_phased_deployment_webhook_failures: false,
     ignore_rollout_operator_zpdb_eviction_webhook_failures: false,
     ignore_rollout_operator_zpdb_validation_webhook_failures: false,
   },
@@ -59,6 +60,7 @@
   assert !$._config.rollout_operator_webhooks_enabled || $._config.rollout_operator_enabled : 'rollout_operator_webhooks_enabled requires rollout_operator_enabled=true',
   assert !$._config.ignore_rollout_operator_no_downscale_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_no_downscale_webhook_failures requires rollout_operator_webhooks_enabled=true',
   assert !$._config.ignore_rollout_operator_prepare_downscale_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_prepare_downscale_webhook_failures requires rollout_operator_webhooks_enabled=true',
+  assert !$._config.ignore_rollout_operator_phased_deployment_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_phased_deployment_webhook_failures requires rollout_operator_webhooks_enabled=true',
   assert !$._config.ignore_rollout_operator_zpdb_eviction_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_zpdb_eviction_webhook_failures requires rollout_operator_webhooks_enabled=true',
   assert !$._config.ignore_rollout_operator_zpdb_validation_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_zpdb_validation_webhook_failures requires rollout_operator_webhooks_enabled=true',
   assert !$._config.replica_template_custom_resource_definition_enabled || $._config.rollout_operator_webhooks_enabled : 'replica_template_custom_resource_definition_enabled requires rollout_operator_webhooks_enabled=true',
@@ -131,6 +133,9 @@
         policyRule.withApiGroups('apps') +
         policyRule.withResources(['statefulsets/status']) +
         policyRule.withVerbs(['update']),
+        policyRule.withApiGroups('apps') +
+        policyRule.withResources(['deployments']) +
+        policyRule.withVerbs(['list', 'get', 'watch', 'patch']),
         policyRule.withApiGroups('') +
         policyRule.withResources(['configmaps']) +
         policyRule.withVerbs(['get', 'update', 'create']),
@@ -352,6 +357,50 @@
             name: 'rollout-operator',
             namespace: $._config.namespace,
             path: '/admission/prepare-downscale',
+            port: 443,
+          },
+        },
+      },
+    ]),
+
+  phased_deployment_webhook: if !enableWebhooks then null else
+    mutatingWebhookConfiguration.new('phased-deployment-%s' % $._config.namespace) +
+    mutatingWebhookConfiguration.mixin.metadata.withLabels({
+      'grafana.com/namespace': $._config.namespace,
+      'grafana.com/inject-rollout-operator-ca': 'true',
+    }) +
+    mutatingWebhookConfiguration.withWebhooksMixin([
+      mutatingWebhook.withName('phased-deployment-%s.grafana.com' % $._config.namespace)
+      + mutatingWebhook.withAdmissionReviewVersions(['v1'])
+      + mutatingWebhook.withFailurePolicy(if $._config.ignore_rollout_operator_phased_deployment_webhook_failures then 'Ignore' else 'Fail')
+      + mutatingWebhook.withMatchPolicy('Equivalent')
+      + mutatingWebhook.withSideEffects('NoneOnDryRun')
+      + mutatingWebhook.withTimeoutSeconds(10)
+      + mutatingWebhook.withRulesMixin([
+        {
+          apiGroups: ['apps'],
+          apiVersions: ['v1'],
+          operations: ['CREATE', 'UPDATE'],
+          resources: ['deployments'],
+          scope: 'Namespaced',
+        },
+      ])
+      + {
+        namespaceSelector: {
+          matchLabels: {
+            'kubernetes.io/metadata.name': $._config.namespace,
+          },
+        },
+        objectSelector: {
+          matchLabels: {
+            'grafana.com/rollout-phased': 'true',
+          },
+        },
+        clientConfig: {
+          service: {
+            name: 'rollout-operator',
+            namespace: $._config.namespace,
+            path: '/admission/phased-deployment',
             port: 443,
           },
         },

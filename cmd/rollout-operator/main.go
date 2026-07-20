@@ -44,7 +44,7 @@ import (
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
 
 var (
-	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale"}
+	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale", "admission/phased-deployment"}
 )
 
 type config struct {
@@ -295,10 +295,16 @@ func main() {
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
 
+	phasedController := controller.NewPhasedDeploymentController(coreKubeClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
+	if err := phasedController.Init(); err != nil {
+		fatal(fmt.Errorf("failed to init phased deployment controller: %w", err))
+	}
+
 	// Listen to sigterm, as well as for restart (like for certificate renewal).
 	go func() {
 		waitForSignalOrRestart(logger, restart)
 		c.Stop()
+		phasedController.Stop()
 		evictionController.Stop()
 		webhookObserver.Stop()
 		if webhookCollector != nil {
@@ -309,6 +315,8 @@ func main() {
 
 	// The operator is ready once the controller successfully initialised.
 	ready.Store(true)
+
+	go phasedController.Run()
 
 	// Run and block until stopped.
 	c.Run()
@@ -411,6 +419,7 @@ func maybeStartTLSServer(cfg config, kubeConfig *rest.Config, podHTTPClient *ins
 
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, noDownscaleKubeClient, webhookHandlerTimeout))
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, prepareDownscaleKubeClient, webhookHandlerTimeout))
+	tlsSrv.Handle(admission.PhasedDeploymentWebhookPath, admission.Serve(admission.PhasedDeployment, logger, nil, webhookHandlerTimeout))
 	tlsSrv.Handle(zpdb.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, nil, webhookHandlerTimeout))
 	tlsSrv.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(zpdbValidationFunc, logger, nil, webhookHandlerTimeout))
 	if err := tlsSrv.Start(); err != nil {

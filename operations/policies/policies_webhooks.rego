@@ -83,6 +83,24 @@ deny contains msg if {
     msg := sprintf("MutatingWebhookConfiguration does not have expected rule, %v. Expected %v, got %v", [display_name(obj), rule, obj.webhooks[0].rules])
 }
 
+# Assert that the phased-deployment has expected path
+deny contains msg if {
+    path := "/admission/phased-deployment"
+	obj := input[_].contents
+	is_phased_deployment_webhook(obj)
+	obj.webhooks[0].clientConfig.service.path != path
+    msg := sprintf("MutatingWebhookConfiguration does not have expected path, %v. Expected %v, got %v", [display_name(obj), path, obj.webhooks[0].clientConfig.service.path])
+}
+
+# Assert that the phased-deployment has expected rule
+deny contains msg if {
+    rule := { "apiGroups": ["apps"], "apiVersions": ["v1"], "operations": ["CREATE", "UPDATE"], "resources": ["deployments"] }
+	obj := input[_].contents
+	is_phased_deployment_webhook(obj)
+	not webhook_rule_present(obj, rule)
+    msg := sprintf("MutatingWebhookConfiguration does not have expected rule, %v. Expected %v, got %v", [display_name(obj), rule, obj.webhooks[0].rules])
+}
+
 # Assert that the no-downscale has expected path
 deny contains msg if {
     path := "/admission/no-downscale"
