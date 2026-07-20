@@ -471,18 +471,6 @@ func (c *PhasedDeploymentController) ensurePaused(ctx context.Context, dep *apps
 	})
 }
 
-func (c *PhasedDeploymentController) patchAnnotations(ctx context.Context, name string, annotations map[string]string) error {
-	payload := make(map[string]interface{}, len(annotations))
-	for k, v := range annotations {
-		payload[k] = v
-	}
-	return c.patchDeployment(ctx, name, map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"annotations": payload,
-		},
-	})
-}
-
 func (c *PhasedDeploymentController) patchDeployment(ctx context.Context, name string, patch map[string]interface{}) error {
 	b, err := json.Marshal(patch)
 	if err != nil {
