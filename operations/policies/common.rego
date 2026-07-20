@@ -145,6 +145,15 @@ is_prepare_downscale_webhook(obj) if {
     startswith(obj.metadata.name, "prepare-downscale-")
 }
 
+has_phased_deployment_webhook if {
+    is_phased_deployment_webhook(input[_].contents)
+}
+
+is_phased_deployment_webhook(obj) if {
+    obj.kind == "MutatingWebhookConfiguration"
+    startswith(obj.metadata.name, "phased-deployment-")
+}
+
 has_no_downscale_webhook if {
     is_no_downscale_webhook(input[_].contents)
 }
