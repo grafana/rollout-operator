@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +32,20 @@ func TestPhasedDeploymentHappyCase(t *testing.T) {
 
 	whPath := path + "admissionregistration.k8s.io-v1.MutatingWebhookConfiguration-phased-deployment-default.yaml"
 	createMutatingWebhookConfiguration(t, api, ctx, whPath)
-	require.Eventually(t, awaitCABundleAssignment(1, ctx, api), 30*time.Second, 50*time.Millisecond, "phased webhook has CABundle")
+	require.Eventually(t, func() bool {
+		list, err := api.AdmissionregistrationV1().MutatingWebhookConfigurations().List(ctx, metav1.ListOptions{
+			LabelSelector: "grafana.com/inject-rollout-operator-ca=true,grafana.com/namespace=default",
+		})
+		if err != nil || len(list.Items) == 0 {
+			return false
+		}
+		for _, wh := range list.Items {
+			if strings.HasPrefix(wh.Name, "phased-deployment-") && len(wh.Webhooks) > 0 && len(wh.Webhooks[0].ClientConfig.CABundle) > 0 {
+				return true
+			}
+		}
+		return false
+	}, 30*time.Second, 50*time.Millisecond, "phased webhook has CABundle")
 
 	const rev1 = "r1"
 	const rev2 = "r2"
