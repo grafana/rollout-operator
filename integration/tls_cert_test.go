@@ -52,7 +52,7 @@ func TestSelfSignedCertificate_EmptySecret(t *testing.T) {
 
 	t.Log("Secret should now contain a valid certificate and the webhook CA should be patched.")
 	requireEventuallyValidCertificateSecret(t, ctx, api)
-	requireEventuallyWebhookHasCABundle(t, ctx, api, webhookName)
+	requireEventuallyWebhookMatchesSecretCA(t, ctx, api, webhookName)
 
 	requireNoDownscaleWebhookWorks(t, ctx, api)
 }
@@ -104,7 +104,7 @@ func TestSelfSignedCertificate_RenewsExpiredSecretOnStartup(t *testing.T) {
 		return notAfter.After(time.Now())
 	}, 2*time.Minute, time.Second, "expired certificate should be renewed on startup")
 
-	requireEventuallyWebhookHasCABundle(t, ctx, api, webhookName)
+	requireEventuallyWebhookMatchesSecretCA(t, ctx, api, webhookName)
 	requireNoDownscaleWebhookWorks(t, ctx, api)
 }
 
@@ -158,7 +158,7 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 	t.Logf("Renewed certificate expires at %s", renewedNotAfter)
 
 	requireRolloutOperatorReady(t, ctx, api)
-	requireEventuallyWebhookHasCABundle(t, ctx, api, webhookName)
+	requireEventuallyWebhookMatchesSecretCA(t, ctx, api, webhookName)
 	requireNoDownscaleWebhookWorks(t, ctx, api)
 }
 
@@ -207,22 +207,37 @@ func requireEventuallyValidCertificateSecret(t *testing.T, ctx context.Context, 
 	return notAfter
 }
 
-func requireEventuallyWebhookHasCABundle(t *testing.T, ctx context.Context, api *kubernetes.Clientset, webhookName string) {
+func requireEventuallyWebhookMatchesSecretCA(t *testing.T, ctx context.Context, api *kubernetes.Clientset, webhookName string) {
 	t.Helper()
 
 	require.Eventually(t, func() bool {
+		secret, err := api.CoreV1().Secrets(corev1.NamespaceDefault).Get(ctx, certificateSecretName, metav1.GetOptions{})
+		if err != nil {
+			t.Logf("secret not ready: %v", err)
+			return false
+		}
+		expectedCA := secret.Data["ca"]
+		if len(expectedCA) == 0 {
+			t.Log("certificate secret has no CA yet")
+			return false
+		}
+
 		webhook, err := api.AdmissionregistrationV1().ValidatingWebhookConfigurations().Get(ctx, webhookName, metav1.GetOptions{})
 		if err != nil {
 			t.Logf("webhook not ready: %v", err)
 			return false
 		}
-		return webhookHasNonEmptyCABundle(webhook)
-	}, 2*time.Minute, time.Second, "webhook CA bundle should be patched")
+		if !webhookHasCABundle(webhook, expectedCA) {
+			t.Log("webhook CA bundle does not match the certificate secret CA yet")
+			return false
+		}
+		return true
+	}, 2*time.Minute, time.Second, "webhook CA bundle should match the certificate secret CA")
 }
 
-func webhookHasNonEmptyCABundle(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) bool {
+func webhookHasCABundle(webhook *admissionregistrationv1.ValidatingWebhookConfiguration, expectedCA []byte) bool {
 	for _, wh := range webhook.Webhooks {
-		if len(wh.ClientConfig.CABundle) > 0 {
+		if bytes.Equal(wh.ClientConfig.CABundle, expectedCA) {
 			return true
 		}
 	}
