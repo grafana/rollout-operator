@@ -94,7 +94,8 @@ SHARD_COUNT ?= 1
 .PHONY: integration
 integration: ## Run integration tests (set SHARD_INDEX/SHARD_COUNT to split across runners)
 integration: check-kind integration/mock-service/.uptodate
-	@set -euo pipefail; \
+	@# bash: make uses /bin/sh (dash on Ubuntu), which has no pipefail
+	@bash -euo pipefail -c '\
 	if [ "$(SHARD_COUNT)" -le 1 ]; then \
 		go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...; \
 	else \
@@ -102,18 +103,18 @@ integration: check-kind integration/mock-service/.uptodate
 			echo "SHARD_INDEX ($(SHARD_INDEX)) must be in [0, $(SHARD_COUNT))" >&2; \
 			exit 1; \
 		fi; \
-		listed=$$(go test -tags requires_docker -list 'Test.*' ./integration/...); \
-		tests=$$(printf '%s\n' "$$listed" | awk -v n="$(SHARD_COUNT)" -v i="$(SHARD_INDEX)" \
-			'/^Test/ { if ((c++ % n) == i) print }'); \
+		listed=$$(go test -tags requires_docker -list "Test.*" ./integration/...); \
+		tests=$$(printf "%s\n" "$$listed" | awk -v n="$(SHARD_COUNT)" -v i="$(SHARD_INDEX)" \
+			"/^Test/ { if ((c++ % n) == i) print }"); \
 		if [ -z "$$tests" ]; then \
 			echo "No integration tests for shard $(SHARD_INDEX)/$(SHARD_COUNT)"; \
 			exit 0; \
 		fi; \
-		pattern=$$(printf '%s\n' "$$tests" | paste -sd '|' -); \
+		pattern=$$(printf "%s\n" "$$tests" | paste -sd "|" -); \
 		echo "Running shard $(SHARD_INDEX)/$(SHARD_COUNT):"; \
-		printf '%s\n' "$$tests"; \
+		printf "%s\n" "$$tests"; \
 		go test -v -tags requires_docker -count 1 -timeout 1h -run "^($$pattern)$$" ./integration/...; \
-	fi
+	fi'
 
 integration/mock-service/.uptodate:
 	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
