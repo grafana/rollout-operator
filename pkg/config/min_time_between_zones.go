@@ -9,9 +9,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// warnedMinTimeLabelObjects tracks objects for which we've already logged the
-// deprecated-label warning, to avoid spamming on every reconcile/admission check.
-var warnedMinTimeLabelObjects sync.Map
+// warnMinTimeLabelOnce ensures we only log the deprecated-label warning once
+// for the process lifetime, to avoid spamming on every reconcile/admission check.
+var warnMinTimeLabelOnce sync.Once
 
 // GetMinTimeBetweenZonesDownscale returns the configured minimum time between zone
 // downscales from the object's metadata. The annotation is preferred. The label is
@@ -25,14 +25,13 @@ func GetMinTimeBetweenZonesDownscale(obj metav1.Object, logger log.Logger) (stri
 
 	if labels := obj.GetLabels(); labels != nil {
 		if value, ok := labels[MinTimeBetweenZonesDownscaleLabelKey]; ok && value != "" {
-			warnKey := obj.GetNamespace() + "/" + obj.GetName()
-			if _, alreadyWarned := warnedMinTimeLabelObjects.LoadOrStore(warnKey, struct{}{}); !alreadyWarned {
+			warnMinTimeLabelOnce.Do(func() {
 				level.Warn(logger).Log(
 					"msg", fmt.Sprintf("%s is set as a label; prefer the annotation with the same key. Label support will be removed in a future release", MinTimeBetweenZonesDownscaleLabelKey),
 					"name", obj.GetName(),
 					"namespace", obj.GetNamespace(),
 				)
-			}
+			})
 			return value, true
 		}
 	}
