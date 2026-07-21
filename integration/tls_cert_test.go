@@ -164,9 +164,9 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 
 	t.Log("Switch to a long-lived certificate so admission checks aren't racing another short expiry.")
 	requireUpdateSelfSignedCertExpiration(t, ctx, api, "1w")
-	require.NoError(t, api.CoreV1().Secrets(corev1.NamespaceDefault).Delete(ctx, certificateSecretName, metav1.DeleteOptions{}))
-	podName := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
-	require.NoError(t, api.CoreV1().Pods(corev1.NamespaceDefault).Delete(ctx, podName, metav1.DeleteOptions{}))
+	err := api.CoreV1().Secrets(corev1.NamespaceDefault).Delete(ctx, certificateSecretName, metav1.DeleteOptions{})
+	require.NoError(t, err)
+	requireDeleteNonTerminatingPods(t, ctx, api, "name=rollout-operator")
 
 	require.Eventually(t, func() bool {
 		secret, err := api.CoreV1().Secrets(corev1.NamespaceDefault).Get(ctx, certificateSecretName, metav1.GetOptions{})
@@ -248,8 +248,68 @@ func setSelfSignedCertExpiration(args []string, expiration string) []string {
 
 func requireRolloutOperatorReady(t *testing.T, ctx context.Context, api *kubernetes.Clientset) {
 	t.Helper()
-	pod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
-	requireEventuallyPod(t, api, ctx, pod, expectPodPhase(corev1.PodRunning), expectReady())
+
+	require.Eventually(t, func() bool {
+		pod, ok := findNonTerminatingPod(ctx, t, api, "name=rollout-operator")
+		if !ok {
+			return false
+		}
+		if pod.Status.Phase != corev1.PodRunning {
+			t.Logf("Pod %s phase is %s, waiting for Running", pod.Name, pod.Status.Phase)
+			return false
+		}
+		if len(pod.Status.ContainerStatuses) == 0 || !pod.Status.ContainerStatuses[0].Ready {
+			t.Logf("Pod %s is not ready yet", pod.Name)
+			return false
+		}
+		t.Logf("Pod %s is running and ready", pod.Name)
+		return true
+	}, 5*time.Minute, 500*time.Millisecond, "rollout-operator should be running and ready")
+}
+
+func requireDeleteNonTerminatingPods(t *testing.T, ctx context.Context, api *kubernetes.Clientset, selector string) {
+	t.Helper()
+
+	require.Eventually(t, func() bool {
+		pods, err := api.CoreV1().Pods(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			t.Logf("failed to list pods matching %s: %v", selector, err)
+			return false
+		}
+		deleted := 0
+		for _, pod := range pods.Items {
+			if pod.DeletionTimestamp != nil {
+				continue
+			}
+			if err := api.CoreV1().Pods(corev1.NamespaceDefault).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
+				t.Logf("failed to delete pod %s: %v", pod.Name, err)
+				return false
+			}
+			deleted++
+		}
+		t.Logf("Deleted %d non-terminating pods matching %s", deleted, selector)
+		return true
+	}, 30*time.Second, 500*time.Millisecond, "should delete non-terminating pods matching %s", selector)
+}
+
+func findNonTerminatingPod(ctx context.Context, t *testing.T, api *kubernetes.Clientset, selector string) (*corev1.Pod, bool) {
+	t.Helper()
+
+	pods, err := api.CoreV1().Pods(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		t.Logf("failed to list pods matching %s: %v", selector, err)
+		return nil, false
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.DeletionTimestamp != nil {
+			t.Logf("Skipping terminating pod %s", pod.Name)
+			continue
+		}
+		return pod, true
+	}
+	t.Logf("No non-terminating pods matching %s yet", selector)
+	return nil, false
 }
 
 func requireEventuallyValidCertificateSecret(t *testing.T, ctx context.Context, api *kubernetes.Clientset) time.Time {
