@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-kit/log"
@@ -11,6 +12,9 @@ import (
 )
 
 func TestGetMinTimeBetweenZonesDownscale(t *testing.T) {
+	// Reset the process-wide Once so this test package can assert warning behavior.
+	warnMinTimeLabelOnce = sync.Once{}
+
 	t.Run("prefers annotation over label", func(t *testing.T) {
 		var buf bytes.Buffer
 		logger := log.NewLogfmtLogger(&buf)
@@ -33,6 +37,7 @@ func TestGetMinTimeBetweenZonesDownscale(t *testing.T) {
 	})
 
 	t.Run("falls back to label with warning", func(t *testing.T) {
+		warnMinTimeLabelOnce = sync.Once{}
 		var buf bytes.Buffer
 		logger := log.NewLogfmtLogger(&buf)
 
@@ -50,7 +55,7 @@ func TestGetMinTimeBetweenZonesDownscale(t *testing.T) {
 		require.Contains(t, buf.String(), "is set as a label")
 		require.Contains(t, buf.String(), "prefer the annotation")
 
-		// Second read should not warn again for the same object.
+		// Second read should not warn again.
 		buf.Reset()
 		value, ok = GetMinTimeBetweenZonesDownscale(obj, logger)
 		require.True(t, ok)
