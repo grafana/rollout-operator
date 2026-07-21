@@ -419,56 +419,28 @@ func maybeStartTLSServer(cfg config, kubeConfig *rest.Config, podHTTPClient *ins
 }
 
 func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, restart chan string) {
-	if err := watchCertificateExpiration(cert, logger, restart, time.Now, time.AfterFunc); err != nil {
-		fatal(err)
-	}
-}
-
-// afterFunc schedules f to run after d, matching time.AfterFunc.
-type afterFunc func(d time.Duration, f func()) *time.Timer
-
-func watchCertificateExpiration(cert tlscert.Certificate, logger log.Logger, restart chan string, now func() time.Time, schedule afterFunc) error {
 	pair, err := tls.X509KeyPair(cert.Cert, cert.Key)
 	if err != nil {
-		return fmt.Errorf("failed to parse the provided certificate: %w", err)
+		fatal(fmt.Errorf("failed to parse the provided certificate: %w", err))
 	}
-
-	type watchedCert struct {
-		expiresIn time.Duration
-		notAfter  time.Time
-		subject   string
-		issuer    string
-	}
-	watched := make([]watchedCert, 0, len(pair.Certificate))
 
 	for i, bytes := range pair.Certificate {
 		c, err := x509.ParseCertificate(bytes)
 		if err != nil {
-			return fmt.Errorf("failed to parse the provided certificate %d: %w", i, err)
+			fatal(fmt.Errorf("failed to parse the provided certificate %d: %s", i, err))
 		}
 
-		expiresIn := c.NotAfter.Sub(now())
+		expiresIn := time.Until(c.NotAfter)
 		if expiresIn <= 0 {
-			return fmt.Errorf("the provided certificate %d for %s issued by %s is expired: notAfter=%s", i, c.Subject, c.Issuer, c.NotAfter)
+			fatal(fmt.Errorf("the provided certificate %d for %s issued by %s is expired: notAfter=%s", i, c.Subject, c.Issuer, c.NotAfter))
 		}
 
-		watched = append(watched, watchedCert{
-			expiresIn: expiresIn,
-			notAfter:  c.NotAfter,
-			subject:   c.Subject.String(),
-			issuer:    c.Issuer.String(),
+		level.Info(logger).Log("msg", "setting restart timer for CA certificate expiration", "expires_in", expiresIn, "expires_at", c.NotAfter, "subject", c.Subject, "issuer", c.Issuer)
+		time.AfterFunc(expiresIn, func() {
+			restart <- fmt.Sprintf("certificate for %s issued by %s expired", c.Subject, c.Issuer)
 		})
 	}
 
-	for _, c := range watched {
-		level.Info(logger).Log("msg", "setting restart timer for certificate expiration", "expires_in", c.expiresIn, "expires_at", c.notAfter, "subject", c.subject, "issuer", c.issuer)
-		subject, issuer := c.subject, c.issuer
-		schedule(c.expiresIn, func() {
-			restart <- fmt.Sprintf("certificate for %s issued by %s expired", subject, issuer)
-		})
-	}
-
-	return nil
 }
 
 // newDedicatedKubeClient builds a *kubernetes.Clientset backed by its own HTTP transport. The per-API-group
