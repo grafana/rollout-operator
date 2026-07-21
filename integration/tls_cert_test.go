@@ -233,7 +233,7 @@ func requireNoDownscaleWebhookWorks(t *testing.T, ctx context.Context, api *kube
 	t.Helper()
 
 	mock := mockServiceStatefulSet("mock", "1", true, 1)
-	mock.ObjectMeta.Labels["grafana.com/no-downscale"] = "true"
+	mock.Labels["grafana.com/no-downscale"] = "true"
 
 	t.Log("Create the service with one replica.")
 	requireCreateStatefulSet(ctx, t, api, mock)
