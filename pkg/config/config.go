@@ -7,9 +7,12 @@ const (
 
 	// LastDownscaleAnnotationKey is the last time the statefulset was scaled down in UTC in time.RFC3339 format.
 	LastDownscaleAnnotationKey = "grafana.com/last-downscale"
-	// MinTimeBetweenZonesDownscaleLabelKey is the minimum duration allowed between downscales of zones that are
-	// part of the same rollout group in Go time.Duration format.
-	MinTimeBetweenZonesDownscaleLabelKey = "grafana.com/min-time-between-zones-downscale"
+	// MinTimeBetweenZonesDownscaleAnnotationKey is the minimum duration allowed between downscales of zones that are
+	// part of the same rollout group in Go time.Duration format. Prefer this over the label with the same key.
+	MinTimeBetweenZonesDownscaleAnnotationKey = "grafana.com/min-time-between-zones-downscale"
+	// MinTimeBetweenZonesDownscaleLabelKey is the deprecated label form of MinTimeBetweenZonesDownscaleAnnotationKey.
+	// Still accepted for migration; prefer the annotation.
+	MinTimeBetweenZonesDownscaleLabelKey = MinTimeBetweenZonesDownscaleAnnotationKey
 	// PrepareDownscalePathAnnotationKey is the path to the endpoint on each pod that should be called when the
 	// statefulset is being prepared to be scaled down.
 	PrepareDownscalePathAnnotationKey = "grafana.com/prepare-downscale-http-path"

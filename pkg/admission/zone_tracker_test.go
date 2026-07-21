@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
 	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -104,6 +105,54 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-zone",
+					Annotations: map[string]string{
+						config.MinTimeBetweenZonesDownscaleAnnotationKey: "2h",
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "other-zone",
+					Annotations: map[string]string{
+						config.MinTimeBetweenZonesDownscaleAnnotationKey: "1h",
+					},
+				},
+			},
+		},
+	}
+
+	if err := zt.loadZones(ctx, stsList); err != nil {
+		t.Fatalf("loadZones failed: %v", err)
+	}
+
+	s, err := zt.findDownscalesDoneMinTimeAgo(stsList, "other-zone", log.NewNopLogger())
+	if err != nil {
+		t.Fatalf("findDownscalesDoneMinTimeAgo failed: %v", err)
+	}
+
+	if s == nil {
+		t.Fatalf("findDownscalesDoneMinTimeAgo returned nil, want statefulSetDownscale")
+	}
+
+	if s.name != "test-zone" {
+		t.Errorf("findDownscalesDoneMinTimeAgo returned statefulSetDownscale with name %s, want test-zone", s.name)
+	}
+
+	if s.waitTime != 2*time.Hour {
+		t.Errorf("findDownscalesDoneMinTimeAgo returned statefulSetDownscale with waitTime %v, want 2h", s.waitTime)
+	}
+}
+
+func TestZoneTrackerFindDownscalesDoneMinTimeAgoLabelFallback(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewClientset()
+	zt := newZoneTracker(client, "cluster.local", "testnamespace", "testconfigmap")
+
+	stsList := &appsv1.StatefulSetList{
+		Items: []appsv1.StatefulSet{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-zone",
 					Labels: map[string]string{
 						config.MinTimeBetweenZonesDownscaleLabelKey: "2h",
 					},
@@ -124,22 +173,11 @@ func TestZoneTrackerFindDownscalesDoneMinTimeAgo(t *testing.T) {
 		t.Fatalf("loadZones failed: %v", err)
 	}
 
-	s, err := zt.findDownscalesDoneMinTimeAgo(stsList, "other-zone")
-	if err != nil {
-		t.Fatalf("findDownscalesDoneMinTimeAgo failed: %v", err)
-	}
-
-	if s == nil {
-		t.Fatalf("findDownscalesDoneMinTimeAgo returned nil, want statefulSetDownscale")
-	}
-
-	if s.name != "test-zone" {
-		t.Errorf("findDownscalesDoneMinTimeAgo returned statefulSetDownscale with name %s, want test-zone", s.name)
-	}
-
-	if s.waitTime != 2*time.Hour {
-		t.Errorf("findDownscalesDoneMinTimeAgo returned statefulSetDownscale with waitTime %v, want 2h", s.waitTime)
-	}
+	s, err := zt.findDownscalesDoneMinTimeAgo(stsList, "other-zone", log.NewNopLogger())
+	require.NoError(t, err)
+	require.NotNil(t, s)
+	require.Equal(t, "test-zone", s.name)
+	require.Equal(t, 2*time.Hour, s.waitTime)
 }
 
 func TestLoadZonesCreatesInitialZones(t *testing.T) {
@@ -155,16 +193,16 @@ func TestLoadZonesCreatesInitialZones(t *testing.T) {
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-zone",
-					Labels: map[string]string{
-						config.MinTimeBetweenZonesDownscaleLabelKey: "2h",
+					Annotations: map[string]string{
+						config.MinTimeBetweenZonesDownscaleAnnotationKey: "2h",
 					},
 				},
 			},
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "other-zone",
-					Labels: map[string]string{
-						config.MinTimeBetweenZonesDownscaleLabelKey: "1h",
+					Annotations: map[string]string{
+						config.MinTimeBetweenZonesDownscaleAnnotationKey: "1h",
 					},
 				},
 			},

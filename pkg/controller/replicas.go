@@ -119,15 +119,14 @@ func minimumTimeHasElapsed(follower *v1.StatefulSet, all []*v1.StatefulSet, logg
 		return true, nil
 	}
 
-	followerLabels := follower.GetLabels()
-	rawValue, ok := followerLabels[config.MinTimeBetweenZonesDownscaleLabelKey]
+	rawValue, ok := config.GetMinTimeBetweenZonesDownscale(follower, logger)
 	if !ok {
-		return false, fmt.Errorf("missing label %s on follower", config.MinTimeBetweenZonesDownscaleLabelKey)
+		return false, fmt.Errorf("missing annotation or label %s on follower", config.MinTimeBetweenZonesDownscaleAnnotationKey)
 	}
 
 	minTimeSinceDownscale, err := time.ParseDuration(rawValue)
 	if err != nil {
-		return false, fmt.Errorf("unable to parse label %s value on follower: %w", config.MinTimeBetweenZonesDownscaleLabelKey, err)
+		return false, fmt.Errorf("unable to parse annotation or label %s value on follower: %w", config.MinTimeBetweenZonesDownscaleAnnotationKey, err)
 	}
 
 	timeSinceDownscale := time.Since(lastDownscale)

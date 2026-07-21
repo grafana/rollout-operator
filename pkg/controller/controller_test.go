@@ -406,19 +406,15 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		"should not update replicas within minimum time between downscales": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withReplicas(2, 2),
-					withLabels(map[string]string{
-						"grafana.com/min-time-between-zones-downscale": "12h",
-					}),
 					withAnnotations(map[string]string{
-						"grafana.com/last-downscale": time.Now().UTC().Add(-time.Hour).Format(time.RFC3339),
+						"grafana.com/min-time-between-zones-downscale": "12h",
+						"grafana.com/last-downscale":                   time.Now().UTC().Add(-time.Hour).Format(time.RFC3339),
 					}),
 				),
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withPrevRevision(),
-					withLabels(map[string]string{
-						"grafana.com/min-time-between-zones-downscale": "12h",
-					}),
 					withAnnotations(map[string]string{
-						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+						"grafana.com/min-time-between-zones-downscale": "12h",
+						"grafana.com/rollout-downscale-leader":         "ingester-zone-a",
 					}),
 				),
 			},
@@ -433,15 +429,13 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		},
 		"should return early and not delete pods if StatefulSet replicas are adjusted": {
 			statefulSets: []runtime.Object{
-				mockStatefulSet("ingester-zone-a", withReplicas(2, 2), withLabels(map[string]string{
+				mockStatefulSet("ingester-zone-a", withReplicas(2, 2), withAnnotations(map[string]string{
 					"grafana.com/min-time-between-zones-downscale": "12h",
 				})),
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withPrevRevision(),
-					withLabels(map[string]string{
-						"grafana.com/min-time-between-zones-downscale": "12h",
-					}),
 					withAnnotations(map[string]string{
-						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+						"grafana.com/min-time-between-zones-downscale": "12h",
+						"grafana.com/rollout-downscale-leader":         "ingester-zone-a",
 					}),
 				),
 			},
@@ -456,15 +450,13 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		},
 		"should not return early and should delete pods if StatefulSet replicas cannot be scaled down": {
 			statefulSets: []runtime.Object{
-				mockStatefulSet("ingester-zone-a", withReplicas(2, 2), withLabels(map[string]string{
+				mockStatefulSet("ingester-zone-a", withReplicas(2, 2), withAnnotations(map[string]string{
 					"grafana.com/min-time-between-zones-downscale": "12h",
 				})),
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withPrevRevision(),
-					withLabels(map[string]string{
-						"grafana.com/min-time-between-zones-downscale": "12h",
-					}),
 					withAnnotations(map[string]string{
-						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+						"grafana.com/min-time-between-zones-downscale": "12h",
+						"grafana.com/rollout-downscale-leader":         "ingester-zone-a",
 					}),
 				),
 			},
@@ -480,15 +472,13 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		},
 		"should not return early and should delete pods if StatefulSet replicas cannot be scaled down - enforce downscale pdb": {
 			statefulSets: []runtime.Object{
-				mockStatefulSet("ingester-zone-a", withReplicas(1, 1), withLabels(map[string]string{
+				mockStatefulSet("ingester-zone-a", withReplicas(1, 1), withAnnotations(map[string]string{
 					"grafana.com/min-time-between-zones-downscale": "12h",
 				})),
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3), withPrevRevision(),
-					withLabels(map[string]string{
-						"grafana.com/min-time-between-zones-downscale": "12h",
-					}),
 					withAnnotations(map[string]string{
-						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+						"grafana.com/min-time-between-zones-downscale": "12h",
+						"grafana.com/rollout-downscale-leader":         "ingester-zone-a",
 					}),
 				),
 			},
@@ -505,15 +495,13 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		},
 		"should not return early and should delete pods if StatefulSet replicas cannot be scaled up": {
 			statefulSets: []runtime.Object{
-				mockStatefulSet("ingester-zone-a", withReplicas(3, 3), withLabels(map[string]string{
+				mockStatefulSet("ingester-zone-a", withReplicas(3, 3), withAnnotations(map[string]string{
 					"grafana.com/min-time-between-zones-downscale": "12h",
 				})),
 				mockStatefulSet("ingester-zone-b", withReplicas(2, 2), withPrevRevision(),
-					withLabels(map[string]string{
-						"grafana.com/min-time-between-zones-downscale": "12h",
-					}),
 					withAnnotations(map[string]string{
-						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+						"grafana.com/min-time-between-zones-downscale": "12h",
+						"grafana.com/rollout-downscale-leader":         "ingester-zone-a",
 					}),
 				),
 			},
@@ -529,15 +517,13 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		},
 		"zpdb is enforced during a scale-up with a version update": {
 			statefulSets: []runtime.Object{
-				mockStatefulSet("ingester-zone-a", withReplicas(3, 3), withPrevRevision(), withLabels(map[string]string{
+				mockStatefulSet("ingester-zone-a", withReplicas(3, 3), withPrevRevision(), withAnnotations(map[string]string{
 					"grafana.com/min-time-between-zones-downscale": "12h",
 				})),
 				mockStatefulSet("ingester-zone-b", withReplicas(1, 1), withPrevRevision(),
-					withLabels(map[string]string{
-						"grafana.com/min-time-between-zones-downscale": "12h",
-					}),
 					withAnnotations(map[string]string{
-						"grafana.com/rollout-downscale-leader": "ingester-zone-a",
+						"grafana.com/min-time-between-zones-downscale": "12h",
+						"grafana.com/rollout-downscale-leader":         "ingester-zone-a",
 					}),
 				),
 			},

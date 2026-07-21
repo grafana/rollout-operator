@@ -130,7 +130,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.Admissio
 				),
 			)
 		}
-		foundSts, err := findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name)
+		foundSts, err := findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name, logger)
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale annotations", "err", err)
 			return deny(
@@ -141,7 +141,7 @@ func prepareDownscale(ctx context.Context, l log.Logger, ar admissionv1.Admissio
 			)
 		}
 		if foundSts != nil {
-			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is configured to wait %s between zone downscales",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
 			level.Warn(logger).Log("msg", msg, "err", err)
 			return deny(msg)
@@ -286,19 +286,19 @@ type statefulSetDownscale struct {
 }
 
 // findDownscalesDoneMinTimeAgo checks whether there's any StatefulSet in the stsList which has been downscaled
-// less than "min allowed time" ago. The timestamp of the last downscale and the minimum time required between
-// downscales are set as StatefulSet annotation and label respectively. If such annotations and labels can't be
-// parsed, then this function returns an error.
+// less than "min allowed time" ago. The timestamp of the last downscale is a StatefulSet annotation; the
+// minimum time between zone downscales is preferred as an annotation (label still accepted for migration).
+// If such values can't be parsed, then this function returns an error.
 //
 // The StatefulSet whose name matches the input excludeStsName is not checked.
-func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, excludeStsName string) (*statefulSetDownscale, error) {
+func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, excludeStsName string, logger log.Logger) (*statefulSetDownscale, error) {
 	for _, sts := range stsList.Items {
 		if sts.Name == excludeStsName {
 			continue
 		}
 		lastDownscaleAnnotation, ok := sts.Annotations[config.LastDownscaleAnnotationKey]
 		if !ok {
-			// No last downscale label set on the statefulset, we can continue
+			// No last downscale annotation set on the statefulset, we can continue
 			continue
 		}
 
@@ -307,15 +307,15 @@ func findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, excludeStsNam
 			return nil, fmt.Errorf("can't parse %v annotation of %s: %w", config.LastDownscaleAnnotationKey, sts.Name, err)
 		}
 
-		timeBetweenDownscaleLabel, ok := sts.Labels[config.MinTimeBetweenZonesDownscaleLabelKey]
+		timeBetweenDownscale, ok := config.GetMinTimeBetweenZonesDownscale(&sts, logger)
 		if !ok {
-			// No time between downscale label set on the statefulset, we can continue
+			// No time between downscale configured on the statefulset, we can continue
 			continue
 		}
 
-		minTimeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscaleLabel)
+		minTimeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscale)
 		if err != nil {
-			return nil, fmt.Errorf("can't parse %v label of %s: %w", config.MinTimeBetweenZonesDownscaleLabelKey, sts.Name, err)
+			return nil, fmt.Errorf("can't parse annotation or label %v of %s: %w", config.MinTimeBetweenZonesDownscaleAnnotationKey, sts.Name, err)
 		}
 
 		if time.Since(lastDownscale) < minTimeBetweenDownscale {

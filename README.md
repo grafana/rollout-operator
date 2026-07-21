@@ -31,7 +31,7 @@ For each **rollout group**, the operator **guarantees**:
 
 ## How scaling up and down works
 
-The operator can also optionally coordinate scaling up and down of `StatefulSets` that are part of the same `rollout-group` based on the `grafana.com/rollout-downscale-leader` annotation. When using this feature, the `grafana.com/min-time-between-zones-downscale` label must also be set on each `StatefulSet`.
+The operator can also optionally coordinate scaling up and down of `StatefulSets` that are part of the same `rollout-group` based on the `grafana.com/rollout-downscale-leader` annotation. When using this feature, the `grafana.com/min-time-between-zones-downscale` annotation must also be set on each `StatefulSet`. For migration, the same key is still accepted as a label (with a warning) and will be removed in a future release.
 
 This can be useful for automating the tedious scaling of stateful services like Mimir ingesters. Making use of this feature requires adding a few annotations and labels to configure how it works.
 
@@ -41,25 +41,25 @@ Example usage for a multi-AZ ingester group:
 
 - For `ingester-zone-a`, add the following:
   - Labels:
-    - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
     - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
   - Annotations:
+    - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
     - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
     - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
 - For `ingester-zone-b`, add the following:
   - Labels:
-    - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
     - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
   - Annotations:
+    - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
     - `grafana.com/rollout-downscale-leader=ingester-zone-a` (zone `b` will follow zone `a`, after a delay)
     - `grafana.com/rollout-upscale-only-when-leader-ready=true` (zone `b` will only scale up once all replicas in zone `a` are ready)
     - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
     - `grafana.com/prepare-downscale-http-port=80` (to call a specific endpoint on the service)
 - For `ingester-zone-c`, add the following:
   - Labels:
-    - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
     - `grafana.com/prepare-downscale=true` (to allow the service to be notified when it will be scaled down)
   - Annotations:
+    - `grafana.com/min-time-between-zones-downscale=12h` (change the value here to an appropriate duration)
     - `grafana.com/rollout-downscale-leader=ingester-zone-b` (zone `c` will follow zone `b`, after a delay)
     - `grafana.com/rollout-upscale-only-when-leader-ready=true` (zone `c` will only scale up once all replicas in zone `b` are ready)
     - `grafana.com/prepare-downscale-http-path=ingester/prepare-shutdown` (to call a specific endpoint on the service)
@@ -394,7 +394,7 @@ The following annotations also have to be present:
 - `grafana.com/prepare-downscale-http-path`
 - `grafana.com/prepare-downscale-http-port`
 
-If the `grafana.com/last-downscale` annotation is present on any of the stateful sets in the same rollout group it's value will be checked against the current time. If the difference is less than the `grafana.com/min-time-between-zones-downscale` label (if present) then the request is rejected. Otherwise the request is approved. This mechanism can be used to maintain a time between downscales of the stateful sets in a rollout group.
+If the `grafana.com/last-downscale` annotation is present on any of the stateful sets in the same rollout group it's value will be checked against the current time. If the difference is less than the `grafana.com/min-time-between-zones-downscale` annotation (if present; the same key is still accepted as a label for migration) then the request is rejected. Otherwise the request is approved. This mechanism can be used to maintain a time between downscales of the stateful sets in a rollout group.
 
 The endpoint created from `grafana.com/prepare-downscale-http-path` and `grafana.com/prepare-downscale-http-port` will be called for each of the pods that have to be downscaled. If any of these requests fail the downscaling request is rejected.
 

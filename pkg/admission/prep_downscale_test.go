@@ -337,11 +337,11 @@ func testPrepDownscaleWebhook(t *testing.T, oldReplicas, newReplicas int, option
 					Namespace: namespace,
 					UID:       types.UID(stsName),
 					Labels: map[string]string{
-						config.RolloutGroupLabelKey:                 "ingester",
-						config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+						config.RolloutGroupLabelKey: "ingester",
 					},
 					Annotations: map[string]string{
-						config.LastDownscaleAnnotationKey: time.Now().UTC().Format(time.RFC3339),
+						config.LastDownscaleAnnotationKey:                time.Now().UTC().Format(time.RFC3339),
+						config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 					},
 				},
 			},
@@ -814,8 +814,10 @@ func testPrepDownscaleWebhookWithZoneTracker(t *testing.T, oldReplicas, newRepli
 					Namespace: namespace,
 					UID:       types.UID(stsName),
 					Labels: map[string]string{
-						config.RolloutGroupLabelKey:                 "ingester",
-						config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+						config.RolloutGroupLabelKey: "ingester",
+					},
+					Annotations: map[string]string{
+						config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 					},
 				},
 			},
