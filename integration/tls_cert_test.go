@@ -13,6 +13,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,8 +111,10 @@ func TestSelfSignedCertificate_RenewsExpiredSecretOnStartup(t *testing.T) {
 
 // TestSelfSignedCertificate_RenewsAfterExpiration starts the operator with a short-lived
 // certificate and waits for the expiration-driven restart to renew the secret.
-// Unlike the old flaky test, this does not update the operator Deployment during the
-// expired window (that race was the main source of flakes).
+// After that renewal is observed, the test switches to a long-lived certificate before
+// exercising admission — avoiding a second short-expiry race during webhook checks.
+// It still does not update the operator Deployment during the expired window (that race
+// was the main source of flakes in the original e2e test).
 func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 	ctx := context.Background()
 	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
@@ -124,10 +127,9 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 	t.Log("Create rollout-operator with a short-lived self-signed certificate.")
 	createRolloutOperatorDependencies(t, ctx, api, cluster.ExtAPI(), path, true)
 	createRolloutOperatorDeployment(t, ctx, api, path, func(deployment *appsv1.Deployment) {
-		deployment.Spec.Template.Spec.Containers[0].Args = append(
+		deployment.Spec.Template.Spec.Containers[0].Args = setSelfSignedCertExpiration(
 			deployment.Spec.Template.Spec.Containers[0].Args,
-			// Long enough for startup and post-renewal webhook checks; short enough to keep the test bounded.
-			"-server-tls.self-signed-cert.expiration=45s",
+			"45s",
 		)
 	})
 	requireRolloutOperatorReady(t, ctx, api)
@@ -159,6 +161,34 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 
 	requireRolloutOperatorReady(t, ctx, api)
 	requireEventuallyWebhookMatchesSecretCA(t, ctx, api, webhookName)
+
+	t.Log("Switch to a long-lived certificate so admission checks aren't racing another short expiry.")
+	requireUpdateSelfSignedCertExpiration(t, ctx, api, "1w")
+	require.NoError(t, api.CoreV1().Secrets(corev1.NamespaceDefault).Delete(ctx, certificateSecretName, metav1.DeleteOptions{}))
+	podName := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+	require.NoError(t, api.CoreV1().Pods(corev1.NamespaceDefault).Delete(ctx, podName, metav1.DeleteOptions{}))
+
+	require.Eventually(t, func() bool {
+		secret, err := api.CoreV1().Secrets(corev1.NamespaceDefault).Get(ctx, certificateSecretName, metav1.GetOptions{})
+		if err != nil {
+			t.Logf("long-lived secret not ready: %v", err)
+			return false
+		}
+		notAfter, err := certificateNotAfter(secret)
+		if err != nil {
+			t.Logf("invalid long-lived certificate: %v", err)
+			return false
+		}
+		// Enough slack for clock skew / slow generation while still proving we got ~1w.
+		ok := notAfter.After(time.Now().Add(6*24*time.Hour)) && notAfter.Before(time.Now().Add(8*24*time.Hour))
+		if !ok {
+			t.Logf("certificate expires at %s, waiting for ~1w lifetime", notAfter)
+		}
+		return ok
+	}, 3*time.Minute, time.Second, "certificate should be regenerated with a ~1w lifetime")
+
+	requireRolloutOperatorReady(t, ctx, api)
+	requireEventuallyWebhookMatchesSecretCA(t, ctx, api, webhookName)
 	requireNoDownscaleWebhookWorks(t, ctx, api)
 }
 
@@ -174,6 +204,46 @@ func createRolloutOperatorDeployment(t *testing.T, ctx context.Context, api *kub
 
 	_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Create(ctx, deployment, metav1.CreateOptions{})
 	require.NoError(t, err)
+}
+
+func requireUpdateSelfSignedCertExpiration(t *testing.T, ctx context.Context, api *kubernetes.Clientset, expiration string) {
+	t.Helper()
+
+	require.Eventually(t, func() bool {
+		deployment, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Get(ctx, "rollout-operator", metav1.GetOptions{})
+		if err != nil {
+			t.Logf("failed to get rollout-operator deployment: %v", err)
+			return false
+		}
+		deployment.Spec.Template.Spec.Containers[0].Args = setSelfSignedCertExpiration(
+			deployment.Spec.Template.Spec.Containers[0].Args,
+			expiration,
+		)
+		_, err = api.AppsV1().Deployments(corev1.NamespaceDefault).Update(ctx, deployment, metav1.UpdateOptions{})
+		if err != nil {
+			t.Logf("failed to update rollout-operator deployment: %v", err)
+			return false
+		}
+		return true
+	}, 30*time.Second, 500*time.Millisecond, "should update self-signed certificate expiration to %s", expiration)
+}
+
+func setSelfSignedCertExpiration(args []string, expiration string) []string {
+	const prefix = "-server-tls.self-signed-cert.expiration="
+	out := make([]string, 0, len(args)+1)
+	replaced := false
+	for _, arg := range args {
+		if strings.HasPrefix(arg, prefix) {
+			out = append(out, prefix+expiration)
+			replaced = true
+			continue
+		}
+		out = append(out, arg)
+	}
+	if !replaced {
+		out = append(out, prefix+expiration)
+	}
+	return out
 }
 
 func requireRolloutOperatorReady(t *testing.T, ctx context.Context, api *kubernetes.Clientset) {
