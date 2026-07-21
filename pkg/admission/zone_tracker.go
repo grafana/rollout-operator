@@ -131,7 +131,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 			)
 		}
 		// Check if the zone has been downscaled recently.
-		foundSts, err := zt.findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name)
+		foundSts, err := zt.findDownscalesDoneMinTimeAgo(stsList, ar.Request.Name, logger)
 		if err != nil {
 			level.Warn(logger).Log("msg", "downscale not allowed due to error while parsing downscale timestamps from the zone ConfigMap", "err", err)
 			return deny(
@@ -142,7 +142,7 @@ func (zt *zoneTracker) prepareDownscale(ctx context.Context, l log.Logger, ar ad
 			)
 		}
 		if foundSts != nil {
-			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is labelled to wait %s between zone downscales",
+			msg := fmt.Sprintf("downscale of %s/%s in %s from %d to %d replicas is not allowed because statefulset %v was downscaled at %v and is configured to wait %s between zone downscales",
 				ar.Request.Resource.Resource, ar.Request.Name, ar.Request.Namespace, *oldInfo.replicas, *newInfo.replicas, foundSts.name, foundSts.lastDownscaleTime, foundSts.waitTime)
 			level.Warn(logger).Log("msg", msg, "err", err)
 			return deny(msg)
@@ -358,7 +358,7 @@ func (zt *zoneTracker) setDownscaled(ctx context.Context, zone string) error {
 }
 
 // findDownscalesDoneMinTimeAgo returns the statefulset that was downscaled the least amount of time ago
-func (zt *zoneTracker) findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, stsName string) (*statefulSetDownscale, error) {
+func (zt *zoneTracker) findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetList, stsName string, logger log.Logger) (*statefulSetDownscale, error) {
 	zt.mu.Lock()
 	defer zt.mu.Unlock()
 
@@ -378,15 +378,15 @@ func (zt *zoneTracker) findDownscalesDoneMinTimeAgo(stsList *appsv1.StatefulSetL
 			return nil, fmt.Errorf("can't parse last downscale time of %s: %w", sts.Name, err)
 		}
 
-		timeBetweenDownscaleLabel, ok := sts.Labels[config.MinTimeBetweenZonesDownscaleLabelKey]
+		timeBetweenDownscale, ok := config.GetMinTimeBetweenZonesDownscale(&sts, logger)
 		if !ok {
-			// No time between downscale label set on the statefulset, we can continue
+			// No time between downscale configured on the statefulset, we can continue
 			continue
 		}
 
-		minTimeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscaleLabel)
+		minTimeBetweenDownscale, err := time.ParseDuration(timeBetweenDownscale)
 		if err != nil {
-			return nil, fmt.Errorf("can't parse %v label of %s: %w", config.MinTimeBetweenZonesDownscaleLabelKey, sts.Name, err)
+			return nil, fmt.Errorf("can't parse annotation or label %v of %s: %w", config.MinTimeBetweenZonesDownscaleAnnotationKey, sts.Name, err)
 		}
 
 		if time.Since(lastDownscale) < minTimeBetweenDownscale {

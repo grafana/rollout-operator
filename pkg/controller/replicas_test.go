@@ -156,8 +156,8 @@ func TestMinimumTimeHasElapsed(t *testing.T) {
 		downscale1 := time.Now().UTC().Round(time.Second).Add(-12 * time.Hour)
 		downscale2 := time.Now().UTC().Round(time.Second).Add(-24 * time.Hour)
 
-		sts1 := mockStatefulSet("test-zone-a", withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "invalid",
+		sts1 := mockStatefulSet("test-zone-a", withAnnotations(map[string]string{
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "invalid",
 		}))
 		sts2 := mockStatefulSet("test-zone-b", withAnnotations(map[string]string{
 			config.LastDownscaleAnnotationKey: downscale1.Format(time.RFC3339),
@@ -174,8 +174,8 @@ func TestMinimumTimeHasElapsed(t *testing.T) {
 		downscale1 := time.Now().UTC().Round(time.Second).Add(-10 * time.Hour)
 		downscale2 := time.Now().UTC().Round(time.Second).Add(-24 * time.Hour)
 
-		sts1 := mockStatefulSet("test-zone-a", withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+		sts1 := mockStatefulSet("test-zone-a", withAnnotations(map[string]string{
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 		}))
 		sts2 := mockStatefulSet("test-zone-b", withAnnotations(map[string]string{
 			config.LastDownscaleAnnotationKey: downscale1.Format(time.RFC3339),
@@ -193,6 +193,25 @@ func TestMinimumTimeHasElapsed(t *testing.T) {
 		downscale1 := time.Now().UTC().Round(time.Second).Add(-14 * time.Hour)
 		downscale2 := time.Now().UTC().Round(time.Second).Add(-26 * time.Hour)
 
+		sts1 := mockStatefulSet("test-zone-a", withAnnotations(map[string]string{
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
+		}))
+		sts2 := mockStatefulSet("test-zone-b", withAnnotations(map[string]string{
+			config.LastDownscaleAnnotationKey: downscale1.Format(time.RFC3339),
+		}))
+		sts3 := mockStatefulSet("test-zone-c", withAnnotations(map[string]string{
+			config.LastDownscaleAnnotationKey: downscale2.Format(time.RFC3339),
+		}))
+
+		elapsed, err := minimumTimeHasElapsed(sts1, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
+		require.NoError(t, err)
+		require.True(t, elapsed)
+	})
+
+	t.Run("enough time via deprecated label", func(t *testing.T) {
+		downscale1 := time.Now().UTC().Round(time.Second).Add(-14 * time.Hour)
+		downscale2 := time.Now().UTC().Round(time.Second).Add(-26 * time.Hour)
+
 		sts1 := mockStatefulSet("test-zone-a", withLabels(map[string]string{
 			config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
 		}))
@@ -206,6 +225,26 @@ func TestMinimumTimeHasElapsed(t *testing.T) {
 		elapsed, err := minimumTimeHasElapsed(sts1, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
 		require.NoError(t, err)
 		require.True(t, elapsed)
+	})
+
+	t.Run("annotation preferred over label", func(t *testing.T) {
+		downscale1 := time.Now().UTC().Round(time.Second).Add(-10 * time.Hour)
+
+		sts1 := mockStatefulSet("test-zone-a",
+			withLabels(map[string]string{
+				config.MinTimeBetweenZonesDownscaleLabelKey: "1h",
+			}),
+			withAnnotations(map[string]string{
+				config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
+			}),
+		)
+		sts2 := mockStatefulSet("test-zone-b", withAnnotations(map[string]string{
+			config.LastDownscaleAnnotationKey: downscale1.Format(time.RFC3339),
+		}))
+
+		elapsed, err := minimumTimeHasElapsed(sts1, []*v1.StatefulSet{sts1, sts2}, log.NewNopLogger())
+		require.NoError(t, err)
+		require.False(t, elapsed)
 	})
 }
 
@@ -331,21 +370,18 @@ func TestReconcileStsReplicas(t *testing.T) {
 		downscale3 := time.Now().UTC().Round(time.Second).Add(-48 * time.Hour)
 
 		sts1 := mockStatefulSet("test-zone-a", withReplicas(2, 2), withAnnotations(map[string]string{
-			config.LastDownscaleAnnotationKey: downscale1.Format(time.RFC3339),
-		}), withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+			config.LastDownscaleAnnotationKey:                downscale1.Format(time.RFC3339),
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 		}))
 		sts2 := mockStatefulSet("test-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
-			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-a",
-			config.LastDownscaleAnnotationKey:          downscale2.Format(time.RFC3339),
-		}), withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "invalid",
+			config.RolloutDownscaleLeaderAnnotationKey:       "test-zone-a",
+			config.LastDownscaleAnnotationKey:                downscale2.Format(time.RFC3339),
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "invalid",
 		}))
 		sts3 := mockStatefulSet("test-zone-c", withReplicas(3, 3), withAnnotations(map[string]string{
-			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-b",
-			config.LastDownscaleAnnotationKey:          downscale3.Format(time.RFC3339),
-		}), withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+			config.RolloutDownscaleLeaderAnnotationKey:       "test-zone-b",
+			config.LastDownscaleAnnotationKey:                downscale3.Format(time.RFC3339),
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 		}))
 
 		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
@@ -359,21 +395,18 @@ func TestReconcileStsReplicas(t *testing.T) {
 		downscale3 := time.Now().UTC().Round(time.Second).Add(-10 * time.Hour)
 
 		sts1 := mockStatefulSet("test-zone-a", withReplicas(2, 2), withAnnotations(map[string]string{
-			config.LastDownscaleAnnotationKey: downscale1.Format(time.RFC3339),
-		}), withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+			config.LastDownscaleAnnotationKey:                downscale1.Format(time.RFC3339),
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 		}))
 		sts2 := mockStatefulSet("test-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
-			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-a",
-			config.LastDownscaleAnnotationKey:          downscale2.Format(time.RFC3339),
-		}), withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+			config.RolloutDownscaleLeaderAnnotationKey:       "test-zone-a",
+			config.LastDownscaleAnnotationKey:                downscale2.Format(time.RFC3339),
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 		}))
 		sts3 := mockStatefulSet("test-zone-c", withReplicas(3, 3), withAnnotations(map[string]string{
-			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-b",
-			config.LastDownscaleAnnotationKey:          downscale3.Format(time.RFC3339),
-		}), withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+			config.RolloutDownscaleLeaderAnnotationKey:       "test-zone-b",
+			config.LastDownscaleAnnotationKey:                downscale3.Format(time.RFC3339),
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 		}))
 
 		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
@@ -387,21 +420,18 @@ func TestReconcileStsReplicas(t *testing.T) {
 		downscale3 := time.Now().UTC().Round(time.Second).Add(-48 * time.Hour)
 
 		sts1 := mockStatefulSet("test-zone-a", withReplicas(2, 2), withAnnotations(map[string]string{
-			config.LastDownscaleAnnotationKey: downscale1.Format(time.RFC3339),
-		}), withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+			config.LastDownscaleAnnotationKey:                downscale1.Format(time.RFC3339),
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 		}))
 		sts2 := mockStatefulSet("test-zone-b", withReplicas(3, 3), withAnnotations(map[string]string{
-			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-a",
-			config.LastDownscaleAnnotationKey:          downscale2.Format(time.RFC3339),
-		}), withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+			config.RolloutDownscaleLeaderAnnotationKey:       "test-zone-a",
+			config.LastDownscaleAnnotationKey:                downscale2.Format(time.RFC3339),
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 		}))
 		sts3 := mockStatefulSet("test-zone-c", withReplicas(3, 3), withAnnotations(map[string]string{
-			config.RolloutDownscaleLeaderAnnotationKey: "test-zone-b",
-			config.LastDownscaleAnnotationKey:          downscale3.Format(time.RFC3339),
-		}), withLabels(map[string]string{
-			config.MinTimeBetweenZonesDownscaleLabelKey: "12h",
+			config.RolloutDownscaleLeaderAnnotationKey:       "test-zone-b",
+			config.LastDownscaleAnnotationKey:                downscale3.Format(time.RFC3339),
+			config.MinTimeBetweenZonesDownscaleAnnotationKey: "12h",
 		}))
 
 		replicas, err := desiredStsReplicas("test", sts2, []*v1.StatefulSet{sts1, sts2, sts3}, log.NewNopLogger())
