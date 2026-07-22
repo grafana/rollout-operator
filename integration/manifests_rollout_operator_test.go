@@ -86,6 +86,7 @@ func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *k
 	require.NoError(t, err)
 
 	_ = createZoneAwarePodDistruptionBudgetCustomResourceDefinition(t, extApi)
+	_ = createRolloutHealthCheckCustomResourceDefinition(t, extApi)
 
 	if webhook {
 		_ = createReplicaTemplateCustomResourceDefinition(t, extApi)
@@ -162,6 +163,12 @@ func loadValidatingWebhookConfigurationFromFile(t *testing.T, path string) *admi
 
 func createZoneAwarePodDistruptionBudgetCustomResourceDefinition(t *testing.T, extApi *apiextensionsclient.Clientset) *apiextensionsv1.CustomResourceDefinition {
 	obj, err := extApi.ApiextensionsV1().CustomResourceDefinitions().Create(context.Background(), loadCustomResourceDefinitionFromDisk(t, "../development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml"), metav1.CreateOptions{})
+	require.NoError(t, err)
+	return obj
+}
+
+func createRolloutHealthCheckCustomResourceDefinition(t *testing.T, extApi *apiextensionsclient.Clientset) *apiextensionsv1.CustomResourceDefinition {
+	obj, err := extApi.ApiextensionsV1().CustomResourceDefinitions().Create(context.Background(), loadCustomResourceDefinitionFromDisk(t, "../development/rollout-health-check-custom-resource-definition.yaml"), metav1.CreateOptions{})
 	require.NoError(t, err)
 	return obj
 }
