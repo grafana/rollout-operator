@@ -38,6 +38,10 @@
     // Include the custom resource definiton for the zpdb.
     zpdb_custom_resource_definition_enabled: $._config.rollout_operator_webhooks_enabled,
 
+    // Include the custom resource definition for RolloutHealthCheck.
+    // Enabled whenever the operator is enabled; health checks are evaluated by the controller, not webhooks.
+    rollout_health_check_custom_resource_definition_enabled: $._config.rollout_operator_enabled,
+
     // Configure the rollout operator to enable support for ReplicaTemplates
     rollout_operator_replica_template_access_enabled: false,
 
@@ -67,6 +71,9 @@
 
   zpdb_template:: std.parseYaml(importstr 'crds/zone-aware-pod-disruption-budget.yaml'),
   zpdb_custom_resource: if !$._config.zpdb_custom_resource_definition_enabled then null else $.zpdb_template,
+
+  rollout_health_check_template:: std.parseYaml(importstr 'crds/rollout-health-check.yaml'),
+  rollout_health_check_custom_resource: if !$._config.rollout_health_check_custom_resource_definition_enabled then null else $.rollout_health_check_template,
 
   replica_template:: std.parseYaml(importstr 'crds/replica-templates.yaml'),
   replica_template_custom_resource: if !$._config.replica_template_custom_resource_definition_enabled then null else $.replica_template,
@@ -134,6 +141,9 @@
         policyRule.withApiGroups('') +
         policyRule.withResources(['configmaps']) +
         policyRule.withVerbs(['get', 'update', 'create']),
+        policyRule.withApiGroups('') +
+        policyRule.withResources(['events']) +
+        policyRule.withVerbs(['create', 'patch']),
       ] +
       (
         if $._config.rollout_operator_replica_template_access_enabled then [
@@ -145,6 +155,9 @@
       [
         policyRule.withApiGroups($.zpdb_template.spec.group) +
         policyRule.withResources([$.zpdb_template.spec.names.plural]) +
+        policyRule.withVerbs(['get', 'list', 'watch']),
+        policyRule.withApiGroups($.rollout_health_check_template.spec.group) +
+        policyRule.withResources([$.rollout_health_check_template.spec.names.plural]) +
         policyRule.withVerbs(['get', 'list', 'watch']),
       ]
 
