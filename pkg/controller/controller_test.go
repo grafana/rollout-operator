@@ -312,6 +312,19 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedDeletedPods: []string{"ingester-zone-a-0"},
 		},
+		"should count missing desired pods when StatefulSet status has caught up": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2), func(sts *v1.StatefulSet) {
+					sts.Status.Replicas = 2
+					sts.Annotations[config.RolloutMaxUnavailableAnnotationKey] = "1"
+				}),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: nil,
+		},
 		"should not delete pods which are already terminating": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision()),

@@ -700,7 +700,7 @@ func (c *RolloutController) unavailablePodCountForRollout(sts *v1.StatefulSet) (
 	}
 
 	// Pods not yet recreated after a delete are also unavailable for the purposes of the budget.
-	if missing := int(sts.Status.Replicas) - len(pods); missing > 0 {
+	if missing := int(*sts.Spec.Replicas) - len(pods); missing > 0 {
 		count += missing
 	}
 
