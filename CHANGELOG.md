@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [BUGFIX] Allow a StatefulSet rollout to recover when pods from a previous failed update are not Ready (e.g. CrashLoopBackOff): only pods already on the current update revision consume the `rollout-max-unavailable` budget, so a subsequent Spec update can replace the stuck pods. #339
+* [BUGFIX] Allow a StatefulSet rollout to recover when pods from a previous failed update are not Ready (e.g. CrashLoopBackOff): only pods already on the current update revision consume the `rollout-max-unavailable` budget, so a subsequent Spec update can replace the stuck pods. #466
 
 ## v0.38.1
 
