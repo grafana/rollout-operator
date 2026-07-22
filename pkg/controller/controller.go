@@ -569,7 +569,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 		// maxUnavailable above, but must not consume a slot in the delete batch.
 		candidates := make([]*corev1.Pod, 0, len(podsToUpdate))
 		for _, pod := range podsToUpdate {
-			if pod.Status.Phase == corev1.PodRunning && pod.DeletionTimestamp != nil {
+			if pod.DeletionTimestamp != nil {
 				level.Debug(c.logger).Log("msg", fmt.Sprintf("waiting for pod %s to be terminated", pod.Name))
 				continue
 			}

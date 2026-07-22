@@ -325,13 +325,14 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedDeletedPods: nil,
 		},
-		"should not delete pods which are already terminating": {
+		"should not delete pods which are already terminating regardless of phase": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision()),
 			},
 			pods: []runtime.Object{
 				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash, func(pod *corev1.Pod) {
 					pod.DeletionTimestamp = util.Now()
+					pod.Status.Phase = corev1.PodFailed
 				}),
 				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
