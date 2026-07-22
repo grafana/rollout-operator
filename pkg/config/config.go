@@ -58,4 +58,13 @@ const (
 	// StatefulSets in the same rollout group to continue rolling out.
 	RolloutPausedAnnotationKey   = "grafana.com/rollout-paused"
 	RolloutPausedAnnotationValue = "true"
+
+	// RolloutHealthCheckAnnotationKey references a namespaced RolloutHealthCheck CR used to gate
+	// progression between zones after the first zone has rolled.
+	RolloutHealthCheckAnnotationKey = "grafana.com/rollout-health-check"
+
+	// RolloutHealthCheckStartedAtAnnotationKey stores "<updateRevision>=<RFC3339>" marking when
+	// the operator first observed pods needing an update for that revision. Used as the baseline
+	// evaluation timestamp (T0) for health checks.
+	RolloutHealthCheckStartedAtAnnotationKey = "grafana.com/rollout-health-check-started-at"
 )
