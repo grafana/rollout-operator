@@ -264,49 +264,75 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedDeletedPods: []string{"ingester-zone-a-0"},
 		},
-		"should give priority to StatefulSet with not-Ready pods and take not-Ready pods in account when honoring max unavailable": {
+		"should give priority to StatefulSet with not-Ready pods and take not-Ready pods on update revision into account when honoring max unavailable": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision()),
-				mockStatefulSet("ingester-zone-b", withPrevRevision(), func(sts *v1.StatefulSet) {
-					sts.Status.Replicas = 3
-					sts.Status.ReadyReplicas = 2
-				}),
+				mockStatefulSet("ingester-zone-b", withPrevRevision(), withReplicas(3, 2)),
 			},
 			pods: []runtime.Object{
 				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
-				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				// One pod already on the update revision and not Ready consumes 1 of maxUnavailable=2.
+				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash, withNotReady()),
 				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
 			},
-			expectedDeletedPods: []string{"ingester-zone-b-0"}, // Max unavailable = 2 but there's 1 not-Ready pod
+			expectedDeletedPods: []string{"ingester-zone-b-1"},
 		},
-		"should do nothing if the number of not-Ready pods >= max unavailable": {
+		"should do nothing if not-Ready pods already on update revision >= max unavailable": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision()),
-				mockStatefulSet("ingester-zone-b", withPrevRevision(), func(sts *v1.StatefulSet) {
-					sts.Status.Replicas = 3
-					sts.Status.ReadyReplicas = 1
-				}),
+				mockStatefulSet("ingester-zone-b", withPrevRevision(), withReplicas(3, 1)),
 			},
 			pods: []runtime.Object{
 				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
-				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
-				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				// Two pods already updated but not Ready consume the full maxUnavailable=2 budget.
+				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash, withNotReady()),
+				mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash, withNotReady()),
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
 			},
-			expectedDeletedPods: nil, // Max unavailable = 2 and there are 2 not-Ready pods
+			expectedDeletedPods: nil,
 		},
-		"should not delete pods which are already terminating": {
+		// Reproduces https://github.com/grafana/rollout-operator/issues/339:
+		// a failed rollout left pods not-Ready on an outdated revision; a subsequent
+		// StatefulSet update must still be allowed to delete those pods.
+		"should delete outdated not-Ready pods when StatefulSet is updated again": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2), func(sts *v1.StatefulSet) {
+					sts.Annotations[config.RolloutMaxUnavailableAnnotationKey] = "1"
+				}),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash, withNotReady()),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-a-0"},
+		},
+		"should count missing desired pods when StatefulSet status has caught up": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2), func(sts *v1.StatefulSet) {
+					sts.Status.Replicas = 2
+					sts.Annotations[config.RolloutMaxUnavailableAnnotationKey] = "1"
+				}),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: nil,
+		},
+		"should not delete pods which are already terminating regardless of phase": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision()),
 			},
 			pods: []runtime.Object{
 				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash, func(pod *corev1.Pod) {
 					pod.DeletionTimestamp = util.Now()
+					pod.Status.Phase = corev1.PodFailed
 				}),
 				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
@@ -1565,6 +1591,14 @@ func withReplicas(totalReplicas, readyReplicas int32) func(sts *v1.StatefulSet) 
 		sts.Spec.Replicas = &totalReplicas
 		sts.Status.Replicas = totalReplicas
 		sts.Status.ReadyReplicas = readyReplicas
+	}
+}
+
+func withNotReady() func(pod *corev1.Pod) {
+	return func(pod *corev1.Pod) {
+		for i := range pod.Status.ContainerStatuses {
+			pod.Status.ContainerStatuses[i].Ready = false
+		}
 	}
 }
 

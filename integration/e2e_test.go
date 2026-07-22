@@ -72,6 +72,53 @@ func TestRolloutHappyCase(t *testing.T) {
 	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectReady(), expectVersion("2"))
 }
 
+// TestRolloutRecoversFromFailedUpdate reproduces https://github.com/grafana/rollout-operator/issues/339:
+// after a bad rollout leaves pods not Ready, a subsequent StatefulSet update must still roll those pods
+// to the fixed revision without requiring a manual pod delete.
+func TestRolloutRecoversFromFailedUpdate(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
+	api := cluster.API()
+
+	path := initManifestFiles(t, "webhooks-not-enabled")
+
+	createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, false)
+	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+
+	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", 1)
+	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b", 1)
+	createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-c", 1)
+	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+
+	// Bad rollout: version 2 never becomes ready.
+	_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-a", "2", false, 1), metav1.UpdateOptions{})
+	require.NoError(t, err, "Can't update StatefulSet")
+	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-b", "2", false, 1), metav1.UpdateOptions{})
+	require.NoError(t, err, "Can't update StatefulSet")
+	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-c", "2", false, 1), metav1.UpdateOptions{})
+	require.NoError(t, err, "Can't update StatefulSet")
+
+	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectNotReady(), expectVersion("2"))
+	requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectReady(), expectVersion("1"))
+	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectReady(), expectVersion("1"))
+
+	// Fix: update to version 3 with readiness enabled. Operator must replace the stuck zone-a pod.
+	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-a", "3", true, 1), metav1.UpdateOptions{})
+	require.NoError(t, err, "Can't update StatefulSet")
+	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-b", "3", true, 1), metav1.UpdateOptions{})
+	require.NoError(t, err, "Can't update StatefulSet")
+	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-c", "3", true, 1), metav1.UpdateOptions{})
+	require.NoError(t, err, "Can't update StatefulSet")
+
+	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectReady(), expectVersion("3"))
+	requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectReady(), expectVersion("3"))
+	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectReady(), expectVersion("3"))
+}
+
 // TestRolloutHappyCaseWithZpdb performs pod updates via the rolling update controller and uses the zpdb to determine if the pod delete is safe or not
 func TestRolloutHappyCaseWithZpdb(t *testing.T) {
 	ctx := context.Background()
