@@ -460,7 +460,7 @@ func checkReplicasChange(logger log.Logger, oldInfo, newInfo *objectInfo) *admis
 	return nil
 }
 
-func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInfo, port, path, serviceName, clusterDomain string) []endpoint {
+func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInfo, port, httpPath, serviceName, clusterDomain string) []endpoint {
 	diff := (*oldInfo.replicas - *newInfo.replicas)
 	eps := make([]endpoint, diff)
 
@@ -469,7 +469,7 @@ func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInf
 		eps[i].url = fmt.Sprintf("%s:%s%s",
 			util.StatefulSetPodFQDN(ar.Request.Namespace, ar.Request.Name, index, serviceName, clusterDomain),
 			port,
-			prepareDownscalePath(path),
+			prepareDownscalePath(httpPath),
 		)
 		eps[i].index = index
 	}

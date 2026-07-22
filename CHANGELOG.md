@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [BUGFIX] Avoid doubling a leading `/` when building prepare-downscale pod URLs from `grafana.com/prepare-downscale-http-path`, and follow same-host redirects while preserving POST/DELETE (net/http would otherwise rewrite them to GET on 301/302/303). #287
+* [BUGFIX] Avoid doubling a leading `/` when building prepare-downscale pod URLs from `grafana.com/prepare-downscale-http-path`. #287
 
 ## v0.38.1
 
