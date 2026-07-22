@@ -156,6 +156,73 @@ spec:
 
 To resume normal rollout behavior, remove the annotation or set it to any value other than `true`.
 
+## Health-check driven rollout gating
+
+After the first zone in a rollout group finishes updating, the operator can evaluate cell-level health before starting the next zone. Pod readiness remains the within-zone gate; health checks are an additional between-zone gate.
+
+Attach a check to StatefulSets in the group:
+
+```yaml
+metadata:
+  annotations:
+    grafana.com/rollout-health-check: ingester-cell-health
+```
+
+Define the reusable configuration as a namespaced `RolloutHealthCheck`:
+
+```yaml
+apiVersion: rollout-operator.grafana.com/v1
+kind: RolloutHealthCheck
+metadata:
+  name: ingester-cell-health
+spec:
+  selector:
+    matchLabels:
+      rollout-group: ingester
+  prometheusURL: http://critical-prometheus.critical-o11y.svc.cluster.local.:9090/critical-prometheus
+  checks:
+    - name: request-error-rate
+      currentRange: 5m
+      baselineRange: 10m
+      queryTimeout: 10s
+      queryRetries: 3
+      onFailure: Pause   # Pause | Warn | Disabled
+      onNoData: Pause
+      # ${targetMatchers} is replaced with namespace + pod matchers for candidate or stable pods.
+      # ${range} is replaced with currentRange or baselineRange.
+      query: |
+        scalar(
+          sum(
+            rate(
+              cortex_request_duration_seconds_count{
+                ${targetMatchers},
+                status_code=~"5..",
+                route!~"ready|debug_pprof"
+              }[${range}]
+            )
+          )
+          or vector(0)
+        )
+      # ${current} and ${baseline} are the scalar results of the query above.
+      # Must return scalar 1 (pass) or 0 (fail).
+      successQuery: |
+        (
+          (${current} < bool 1)
+          +
+          (${current} < bool (2 * ${baseline}))
+        ) > bool 0
+```
+
+Behavior:
+
+- The first zone always rolls without a health evaluation (minimum blast radius is one zone).
+- Before starting a subsequent zone, each enabled check runs against candidate pods (already updated) and stable pods (not yet updated). Failed, no-data, or unreachable checks with `onFailure`/`onNoData: Pause` block progression.
+- `Warn` emits a warning event/log and continues. `Disabled` (or `disabled: true` on a check) skips that check.
+- If the annotation references a missing `RolloutHealthCheck`, or the check's selector does not match the StatefulSet, the rollout proceeds as today and the operator emits an error log, a Kubernetes event, and increments `rollout_operator_health_check_misconfigured_total`.
+- Remove the annotation (or set individual checks to `Disabled`) to bypass the gate. The operator never reverts workload versions.
+
+The operator stores `grafana.com/rollout-health-check-started-at: <updateRevision>=<RFC3339>` on StatefulSets when it first observes pods needing that revision; the earliest timestamp in the group is used as the baseline evaluation time.
+
 ## Operations
 
 ### HTTP endpoints
