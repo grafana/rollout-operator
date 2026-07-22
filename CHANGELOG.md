@@ -3,6 +3,7 @@
 ## main / unreleased
 
 * [CHANGE] Prefer `grafana.com/min-time-between-zones-downscale` as a StatefulSet annotation instead of a label. The label remains supported as a fallback and logs a deprecation warning when used. #463
+* [BUGFIX] Allow a StatefulSet rollout to recover when pods from a previous failed update are not Ready (e.g. CrashLoopBackOff): only pods already on the current update revision consume the `rollout-max-unavailable` budget, so a subsequent Spec update can replace the stuck pods. #339
 * [ENHANCEMENT] Updated dependencies, including: #470
   * `github.com/prometheus/client_golang` from `v1.23.2` to `v1.24.1`
   * `github.com/prometheus/common` from `v0.70.0` to `v0.70.1`

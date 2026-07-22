@@ -24,7 +24,7 @@ For each **rollout group**, the operator **guarantees**:
 1. Pods in 2 different StatefulSets are not rolled out at the same time
 1. Pods in a StatefulSet are rolled out if and only if all pods in all other StatefulSets of the same group are `Ready` (otherwise it will start or continue the rollout once this check is satisfied)
 1. Pods are rolled out if and only if all StatefulSets in the same group have `OnDelete` update strategy (otherwise the operator will skip the group and log an error)
-1. The maximum number of not-Ready pods in a StatefulSet doesn't exceed the value configured in the `rollout-max-unavailable` annotation (if not set, it defaults to `1`). Values:
+1. The maximum number of unavailable pods **already on the current update revision** in a StatefulSet doesn't exceed the value configured in the `rollout-max-unavailable` annotation (if not set, it defaults to `1`). Outdated not-Ready pods (for example CrashLoopBackOff from a previous failed update) do not consume this budget, so a subsequent StatefulSet update can still replace them. Values:
    - `<= 0`: invalid (will default to `1` and log a warning)
    - `1`: pods are rolled out sequentially
    - `> 1`: pods are rolled out in parallel (honoring the configured number of max unavailable pods)
