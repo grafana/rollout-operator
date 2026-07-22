@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/healthcheck"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/util"
 	"github.com/grafana/rollout-operator/pkg/zpdb"
@@ -66,6 +67,9 @@ type RolloutController struct {
 	logger               log.Logger
 
 	zpdbController ZPDBEvictionController
+
+	healthGate    HealthGate
+	healthMetrics *healthcheck.Metrics
 
 	// This bool is true if we should trigger a reconcile.
 	shouldReconcile atomic.Bool
@@ -366,12 +370,44 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 		sets = util.MoveStatefulSetToFront(sets, notReadySets[0])
 	}
 
+	// Stamp the pre-rollout baseline timestamp as soon as any StatefulSet in the group
+	// needs updates, so T0 is available before the first between-zone health evaluation.
+	if groupHasHealthCheckAnnotation(sets) {
+		needsStamp := false
+		for _, sts := range sets {
+			outdated, err := c.podsNotMatchingUpdateRevision(sts)
+			if err != nil {
+				return fmt.Errorf("unable to list outdated pods for StatefulSet %s: %w", sts.Name, err)
+			}
+			if len(outdated) > 0 {
+				needsStamp = true
+				break
+			}
+		}
+		if needsStamp {
+			if err := c.ensureHealthCheckStartedAt(ctx, sets); err != nil {
+				level.Warn(c.logger).Log("msg", "failed to ensure health-check started-at annotation", "group", groupName, "err", err)
+			}
+		}
+	}
+
 	for _, sts := range sets {
 		if sts.Annotations[config.RolloutPausedAnnotationKey] == config.RolloutPausedAnnotationValue {
 			level.Info(c.logger).Log("msg", "StatefulSet rollout is paused, skipping pod updates", "statefulset", sts.Name)
 			if len(notReadySets) == 1 && notReadySets[0] == sts {
 				return nil
 			}
+			continue
+		}
+		pause, err := c.maybeEvaluateHealthGate(ctx, groupName, sets, sts)
+		if err != nil {
+			return fmt.Errorf("failed to evaluate health check before StatefulSet %s: %w", sts.Name, err)
+		}
+		if pause {
+			// Skip this StatefulSet but continue the loop so a mid-roll zone that sorts
+			// later (all its pods Ready, so not reordered via notReadySets) can still progress.
+			level.Info(c.logger).Log("msg", "pausing rollout due to health check", "group", groupName, "statefulset", sts.Name)
+>>>>>>> a9ae4aa8 (Add health-check driven between-zone rollout gating)
 			continue
 		}
 
@@ -772,6 +808,9 @@ func (c *RolloutController) deleteMetricsForDecommissionedGroups(groups map[stri
 		c.groupReconcileFailed.DeleteLabelValues(name)
 		c.groupReconcileDuration.DeleteLabelValues(name)
 		c.groupReconcileLastSuccess.DeleteLabelValues(name)
+		if c.healthMetrics != nil {
+			c.healthMetrics.DeleteGroup(name)
+		}
 		delete(c.discoveredGroups, name)
 	}
 
