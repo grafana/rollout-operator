@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/go-kit/log"
@@ -464,15 +466,29 @@ func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInf
 
 	for i := range int(diff) {
 		index := int(*oldInfo.replicas) - i - 1 // nr in statefulset
-		eps[i].url = fmt.Sprintf("%s:%s/%s",
+		eps[i].url = fmt.Sprintf("%s:%s%s",
 			util.StatefulSetPodFQDN(ar.Request.Namespace, ar.Request.Name, index, serviceName, clusterDomain),
 			port,
-			path,
+			prepareDownscalePath(path),
 		)
 		eps[i].index = index
 	}
 
 	return eps
+}
+
+// prepareDownscalePath ensures the annotation value is joined as a cleaned absolute URL path.
+// A leading "/" is added only when the configured path does not already have one, and path.Clean
+// collapses duplicates so values like "//ingester/prepare_shutdown" do not produce a double-slash URL
+// (which many servers answer with a 301).
+func prepareDownscalePath(p string) string {
+	if p == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return path.Clean(p)
 }
 
 func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.Logger, client *instrumentation.PodHTTPClient, ep endpoint) error {
