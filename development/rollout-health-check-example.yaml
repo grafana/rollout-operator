@@ -1,0 +1,37 @@
+apiVersion: rollout-operator.grafana.com/v1
+kind: RolloutHealthCheck
+metadata:
+  name: ingester-cell-health
+  namespace: rollout-operator-development
+spec:
+  selector:
+    matchLabels:
+      rollout-group: ingester
+  prometheusURL: http://critical-prometheus.critical-o11y.svc.cluster.local.:9090/critical-prometheus
+  checks:
+    - name: request-error-rate
+      currentRange: 5m
+      baselineRange: 10m
+      queryTimeout: 10s
+      queryRetries: 3
+      onFailure: Pause
+      onNoData: Pause
+      query: |
+        scalar(
+          sum(
+            rate(
+              cortex_request_duration_seconds_count{
+                ${targetMatchers},
+                status_code=~"5..",
+                route!~"ready|debug_pprof"
+              }[${range}]
+            )
+          )
+          or vector(0)
+        )
+      successQuery: |
+        (
+          (${current} < bool 1)
+          +
+          (${current} < bool (2 * ${baseline}))
+        ) > bool 0

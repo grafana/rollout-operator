@@ -25,16 +25,21 @@ import (
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // Required to get the GCP auth provider working.
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"github.com/grafana/rollout-operator/pkg/admission"
 	"github.com/grafana/rollout-operator/pkg/controller"
+	"github.com/grafana/rollout-operator/pkg/healthcheck"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
 	"github.com/grafana/rollout-operator/pkg/webhooks"
@@ -167,6 +172,7 @@ func main() {
 	reg := prometheus.NewRegistry()
 	metrics := newMetrics(reg)
 	zpdbMetrics := zpdb.NewMetrics(reg)
+	healthMetrics := healthcheck.NewMetrics(reg)
 
 	ready := atomic.NewBool(false)
 	restart := make(chan string)
@@ -276,6 +282,14 @@ func main() {
 	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
 	check(evictionController.Start())
 
+	healthObserver := healthcheck.NewObserver(dynamicClient, cfg.kubeNamespace, logger, healthMetrics)
+	check(healthObserver.Start())
+
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartStructuredLogging(0)
+	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: coreKubeClient.CoreV1().Events(cfg.kubeNamespace)})
+	eventRecorder := eventBroadcaster.NewRecorder(clientgoscheme.Scheme, corev1.EventSource{Component: "rollout-operator"})
+
 	maybeStartTLSServer(cfg, kubeConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
 
 	// Monitors the validating and mutating webhook configurations and provides a metric
@@ -291,6 +305,8 @@ func main() {
 
 	// Init the controller
 	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
+	healthEvaluator := healthcheck.NewEvaluator(nil, healthMetrics, logger)
+	c.SetHealthCheck(healthcheck.NewGate(healthObserver, healthEvaluator, healthMetrics, eventRecorder, logger), healthMetrics)
 	if err := c.Init(); err != nil {
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
@@ -300,6 +316,8 @@ func main() {
 		waitForSignalOrRestart(logger, restart)
 		c.Stop()
 		evictionController.Stop()
+		healthObserver.Stop()
+		eventBroadcaster.Shutdown()
 		webhookObserver.Stop()
 		if webhookCollector != nil {
 			reg.Unregister(webhookCollector)
