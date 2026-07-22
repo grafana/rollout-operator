@@ -62,13 +62,13 @@ const (
 
 // EvaluateRequest holds inputs for evaluating a RolloutHealthCheck against a rollout group.
 type EvaluateRequest struct {
-	Config          *Config
-	Namespace       string
-	RolloutGroup    string
-	CandidatePods   []string
-	StablePods      []string
-	BaselineTime    time.Time
-	Now             time.Time
+	Config        *Config
+	Namespace     string
+	RolloutGroup  string
+	CandidatePods []string
+	StablePods    []string
+	BaselineTime  time.Time
+	Now           time.Time
 }
 
 // EvaluateResponse is the aggregate result of all checks.

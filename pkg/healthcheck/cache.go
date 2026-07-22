@@ -64,9 +64,3 @@ func (c *configCache) invalidate(name string) {
 	defer c.lock.Unlock()
 	delete(c.entries, name)
 }
-
-func (c *configCache) size() int {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-	return len(c.entries)
-}
