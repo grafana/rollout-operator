@@ -1015,6 +1015,44 @@ func TestCreateEndpoints(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "path with leading slash is not doubled",
+			oldInfo: &objectInfo{
+				replicas: func() *int32 { i := int32(2); return &i }(),
+			},
+			newInfo: &objectInfo{
+				replicas: func() *int32 { i := int32(1); return &i }(),
+			},
+			port:          "3100",
+			path:          "/ingester/prepare_shutdown",
+			serviceName:   "service-name",
+			clusterDomain: "cluster.local.",
+			expected: []endpoint{
+				{
+					url:   "test-1.service-name.default.svc.cluster.local.:3100/ingester/prepare_shutdown",
+					index: 1,
+				},
+			},
+		},
+		{
+			name: "path with doubled leading slash is cleaned",
+			oldInfo: &objectInfo{
+				replicas: func() *int32 { i := int32(2); return &i }(),
+			},
+			newInfo: &objectInfo{
+				replicas: func() *int32 { i := int32(1); return &i }(),
+			},
+			port:          "3100",
+			path:          "//ingester/prepare_shutdown",
+			serviceName:   "service-name",
+			clusterDomain: "cluster.local.",
+			expected: []endpoint{
+				{
+					url:   "test-1.service-name.default.svc.cluster.local.:3100/ingester/prepare_shutdown",
+					index: 1,
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
