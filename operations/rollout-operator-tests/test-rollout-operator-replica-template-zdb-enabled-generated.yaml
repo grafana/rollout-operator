@@ -191,6 +191,15 @@ rules:
   verbs:
   - update
 - apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - list
+  - get
+  - watch
+  - patch
+- apiGroups:
   - ""
   resources:
   - configmaps
@@ -328,6 +337,45 @@ spec:
             cpu: 100m
             memory: 100Mi
       serviceAccountName: rollout-operator
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  labels:
+    grafana.com/inject-rollout-operator-ca: "true"
+    grafana.com/namespace: default
+  name: phased-deployment-default
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: rollout-operator
+      namespace: default
+      path: /admission/phased-deployment
+      port: 443
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: phased-deployment-default.grafana.com
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: default
+  objectSelector:
+    matchLabels:
+      grafana.com/rollout-phased: "true"
+  rules:
+  - apiGroups:
+    - apps
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - deployments
+    scope: Namespaced
+  sideEffects: NoneOnDryRun
+  timeoutSeconds: 10
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration

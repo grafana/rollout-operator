@@ -58,4 +58,41 @@ const (
 	// StatefulSets in the same rollout group to continue rolling out.
 	RolloutPausedAnnotationKey   = "grafana.com/rollout-paused"
 	RolloutPausedAnnotationValue = "true"
+
+	// RolloutPhasedLabelKey opts a Deployment into phased (dependency-chained) rollouts.
+	RolloutPhasedLabelKey   = "grafana.com/rollout-phased"
+	RolloutPhasedLabelValue = "true"
+
+	// RolloutDependsOnAnnotationKey names the upstream Deployment that must finish and soak
+	// before this Deployment is allowed to roll.
+	RolloutDependsOnAnnotationKey = "grafana.com/rollout-depends-on"
+
+	// RolloutRevisionAnnotationKey is a shared revision stamp set by Git/jsonnet. The operator
+	// only gates when this value changes, so zone-local template differences are ignored.
+	RolloutRevisionAnnotationKey = "grafana.com/rollout-revision"
+
+	// RolloutSoakDurationAnnotationKey overrides the default soak duration (Prometheus duration, e.g. "5m").
+	RolloutSoakDurationAnnotationKey = "grafana.com/rollout-soak-duration"
+
+	// RolloutRestartThresholdAnnotationKey overrides the default restart ratio threshold
+	// (e.g. "10%" or "0.1") evaluated at the end of the soak.
+	RolloutRestartThresholdAnnotationKey = "grafana.com/rollout-restart-threshold"
+
+	// RolloutResumeAnnotationKey, when set to the gated revision, bypasses a failed soak gate
+	// and immediately unpauses the Deployment.
+	RolloutResumeAnnotationKey = "grafana.com/rollout-resume"
+
+	// Operator-owned state annotations written by the webhook and phased Deployment controller.
+	RolloutDependencyPhaseAnnotationKey    = "grafana.com/rollout-dependency-phase"
+	RolloutDependencyRevisionAnnotationKey = "grafana.com/rollout-dependency-revision"
+	RolloutDependencyReasonAnnotationKey   = "grafana.com/rollout-dependency-reason"
+	RolloutSoakStartedAtAnnotationKey      = "grafana.com/rollout-soak-started-at"
+	RolloutRestartBaselineAnnotationKey    = "grafana.com/rollout-restart-baseline"
+	RolloutHadPausedAnnotationKey          = "grafana.com/rollout-had-paused"
+
+	// Dependency phase values.
+	RolloutDependencyPhaseWaiting  = "waiting"
+	RolloutDependencyPhaseSoaking  = "soaking"
+	RolloutDependencyPhaseBlocked  = "blocked"
+	RolloutDependencyPhaseComplete = "complete"
 )
