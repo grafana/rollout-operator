@@ -38,8 +38,16 @@ jobs:
       - run: make test
       - run: make test-boringcrypto
 
+  # Number of matrix.shard entries controls runner count (values must be 0..N-1).
   integration:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: ${{ strategy.job-total }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -88,8 +96,16 @@ jobs:
       - run: make build-image
       - run: make integration
 
+  # Number of matrix.shard entries controls runner count (values must be 0..N-1).
   integration-boringcrypto:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_COUNT: ${{ strategy.job-total }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:

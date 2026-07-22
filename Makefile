@@ -87,10 +87,14 @@ test-boringcrypto: ## Run tests with GOEXPERIMENT=boringcrypto
 check-kind: ## Check if kind is installed
 	@which kind >/dev/null 2>&1 || (echo "Error: kind binary not found. Please install kind: https://kind.sigs.k8s.io/docs/user/quick-start/#installation" && exit 1)
 
+# Optional CI sharding: SHARD_INDEX=0 SHARD_COUNT=2 make integration
+SHARD_INDEX ?= 0
+SHARD_COUNT ?= 1
+
 .PHONY: integration
-integration: ## Run integration tests
+integration: ## Run integration tests (set SHARD_INDEX/SHARD_COUNT to split across runners)
 integration: check-kind integration/mock-service/.uptodate
-	go test -v -tags requires_docker -count 1 -timeout 1h ./integration/...
+	SHARD_INDEX=$(SHARD_INDEX) SHARD_COUNT=$(SHARD_COUNT) ./tools/run-integration-tests.sh
 
 integration/mock-service/.uptodate:
 	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o ./integration/mock-service/mock-service ./integration/mock-service
