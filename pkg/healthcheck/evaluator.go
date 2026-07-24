@@ -40,17 +40,18 @@ func NewPrometheusQuerier(prometheusURL string) (Querier, error) {
 // QuerierFactory creates a Querier for a Prometheus URL. Overridable in tests.
 type QuerierFactory func(prometheusURL string) (Querier, error)
 
-// EvaluationResult is the raw outcome of evaluating a single check.
+// EvaluationResult is the raw outcome of evaluating a single check before policy mapping.
 type EvaluationResult string
 
 const (
-	ResultPass   EvaluationResult = "pass"
-	ResultFail   EvaluationResult = "fail"
-	ResultNoData EvaluationResult = "no_data"
-	ResultError  EvaluationResult = "error"
+	ResultPass    EvaluationResult = "pass"
+	ResultFail    EvaluationResult = "fail"
+	ResultNoData  EvaluationResult = "no_data"
+	ResultError   EvaluationResult = "error"
+	ResultSkipped EvaluationResult = "skipped"
 )
 
-// CheckOutcome is the action taken after mapping an EvaluationResult through onFailure/onNoData.
+// CheckOutcome is the action taken after mapping an EvaluationResult through policies.
 type CheckOutcome string
 
 const (
@@ -60,23 +61,37 @@ const (
 	OutcomeSkipped CheckOutcome = "skipped"
 )
 
+// TargetPods describes pods for ${targetMatchers} substitution.
+type TargetPods struct {
+	Names []string
+	// Zones are StatefulSet / zone identifiers (typically the pod "name" label).
+	Zones []string
+}
+
 // EvaluateRequest holds inputs for evaluating a RolloutHealthCheck against a rollout group.
 type EvaluateRequest struct {
 	Config        *Config
 	Namespace     string
 	RolloutGroup  string
-	CandidatePods []string
-	StablePods    []string
+	CandidatePods TargetPods
+	StablePods    TargetPods
 	BaselineTime  time.Time
 	Now           time.Time
 }
 
-// EvaluateResponse is the aggregate result of all checks.
+// CheckEvaluation is the raw result of one check.
+type CheckEvaluation struct {
+	Name    string
+	Result  EvaluationResult
+	Message string
+}
+
+// EvaluateResponse is the aggregate raw result of all checks.
 type EvaluateResponse struct {
-	Outcome      CheckOutcome
-	FailedCheck  string
-	Message      string
-	CheckResults map[string]EvaluationResult
+	Checks  []CheckEvaluation
+	Results map[string]EvaluationResult
+	// ClientError is set when the Prometheus client could not be created.
+	ClientError string
 }
 
 // Evaluator runs PromQL health checks.
@@ -94,11 +109,11 @@ func NewEvaluator(factory QuerierFactory, metrics *Metrics, logger log.Logger) *
 	return &Evaluator{factory: factory, metrics: metrics, logger: logger}
 }
 
-// Evaluate runs all enabled checks in cfg. Returns OutcomePause when any check requires pausing.
+// Evaluate runs all enabled checks and returns raw results. Policy mapping and retries across
+// reconciles are handled by Gate so evaluation does not block the controller on sleep.
 func (e *Evaluator) Evaluate(ctx context.Context, req EvaluateRequest) EvaluateResponse {
 	resp := EvaluateResponse{
-		Outcome:      OutcomePass,
-		CheckResults: map[string]EvaluationResult{},
+		Results: map[string]EvaluationResult{},
 	}
 	if req.Config == nil {
 		return resp
@@ -111,8 +126,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, req EvaluateRequest) EvaluateR
 	if err != nil {
 		msg := fmt.Sprintf("failed to create Prometheus client for %q: %v", req.Config.PrometheusURL, err)
 		level.Error(e.logger).Log("msg", msg, "rollout_group", req.RolloutGroup)
-		resp.Outcome = OutcomePause
-		resp.Message = msg
+		resp.ClientError = msg
 		return resp
 	}
 
@@ -121,95 +135,45 @@ func (e *Evaluator) Evaluate(ctx context.Context, req EvaluateRequest) EvaluateR
 
 	for _, check := range req.Config.Checks {
 		if check.Disabled {
-			resp.CheckResults[check.Name] = ResultPass
-			e.observeEvaluation(req.RolloutGroup, check.Name, "skipped")
+			ev := CheckEvaluation{Name: check.Name, Result: ResultSkipped}
+			resp.Checks = append(resp.Checks, ev)
+			resp.Results[check.Name] = ResultSkipped
+			e.observeEvaluation(req.RolloutGroup, check.Name, string(ResultSkipped))
 			continue
 		}
 
 		result, msg := e.evaluateCheck(ctx, querier, check, candidateMatchers, stableMatchers, req)
-		resp.CheckResults[check.Name] = result
+		ev := CheckEvaluation{Name: check.Name, Result: result, Message: msg}
+		resp.Checks = append(resp.Checks, ev)
+		resp.Results[check.Name] = result
 		e.observeEvaluation(req.RolloutGroup, check.Name, string(result))
-
-		outcome := mapResultToOutcome(result, check)
-		if outcome == OutcomeSkipped || outcome == OutcomePass {
-			continue
-		}
-		if outcome == OutcomeWarn {
-			if resp.Outcome == OutcomePass {
-				resp.Outcome = OutcomeWarn
-				resp.FailedCheck = check.Name
-				resp.Message = msg
-			}
-			continue
-		}
-		// Pause wins over Warn.
-		resp.Outcome = OutcomePause
-		resp.FailedCheck = check.Name
-		resp.Message = msg
-		return resp
 	}
 
 	return resp
-}
-
-func mapResultToOutcome(result EvaluationResult, check Check) CheckOutcome {
-	switch result {
-	case ResultPass:
-		return OutcomePass
-	case ResultFail:
-		return actionToOutcome(check.OnFailure)
-	case ResultNoData:
-		return actionToOutcome(check.OnNoData)
-	case ResultError:
-		// Unreachable / query errors always pause unless the check is fully disabled (handled earlier).
-		return actionToOutcome(check.OnFailure)
-	default:
-		return OutcomePause
-	}
-}
-
-func actionToOutcome(action FailureAction) CheckOutcome {
-	switch action {
-	case ActionWarn:
-		return OutcomeWarn
-	case ActionDisabled:
-		return OutcomeSkipped
-	default:
-		return OutcomePause
-	}
 }
 
 func (e *Evaluator) evaluateCheck(ctx context.Context, querier Querier, check Check, candidateMatchers, stableMatchers string, req EvaluateRequest) (EvaluationResult, string) {
 	currentQuery := substituteQuery(check.Query, candidateMatchers, formatDuration(check.CurrentRange))
 	baselineQuery := substituteQuery(check.Query, stableMatchers, formatDuration(check.BaselineRange))
 
-	currentVal, err := e.queryScalar(ctx, querier, currentQuery, req.Now, req.RolloutGroup, check, "current")
-	if err != nil {
-		return ResultError, fmt.Sprintf("check %q current query failed: %v", check.Name, err)
-	}
-	if currentVal == nil {
-		return ResultNoData, fmt.Sprintf("check %q current query returned no data", check.Name)
+	currentVal, result, errMsg := e.queryScalarOnce(ctx, querier, currentQuery, req.Now, req.RolloutGroup, check, "current")
+	if result != ResultPass {
+		return result, fmt.Sprintf("check %q current query: %s", check.Name, errMsg)
 	}
 
 	baselineTS := req.BaselineTime
 	if baselineTS.IsZero() {
 		baselineTS = req.Now
 	}
-	baselineVal, err := e.queryScalar(ctx, querier, baselineQuery, baselineTS, req.RolloutGroup, check, "baseline")
-	if err != nil {
-		return ResultError, fmt.Sprintf("check %q baseline query failed: %v", check.Name, err)
-	}
-	if baselineVal == nil {
-		return ResultNoData, fmt.Sprintf("check %q baseline query returned no data", check.Name)
+	baselineVal, result, errMsg := e.queryScalarOnce(ctx, querier, baselineQuery, baselineTS, req.RolloutGroup, check, "baseline")
+	if result != ResultPass {
+		return result, fmt.Sprintf("check %q baseline query: %s", check.Name, errMsg)
 	}
 
 	successQuery := substituteSuccessQuery(check.SuccessQuery, *currentVal, *baselineVal)
-	successVal, err := e.queryScalar(ctx, querier, successQuery, req.Now, req.RolloutGroup, check, "success")
-	if err != nil {
-		return ResultError, fmt.Sprintf("check %q success query failed: %v", check.Name, err)
-	}
-	if successVal == nil {
-		return ResultNoData, fmt.Sprintf("check %q success query returned no data", check.Name)
+	successVal, result, errMsg := e.queryScalarOnce(ctx, querier, successQuery, req.Now, req.RolloutGroup, check, "success")
+	if result != ResultPass {
+		return result, fmt.Sprintf("check %q success query: %s", check.Name, errMsg)
 	}
 	if *successVal == 1 {
 		return ResultPass, ""
@@ -220,31 +184,34 @@ func (e *Evaluator) evaluateCheck(ctx context.Context, querier Querier, check Ch
 	return ResultFail, fmt.Sprintf("check %q success query returned unexpected scalar %v (want 0 or 1)", check.Name, *successVal)
 }
 
-func (e *Evaluator) queryScalar(ctx context.Context, querier Querier, query string, ts time.Time, rolloutGroup string, check Check, queryType string) (*float64, error) {
-	var lastErr error
-	attempts := check.QueryRetries + 1
-	for attempt := 0; attempt < attempts; attempt++ {
-		qctx, cancel := context.WithTimeout(ctx, check.QueryTimeout)
-		start := time.Now()
-		value, warnings, err := querier.Query(qctx, query, ts)
-		cancel()
-		if e.metrics != nil {
-			e.metrics.QueryDuration.WithLabelValues(rolloutGroup, check.Name, queryType).Observe(time.Since(start).Seconds())
-		}
-		if len(warnings) > 0 {
-			level.Warn(e.logger).Log("msg", "prometheus query warnings", "check", check.Name, "query_type", queryType, "warnings", strings.Join(warnings, "; "))
-		}
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		scalar, err := valueToScalar(value)
-		if err != nil {
-			return nil, err
-		}
-		return scalar, nil
+// queryScalarOnce performs a single Prometheus query. Retries are applied by Gate across reconciles
+// using errorPolicy / noDataPolicy so the controller reconcile loop is not blocked on sleep.
+func (e *Evaluator) queryScalarOnce(ctx context.Context, querier Querier, query string, ts time.Time, rolloutGroup string, check Check, queryType string) (*float64, EvaluationResult, string) {
+	qctx, cancel := context.WithTimeout(ctx, check.QueryTimeout)
+	start := time.Now()
+	value, warnings, err := querier.Query(qctx, query, ts)
+	cancel()
+	if e.metrics != nil {
+		e.metrics.QueryDuration.WithLabelValues(rolloutGroup, check.Name, queryType).Observe(time.Since(start).Seconds())
 	}
-	return nil, lastErr
+	if len(warnings) > 0 {
+		level.Warn(e.logger).Log("msg", "prometheus query warnings", "check", check.Name, "query_type", queryType, "warnings", strings.Join(warnings, "; "))
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ResultError, fmt.Sprintf("interrupted: %v", err)
+		}
+		return nil, ResultError, err.Error()
+	}
+
+	scalar, err := valueToScalar(value)
+	if err != nil {
+		return nil, ResultError, err.Error()
+	}
+	if scalar == nil {
+		return nil, ResultNoData, "no data"
+	}
+	return scalar, ResultPass, ""
 }
 
 func (e *Evaluator) observeEvaluation(rolloutGroup, check, result string) {
@@ -309,15 +276,52 @@ func formatDuration(d time.Duration) string {
 	return d.String()
 }
 
-// buildTargetMatchers returns PromQL label matchers for namespace and pod names.
-func buildTargetMatchers(namespace string, podNames []string) string {
+// buildTargetMatchers returns PromQL label matchers for namespace, zone (name), and pods.
+func buildTargetMatchers(namespace string, targets TargetPods) string {
 	quotedNS := strconv.Quote(namespace)
-	if len(podNames) == 0 {
-		return fmt.Sprintf(`namespace=%s,pod=~"^$"`, quotedNS)
+	parts := []string{fmt.Sprintf("namespace=%s", quotedNS)}
+	if len(targets.Zones) > 0 {
+		parts = append(parts, fmt.Sprintf(`name=~"%s"`, joinRegex(targets.Zones)))
 	}
-	parts := make([]string, 0, len(podNames))
-	for _, name := range podNames {
-		parts = append(parts, regexp.QuoteMeta(name))
+	if len(targets.Names) == 0 {
+		parts = append(parts, `pod=~"^$"`)
+	} else {
+		parts = append(parts, fmt.Sprintf(`pod=~"%s"`, joinRegex(targets.Names)))
 	}
-	return fmt.Sprintf(`namespace=%s,pod=~"%s"`, quotedNS, strings.Join(parts, "|"))
+	return strings.Join(parts, ",")
+}
+
+func joinRegex(values []string) string {
+	parts := make([]string, 0, len(values))
+	for _, v := range values {
+		parts = append(parts, regexp.QuoteMeta(v))
+	}
+	return strings.Join(parts, "|")
+}
+
+func uniqueNonEmpty(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func actionToOutcome(action FailureAction) CheckOutcome {
+	switch action {
+	case ActionWarn:
+		return OutcomeWarn
+	case ActionDisabled:
+		return OutcomeSkipped
+	default:
+		return OutcomePause
+	}
 }

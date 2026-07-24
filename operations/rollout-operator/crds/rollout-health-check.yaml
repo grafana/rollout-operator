@@ -54,34 +54,71 @@ spec:
                       baselineRange:
                         type: string
                         description: Range vector duration substituted for ${range} when evaluating stable pods at the pre-rollout timestamp. Defaults to 10m.
-                      queryTimeout:
-                        type: string
-                        description: Per-query timeout. Defaults to 10s.
-                      queryRetries:
-                        type: integer
-                        description: Number of retries after the first attempt. Defaults to 3.
-                        minimum: 0
-                      onFailure:
-                        type: string
-                        description: Behavior when the success query returns failure. Defaults to Pause.
-                        enum:
-                          - Pause
-                          - Warn
-                          - Disabled
-                      onNoData:
-                        type: string
-                        description: Behavior when a query returns no data. Defaults to Pause.
-                        enum:
-                          - Pause
-                          - Warn
-                          - Disabled
+                      errorPolicy:
+                        type: object
+                        description: Retry and action policy when a Prometheus query fails or is unreachable. Defaults to retryInterval=10s, maxAttempts=3, exhaustedAction=Pause.
+                        properties:
+                          retryInterval:
+                            type: string
+                            description: Delay between query attempts after an error. Defaults to 10s.
+                          maxAttempts:
+                            type: integer
+                            description: Maximum query attempts including the first. Defaults to 3.
+                            minimum: 1
+                          exhaustedAction:
+                            type: string
+                            description: Behavior when all attempts fail. Defaults to Pause.
+                            enum:
+                              - Pause
+                              - Warn
+                              - Disabled
+                      failurePolicy:
+                        type: object
+                        description: How failed successQuery results accumulate before gating. Defaults to reevaluationInterval=2m30s, consecutiveFailures=3, consecutiveSuccesses=1, exceededAction=Pause.
+                        properties:
+                          reevaluationInterval:
+                            type: string
+                            description: Minimum time between evaluations that update consecutive counters. Defaults to 2m30s.
+                          consecutiveFailures:
+                            type: integer
+                            description: Number of consecutive failed evaluations required before exceededAction. Defaults to 3.
+                            minimum: 1
+                          consecutiveSuccesses:
+                            type: integer
+                            description: Number of consecutive successful evaluations required to pass. Defaults to 1.
+                            minimum: 1
+                          exceededAction:
+                            type: string
+                            description: Behavior when consecutiveFailures is reached. Defaults to Pause.
+                            enum:
+                              - Pause
+                              - Warn
+                              - Disabled
+                      noDataPolicy:
+                        type: object
+                        description: Retry and action policy when a query returns no data. Defaults to retryInterval=30s, maxAttempts=3, exhaustedAction=Pause.
+                        properties:
+                          retryInterval:
+                            type: string
+                            description: Delay between query attempts after no-data. Defaults to 30s.
+                          maxAttempts:
+                            type: integer
+                            description: Maximum query attempts including the first. Defaults to 3.
+                            minimum: 1
+                          exhaustedAction:
+                            type: string
+                            description: Behavior when all attempts return no data. Defaults to Pause.
+                            enum:
+                              - Pause
+                              - Warn
+                              - Disabled
                       disabled:
                         type: boolean
                         description: When true, this check is skipped while other checks remain active.
                       query:
                         type: string
                         description: |
-                          PromQL that must return exactly one scalar. Required placeholders: ${targetMatchers} and ${range}.
+                          PromQL that must return exactly one scalar. Required placeholders: ${targetMatchers} (namespace, zone/name, and pod matchers) and ${range}.
                         minLength: 1
                       successQuery:
                         type: string
