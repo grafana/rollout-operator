@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
@@ -30,8 +31,8 @@ func TestPhasedDeployment_PausesOnRevisionChange(t *testing.T) {
 }
 
 func TestPhasedDeployment_RePausesWhileGateActive(t *testing.T) {
-	newDep := phasedDeployment("b", "a", "r1", false, config.RolloutDependencyPhaseSoaking, "r1")
-	oldDep := phasedDeployment("b", "a", "r1", true, config.RolloutDependencyPhaseSoaking, "r1")
+	newDep := phasedDeployment("b", "a", "r1", false, config.RolloutDependencyPhaseWaiting, "r1")
+	oldDep := phasedDeployment("b", "a", "r1", true, config.RolloutDependencyPhaseWaiting, "r1")
 	oldDep.Annotations[config.RolloutHadPausedAnnotationKey] = "false"
 	newDep.Annotations[config.RolloutHadPausedAnnotationKey] = "false"
 
@@ -51,7 +52,7 @@ func TestPhasedDeployment_AllowsWhenComplete(t *testing.T) {
 	require.Nil(t, resp.Patch)
 }
 
-func TestPhasedDeployment_AllowsWithoutDependsOn(t *testing.T) {
+func TestPhasedDeployment_AllowsWithoutCanary(t *testing.T) {
 	dep := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "apps/v1",
@@ -68,6 +69,20 @@ func TestPhasedDeployment_AllowsWithoutDependsOn(t *testing.T) {
 	resp := PhasedDeployment(context.Background(), log.NewNopLogger(), admissionReview(nil, dep), nil)
 	require.True(t, resp.Allowed)
 	require.Nil(t, resp.Patch)
+}
+
+func TestPhasedDeployment_AllowsWhenBypassActive(t *testing.T) {
+	dep := phasedDeployment("b", "a", "r2", true, config.RolloutDependencyPhaseWaiting, "r2")
+	dep.Annotations[config.RolloutHadPausedAnnotationKey] = "false"
+	dep.Annotations[config.RolloutBypassUntilAnnotationKey] = time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+
+	resp := PhasedDeployment(context.Background(), log.NewNopLogger(), admissionReview(nil, dep), nil)
+	require.True(t, resp.Allowed)
+	require.NotEmpty(t, resp.Patch)
+
+	var ops []jsonPatchOp
+	require.NoError(t, json.Unmarshal(resp.Patch, &ops))
+	require.Contains(t, ops, jsonPatchOp{Op: "add", Path: "/spec/paused", Value: false})
 }
 
 func TestPhasedDeployment_PreservesPreExistingPause(t *testing.T) {
@@ -90,10 +105,10 @@ func TestPhasedDeployment_PreservesPreExistingPause(t *testing.T) {
 	require.True(t, found, "expected had-paused annotation in patch")
 }
 
-func phasedDeployment(name, dependsOn, revision string, paused bool, phase, depRevision string) *appsv1.Deployment {
+func phasedDeployment(name, canary, revision string, paused bool, phase, depRevision string) *appsv1.Deployment {
 	ann := map[string]string{
-		config.RolloutDependsOnAnnotationKey: dependsOn,
-		config.RolloutRevisionAnnotationKey:  revision,
+		config.RolloutCanaryAnnotationKey:   canary,
+		config.RolloutRevisionAnnotationKey: revision,
 	}
 	if phase != "" {
 		ann[config.RolloutDependencyPhaseAnnotationKey] = phase

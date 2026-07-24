@@ -137,6 +137,9 @@
         policyRule.withResources(['deployments']) +
         policyRule.withVerbs(['list', 'get', 'watch', 'patch']),
         policyRule.withApiGroups('') +
+        policyRule.withResources(['events']) +
+        policyRule.withVerbs(['create']),
+        policyRule.withApiGroups('') +
         policyRule.withResources(['configmaps']) +
         policyRule.withVerbs(['get', 'update', 'create']),
       ] +

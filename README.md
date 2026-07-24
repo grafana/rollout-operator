@@ -158,11 +158,11 @@ To resume normal rollout behavior, remove the annotation or set it to any value 
 
 ## Phased Deployment rollouts
 
-Opt-in sequencing for Kubernetes Deployments. A dependent Deployment stays paused until its upstream Deployment finishes rolling, soaks for a configurable period (default `5m`), and passes a restart check (default: container restart deltas divided by upstream pod count must be below `10%`).
+Opt-in sequencing for Kubernetes Deployments (proposal 4c). A main Deployment stays paused until its canary Deployment(s) finish rolling and become ready. Batches are explicit Deployments in Git; the operator only toggles `spec.paused` and never manages ReplicaSets. Prometheus health gating is a separate feature (proposal 4b) and is not part of this gate.
 
 ### Enablement
 
-Label opted-in Deployments and stamp a shared revision from Git/jsonnet. Point followers at their upstream with `grafana.com/rollout-depends-on`:
+Label opted-in Deployments and stamp a shared revision from Git/jsonnet. Point the main Deployment at its canary with `grafana.com/rollout-canary` (comma-separated for coordinated groups):
 
 ```yaml
 apiVersion: apps/v1
@@ -181,26 +181,33 @@ metadata:
   labels:
     grafana.com/rollout-phased: "true"
   annotations:
-    grafana.com/rollout-depends-on: query-frontend-zone-a
+    grafana.com/rollout-canary: query-frontend-zone-a
     grafana.com/rollout-revision: "r388"
-    # Optional overrides:
-    # grafana.com/rollout-soak-duration: "5m"
-    # grafana.com/rollout-restart-threshold: "10%"
 ```
 
-The mutating webhook `/admission/phased-deployment` (scoped to `grafana.com/rollout-phased: "true"`) pauses the follower when the revision changes and re-applies `spec.paused: true` on later applies while the gate is active (including Flux server-side apply).
+Coordinated canary groups (for example querier zone-b waiting on both querier and query-frontend zone-a):
 
-Chains such as zone-a → zone-b → zone-c are supported by setting `depends-on` on each follower. Disable by removing `grafana.com/rollout-depends-on` (the webhook clears gate state and restores the prior pause intent) and optionally the `grafana.com/rollout-phased` label. If you remove only the label while the Deployment is still paused by the operator, unpause it manually.
+```yaml
+metadata:
+  annotations:
+    grafana.com/rollout-canary: querier-zone-a,query-frontend-zone-a
+    grafana.com/rollout-revision: "r388"
+```
 
-### Resume after a failed soak
+The mutating webhook `/admission/phased-deployment` (scoped to `grafana.com/rollout-phased: "true"`) pauses the main Deployment when the revision changes and re-applies `spec.paused: true` on later applies while the gate is active (including Flux server-side apply).
 
-If the restart check fails, the follower stays paused with phase `blocked`. Resume for that revision:
+Disable by removing `grafana.com/rollout-canary` (the webhook clears gate state and restores the prior pause intent) and optionally the `grafana.com/rollout-phased` label. If you remove only the label while the Deployment is still paused by the operator, unpause it manually.
+
+### Incident bypass
+
+During an incident, apply a time-limited bypass so the Deployment uses native Kubernetes rolling updates:
 
 ```bash
-kubectl annotate deployment query-frontend-zone-b grafana.com/rollout-resume=r388 --overwrite
+kubectl annotate deployment query-frontend-zone-b \
+  grafana.com/rollout-bypass-until="2026-07-24T16:00:00Z" --overwrite
 ```
 
-The operator then marks the gate complete and unpauses immediately (no fresh soak).
+While the bypass is active, the operator does not pause new updates and unpauses an already-gated Deployment. It emits a Warning event (`RolloutBypass`) and increments `rollout_operator_phased_deployment_bypass_total`. Existing readiness checks and the native Deployment strategy still apply.
 
 ## Operations
 
@@ -224,7 +231,7 @@ Offers a `ValidatingAdmissionWebhook` that rejects the requests that decrease th
 
 #### `/admission/phased-deployment`
 
-Offers a `MutatingAdmissionWebhook` that pauses opted-in dependent Deployments while an upstream soak gate is active. See [Phased Deployment rollouts](#phased-deployment-rollouts).
+Offers a `MutatingAdmissionWebhook` that pauses opted-in main Deployments while a canary gate is active. See [Phased Deployment rollouts](#phased-deployment-rollouts).
 
 #### `/pods/eviction`
 
@@ -275,6 +282,12 @@ rules:
   - get
   - watch
   - patch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
 - apiGroups:
   - rollout-operator.grafana.com
   resources:
