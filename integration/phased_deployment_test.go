@@ -13,7 +13,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 
@@ -67,24 +66,18 @@ func TestPhasedDeploymentHappyCase(t *testing.T) {
 
 	awaitDeploymentRolledOut(t, ctx, api, "frontend-zone-a")
 
-	// Still paused during short soak (3s configured on the Deployment).
-	time.Sleep(1 * time.Second)
-	b, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Get(ctx, "frontend-zone-b", metav1.GetOptions{})
-	require.NoError(t, err)
-	require.True(t, b.Spec.Paused, "zone-b should remain paused during soak")
-
 	require.Eventually(t, func() bool {
 		b, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Get(ctx, "frontend-zone-b", metav1.GetOptions{})
 		if err != nil {
 			return false
 		}
 		return !b.Spec.Paused && b.Annotations[config.RolloutDependencyPhaseAnnotationKey] == config.RolloutDependencyPhaseComplete
-	}, 30*time.Second, 200*time.Millisecond, "zone-b should unpause after soak")
+	}, 30*time.Second, 200*time.Millisecond, "zone-b should unpause after canary is ready")
 
 	awaitDeploymentRolledOut(t, ctx, api, "frontend-zone-b")
 }
 
-func TestPhasedDeploymentResumeAfterBlock(t *testing.T) {
+func TestPhasedDeploymentBypass(t *testing.T) {
 	ctx := context.Background()
 	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
 	api := cluster.API()
@@ -94,7 +87,7 @@ func TestPhasedDeploymentResumeAfterBlock(t *testing.T) {
 	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
 
-	const rev = "r-block"
+	const rev = "r-bypass"
 	createPhasedMockDeployment(t, ctx, api, "frontend-zone-a", "", rev, 1)
 	awaitDeploymentRolledOut(t, ctx, api, "frontend-zone-a")
 
@@ -107,14 +100,13 @@ func TestPhasedDeploymentResumeAfterBlock(t *testing.T) {
 				"name":                       "frontend-zone-b",
 			},
 			Annotations: map[string]string{
-				config.RolloutDependsOnAnnotationKey:          "frontend-zone-a",
+				config.RolloutCanaryAnnotationKey:             "frontend-zone-a",
 				config.RolloutRevisionAnnotationKey:           rev,
-				config.RolloutSoakDurationAnnotationKey:       "3s",
-				config.RolloutRestartThresholdAnnotationKey:   "10%",
-				config.RolloutDependencyPhaseAnnotationKey:    config.RolloutDependencyPhaseBlocked,
+				config.RolloutDependencyPhaseAnnotationKey:    config.RolloutDependencyPhaseWaiting,
 				config.RolloutDependencyRevisionAnnotationKey: rev,
-				config.RolloutDependencyReasonAnnotationKey:   "test block",
+				config.RolloutDependencyReasonAnnotationKey:   "test wait",
 				config.RolloutHadPausedAnnotationKey:          "false",
+				config.RolloutBypassUntilAnnotationKey:        time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
 			},
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -127,33 +119,26 @@ func TestPhasedDeploymentResumeAfterBlock(t *testing.T) {
 	_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Create(ctx, b, metav1.CreateOptions{})
 	require.NoError(t, err)
 
-	_, err = api.AppsV1().Deployments(corev1.NamespaceDefault).Patch(ctx, "frontend-zone-b",
-		types.MergePatchType,
-		[]byte(`{"metadata":{"annotations":{"grafana.com/rollout-resume":"r-block"}}}`),
-		metav1.PatchOptions{})
-	require.NoError(t, err)
-
 	require.Eventually(t, func() bool {
 		cur, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Get(ctx, "frontend-zone-b", metav1.GetOptions{})
 		if err != nil {
 			return false
 		}
 		return !cur.Spec.Paused && cur.Annotations[config.RolloutDependencyPhaseAnnotationKey] == config.RolloutDependencyPhaseComplete
-	}, 30*time.Second, 200*time.Millisecond, "resume should complete the gate")
+	}, 30*time.Second, 200*time.Millisecond, "bypass should complete the gate")
 }
 
-func createPhasedMockDeployment(t *testing.T, ctx context.Context, api *kubernetes.Clientset, name, dependsOn, revision string, replicas int32) {
+func createPhasedMockDeployment(t *testing.T, ctx context.Context, api *kubernetes.Clientset, name, canary, revision string, replicas int32) {
 	t.Helper()
 	labels := map[string]string{
 		config.RolloutPhasedLabelKey: config.RolloutPhasedLabelValue,
 		"name":                       name,
 	}
 	ann := map[string]string{
-		config.RolloutRevisionAnnotationKey:     revision,
-		config.RolloutSoakDurationAnnotationKey: "3s",
+		config.RolloutRevisionAnnotationKey: revision,
 	}
-	if dependsOn != "" {
-		ann[config.RolloutDependsOnAnnotationKey] = dependsOn
+	if canary != "" {
+		ann[config.RolloutCanaryAnnotationKey] = canary
 		// Treat the initial revision as already gated so CREATE does not pause the first rollout.
 		ann[config.RolloutDependencyPhaseAnnotationKey] = config.RolloutDependencyPhaseComplete
 		ann[config.RolloutDependencyRevisionAnnotationKey] = revision
@@ -181,7 +166,7 @@ func createPhasedMockDeployment(t *testing.T, ctx context.Context, api *kubernet
 	require.NoError(t, err)
 }
 
-func updatePhasedMockDeployment(t *testing.T, ctx context.Context, api *kubernetes.Clientset, name, dependsOn, revision string) {
+func updatePhasedMockDeployment(t *testing.T, ctx context.Context, api *kubernetes.Clientset, name, canary, revision string) {
 	t.Helper()
 	d, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Get(ctx, name, metav1.GetOptions{})
 	require.NoError(t, err)
@@ -189,8 +174,8 @@ func updatePhasedMockDeployment(t *testing.T, ctx context.Context, api *kubernet
 		d.Annotations = map[string]string{}
 	}
 	d.Annotations[config.RolloutRevisionAnnotationKey] = revision
-	if dependsOn != "" {
-		d.Annotations[config.RolloutDependsOnAnnotationKey] = dependsOn
+	if canary != "" {
+		d.Annotations[config.RolloutCanaryAnnotationKey] = canary
 	}
 	d.Spec.Template = phasedMockPodTemplate(name, "2")
 	_, err = api.AppsV1().Deployments(corev1.NamespaceDefault).Update(ctx, d, metav1.UpdateOptions{})

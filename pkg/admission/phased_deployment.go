@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -27,8 +29,9 @@ type jsonPatchOp struct {
 	Value interface{} `json:"value,omitempty"`
 }
 
-// PhasedDeployment is a mutating webhook that pauses opted-in dependent Deployments
-// when their shared rollout revision changes, and re-applies pause while the gate is active.
+// PhasedDeployment is a mutating webhook that pauses opted-in Deployments with canary
+// dependencies when their shared rollout revision changes, and re-applies pause while
+// the gate is active. A time-limited bypass annotation skips gating.
 func PhasedDeployment(ctx context.Context, l log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {
 	logger, ctx := spanlogger.New(ctx, l, "admission.PhasedDeployment()", tenantResolver)
 	defer logger.Finish()
@@ -60,11 +63,21 @@ func PhasedDeployment(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
-	dependsOn := phased.DependsOn(dep)
-	if dependsOn == "" {
-		// Upstream / first Deployment in a chain: clear leftover gate state if present.
+	canaries := phased.Canaries(dep)
+	if len(canaries) == 0 {
+		// Canary / first Deployment in a chain: clear leftover gate state if present.
 		if patch := clearGateStatePatch(dep); patch != nil {
-			level.Info(logger).Log("msg", "clearing leftover phased gate state from non-dependent deployment")
+			level.Info(logger).Log("msg", "clearing leftover phased gate state from canary deployment")
+			return mutate(patch)
+		}
+		return &v1.AdmissionResponse{Allowed: true}
+	}
+
+	if _, ok, err := phased.BypassUntil(dep); err != nil {
+		level.Warn(logger).Log("msg", "invalid rollout-bypass-until, ignoring", "err", err)
+	} else if ok && phased.BypassActive(dep, time.Now()) {
+		level.Info(logger).Log("msg", "phased rollout bypass active, allowing without gate")
+		if patch := bypassReleasePatch(dep); patch != nil {
 			return mutate(patch)
 		}
 		return &v1.AdmissionResponse{Allowed: true}
@@ -104,7 +117,7 @@ func PhasedDeployment(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 
 	level.Info(logger).Log(
 		"msg", "pausing deployment for phased rollout gate",
-		"depends_on", dependsOn,
+		"canaries", fmt.Sprintf("%v", canaries),
 		"revision", revision,
 		"phase", phased.Phase(dep),
 	)
@@ -148,20 +161,14 @@ func buildGatePatch(dep, oldDep *appsv1.Deployment, revision string) ([]byte, er
 	if needsNewGate {
 		setAnn(config.RolloutDependencyPhaseAnnotationKey, config.RolloutDependencyPhaseWaiting)
 		setAnn(config.RolloutDependencyRevisionAnnotationKey, revision)
-		setAnn(config.RolloutDependencyReasonAnnotationKey, "waiting for upstream deployment")
+		setAnn(config.RolloutDependencyReasonAnnotationKey, "waiting for canary deployment(s)")
 		setAnn(config.RolloutHadPausedAnnotationKey, hadPaused)
-		if dep.Annotations != nil && dep.Annotations[config.RolloutSoakStartedAtAnnotationKey] != "" {
-			ops = append(ops, jsonPatchOp{Op: "remove", Path: phased.AnnotationJSONPointer(config.RolloutSoakStartedAtAnnotationKey)})
-		}
-		if dep.Annotations != nil && dep.Annotations[config.RolloutRestartBaselineAnnotationKey] != "" {
-			ops = append(ops, jsonPatchOp{Op: "remove", Path: phased.AnnotationJSONPointer(config.RolloutRestartBaselineAnnotationKey)})
-		}
 	} else {
 		setAnn(config.RolloutHadPausedAnnotationKey, hadPaused)
 		if phased.Phase(dep) == "" {
 			setAnn(config.RolloutDependencyPhaseAnnotationKey, config.RolloutDependencyPhaseWaiting)
 			setAnn(config.RolloutDependencyRevisionAnnotationKey, revision)
-			setAnn(config.RolloutDependencyReasonAnnotationKey, "waiting for upstream deployment")
+			setAnn(config.RolloutDependencyReasonAnnotationKey, "waiting for canary deployment(s)")
 		}
 	}
 
@@ -213,10 +220,7 @@ func clearGateStatePatch(dep *appsv1.Deployment) []byte {
 		config.RolloutDependencyPhaseAnnotationKey,
 		config.RolloutDependencyRevisionAnnotationKey,
 		config.RolloutDependencyReasonAnnotationKey,
-		config.RolloutSoakStartedAtAnnotationKey,
-		config.RolloutRestartBaselineAnnotationKey,
 		config.RolloutHadPausedAnnotationKey,
-		config.RolloutResumeAnnotationKey,
 	}
 	hasGateState := false
 	for _, key := range keys {
@@ -240,6 +244,45 @@ func clearGateStatePatch(dep *appsv1.Deployment) []byte {
 	}
 	// Only unpause when releasing an active gate that we owned.
 	if gateWasActive && dep.Spec.Paused && !hadPaused {
+		ops = append(ops, jsonPatchOp{Op: "add", Path: "/spec/paused", Value: false})
+	}
+	if len(ops) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(ops)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// bypassReleasePatch unpauses a Deployment that is still held by an active gate when bypass is used.
+func bypassReleasePatch(dep *appsv1.Deployment) []byte {
+	if !phased.GateActive(dep) && !dep.Spec.Paused {
+		return nil
+	}
+	hadPaused := dep.Annotations != nil && dep.Annotations[config.RolloutHadPausedAnnotationKey] == phased.HadPausedAnnotationTrue
+	ops := []jsonPatchOp{}
+	if dep.Annotations == nil {
+		ops = append(ops, jsonPatchOp{Op: "add", Path: "/metadata/annotations", Value: map[string]string{}})
+	}
+	revision := phased.Revision(dep)
+	setAnn := func(key, value string) {
+		cur := ""
+		if dep.Annotations != nil {
+			cur = dep.Annotations[key]
+		}
+		if cur == value {
+			return
+		}
+		ops = append(ops, jsonPatchOp{Op: "add", Path: phased.AnnotationJSONPointer(key), Value: value})
+	}
+	if revision != "" {
+		setAnn(config.RolloutDependencyPhaseAnnotationKey, config.RolloutDependencyPhaseComplete)
+		setAnn(config.RolloutDependencyRevisionAnnotationKey, revision)
+		setAnn(config.RolloutDependencyReasonAnnotationKey, "bypassed until "+strings.TrimSpace(dep.Annotations[config.RolloutBypassUntilAnnotationKey]))
+	}
+	if dep.Spec.Paused && !hadPaused {
 		ops = append(ops, jsonPatchOp{Op: "add", Path: "/spec/paused", Value: false})
 	}
 	if len(ops) == 0 {

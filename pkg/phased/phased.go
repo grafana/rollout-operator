@@ -1,23 +1,16 @@
 package phased
 
 import (
-	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/prometheus/common/model"
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/grafana/rollout-operator/pkg/config"
 )
 
 const (
-	DefaultSoakDuration      = 5 * time.Minute
-	DefaultRestartThreshold  = 0.10
 	HadPausedAnnotationTrue  = "true"
 	HadPausedAnnotationFalse = "false"
 )
@@ -30,12 +23,31 @@ func IsOptedIn(d *appsv1.Deployment) bool {
 	return d.Labels[config.RolloutPhasedLabelKey] == config.RolloutPhasedLabelValue
 }
 
-// DependsOn returns the upstream Deployment name, or empty if none.
-func DependsOn(d *appsv1.Deployment) string {
+// Canaries returns the canary Deployment names this Deployment depends on.
+// Values are comma-separated in grafana.com/rollout-canary.
+func Canaries(d *appsv1.Deployment) []string {
 	if d == nil || d.Annotations == nil {
-		return ""
+		return nil
 	}
-	return strings.TrimSpace(d.Annotations[config.RolloutDependsOnAnnotationKey])
+	raw := strings.TrimSpace(d.Annotations[config.RolloutCanaryAnnotationKey])
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, p := range parts {
+		name := strings.TrimSpace(p)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 // Revision returns the shared rollout revision stamp.
@@ -62,17 +74,34 @@ func DependencyRevision(d *appsv1.Deployment) string {
 	return d.Annotations[config.RolloutDependencyRevisionAnnotationKey]
 }
 
-// ResumeRevision returns the revision requested for an explicit resume bypass.
-func ResumeRevision(d *appsv1.Deployment) string {
+// BypassUntil parses grafana.com/rollout-bypass-until. ok is false when unset.
+func BypassUntil(d *appsv1.Deployment) (until time.Time, ok bool, err error) {
 	if d == nil || d.Annotations == nil {
-		return ""
+		return time.Time{}, false, nil
 	}
-	return strings.TrimSpace(d.Annotations[config.RolloutResumeAnnotationKey])
+	raw := strings.TrimSpace(d.Annotations[config.RolloutBypassUntilAnnotationKey])
+	if raw == "" {
+		return time.Time{}, false, nil
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("invalid %s %q: %w", config.RolloutBypassUntilAnnotationKey, raw, err)
+	}
+	return t, true, nil
+}
+
+// BypassActive reports whether a valid bypass-until annotation is still in the future.
+func BypassActive(d *appsv1.Deployment, now time.Time) bool {
+	until, ok, err := BypassUntil(d)
+	if err != nil || !ok {
+		return false
+	}
+	return now.Before(until)
 }
 
 // GateActive reports whether the Deployment must stay paused for the current revision.
 func GateActive(d *appsv1.Deployment) bool {
-	if !IsOptedIn(d) || DependsOn(d) == "" {
+	if !IsOptedIn(d) || len(Canaries(d)) == 0 {
 		return false
 	}
 	rev := Revision(d)
@@ -85,7 +114,7 @@ func GateActive(d *appsv1.Deployment) bool {
 
 // NeedsNewGate reports whether a revision change requires (re)starting the gate.
 func NeedsNewGate(d *appsv1.Deployment) bool {
-	if !IsOptedIn(d) || DependsOn(d) == "" {
+	if !IsOptedIn(d) || len(Canaries(d)) == 0 {
 		return false
 	}
 	rev := Revision(d)
@@ -93,61 +122,6 @@ func NeedsNewGate(d *appsv1.Deployment) bool {
 		return false
 	}
 	return DependencyRevision(d) != rev
-}
-
-// ParseSoakDuration returns the soak duration from annotations, or the default.
-func ParseSoakDuration(annotations map[string]string) (time.Duration, error) {
-	if annotations == nil {
-		return DefaultSoakDuration, nil
-	}
-	raw := strings.TrimSpace(annotations[config.RolloutSoakDurationAnnotationKey])
-	if raw == "" {
-		return DefaultSoakDuration, nil
-	}
-	d, err := model.ParseDuration(raw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid %s %q: %w", config.RolloutSoakDurationAnnotationKey, raw, err)
-	}
-	if d <= 0 {
-		return 0, fmt.Errorf("%s must be positive, got %q", config.RolloutSoakDurationAnnotationKey, raw)
-	}
-	return time.Duration(d), nil
-}
-
-// ParseRestartThreshold returns the restart ratio threshold from annotations, or the default.
-func ParseRestartThreshold(annotations map[string]string) (float64, error) {
-	if annotations == nil {
-		return DefaultRestartThreshold, nil
-	}
-	raw := strings.TrimSpace(annotations[config.RolloutRestartThresholdAnnotationKey])
-	if raw == "" {
-		return DefaultRestartThreshold, nil
-	}
-	percent := false
-	if strings.HasSuffix(raw, "%") {
-		percent = true
-		raw = strings.TrimSuffix(raw, "%")
-	}
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid %s %q: %w", config.RolloutRestartThresholdAnnotationKey, annotations[config.RolloutRestartThresholdAnnotationKey], err)
-	}
-	if percent {
-		v = v / 100
-	}
-	if v < 0 {
-		return 0, fmt.Errorf("%s must be non-negative, got %q", config.RolloutRestartThresholdAnnotationKey, annotations[config.RolloutRestartThresholdAnnotationKey])
-	}
-	return v, nil
-}
-
-// ExceedsRestartThreshold reports whether the measured ratio should block progression.
-// A threshold of 0 means any positive restart ratio blocks; otherwise ratio >= threshold blocks.
-func ExceedsRestartThreshold(ratio, threshold float64) bool {
-	if threshold == 0 {
-		return ratio > 0
-	}
-	return ratio >= threshold
 }
 
 // IsFullyRolledOut reports whether every replica is updated, ready, and available.
@@ -174,99 +148,32 @@ func IsFullyRolledOut(d *appsv1.Deployment) bool {
 		d.Status.Replicas == desired
 }
 
-// RestartBaseline maps "podUID/containerName" to restart count at soak start.
-type RestartBaseline map[string]int32
-
-func baselineKey(podUID types.UID, containerName string) string {
-	return string(podUID) + "/" + containerName
-}
-
-// BuildRestartBaseline captures current restart counts for the given pods.
-func BuildRestartBaseline(pods []*corev1.Pod) RestartBaseline {
-	baseline := make(RestartBaseline)
-	for _, pod := range pods {
-		if pod == nil {
-			continue
-		}
-		for _, cs := range pod.Status.ContainerStatuses {
-			baseline[baselineKey(pod.UID, cs.Name)] = cs.RestartCount
-		}
-	}
-	return baseline
-}
-
-// EncodeRestartBaseline serializes a baseline for annotation storage.
-func EncodeRestartBaseline(baseline RestartBaseline) (string, error) {
-	if baseline == nil {
-		baseline = RestartBaseline{}
-	}
-	b, err := json.Marshal(baseline)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-// DecodeRestartBaseline parses a baseline annotation value.
-func DecodeRestartBaseline(raw string) (RestartBaseline, error) {
-	if raw == "" {
-		return RestartBaseline{}, nil
-	}
-	var baseline RestartBaseline
-	if err := json.Unmarshal([]byte(raw), &baseline); err != nil {
-		return nil, err
-	}
-	if baseline == nil {
-		baseline = RestartBaseline{}
-	}
-	return baseline, nil
-}
-
-// RestartRatio is sum(container restart deltas since baseline) / len(pods).
-// Missing baseline entries (new pods/containers) are treated as zero.
-func RestartRatio(pods []*corev1.Pod, baseline RestartBaseline) float64 {
-	if len(pods) == 0 {
-		return 0
-	}
-	if baseline == nil {
-		baseline = RestartBaseline{}
-	}
-	var totalDelta int64
-	for _, pod := range pods {
-		if pod == nil {
-			continue
-		}
-		for _, cs := range pod.Status.ContainerStatuses {
-			prev := baseline[baselineKey(pod.UID, cs.Name)]
-			delta := cs.RestartCount - prev
-			if delta > 0 {
-				totalDelta += int64(delta)
-			}
-		}
-	}
-	return float64(totalDelta) / float64(len(pods))
-}
-
-// DetectDependencyCycle walks depends-on links starting from start.
+// DetectDependencyCycle walks canary links starting from start.
 // deployments is keyed by name. Returns true if a cycle involving start is found.
 func DetectDependencyCycle(start string, deployments map[string]*appsv1.Deployment) bool {
+	onPath := map[string]struct{}{}
 	seen := map[string]struct{}{}
-	cur := start
-	for {
-		if _, ok := seen[cur]; ok {
+	var walk func(string) bool
+	walk = func(cur string) bool {
+		if _, ok := onPath[cur]; ok {
 			return true
 		}
+		if _, ok := seen[cur]; ok {
+			return false
+		}
+		onPath[cur] = struct{}{}
 		seen[cur] = struct{}{}
-		d, ok := deployments[cur]
-		if !ok {
-			return false
+		if d, ok := deployments[cur]; ok {
+			for _, next := range Canaries(d) {
+				if walk(next) {
+					return true
+				}
+			}
 		}
-		next := DependsOn(d)
-		if next == "" {
-			return false
-		}
-		cur = next
+		delete(onPath, cur)
+		return false
 	}
+	return walk(start)
 }
 
 // AnnotationJSONPointer escapes an annotation key for use in a JSON Patch path.
