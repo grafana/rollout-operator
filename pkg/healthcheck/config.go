@@ -22,13 +22,19 @@ const (
 	placeholderCurrent        = "${current}"
 	placeholderBaseline       = "${baseline}"
 
-	defaultCurrentRange  = 5 * time.Minute
-	defaultBaselineRange = 10 * time.Minute
-	defaultQueryTimeout  = 10 * time.Second
-	defaultQueryRetries  = 3
+	defaultCurrentRange         = 5 * time.Minute
+	defaultBaselineRange        = 10 * time.Minute
+	defaultQueryTimeout         = 10 * time.Second
+	defaultErrorRetryInterval   = 10 * time.Second
+	defaultErrorMaxAttempts     = 3
+	defaultNoDataRetryInterval  = 30 * time.Second
+	defaultNoDataMaxAttempts    = 3
+	defaultReevaluationInterval = 2*time.Minute + 30*time.Second
+	defaultConsecutiveFailures  = 3
+	defaultConsecutiveSuccesses = 1
 )
 
-// FailureAction controls how a failed or no-data check affects the rollout.
+// FailureAction controls how a failed, no-data, or exhausted check affects the rollout.
 type FailureAction string
 
 const (
@@ -37,15 +43,30 @@ const (
 	ActionDisabled FailureAction = "Disabled"
 )
 
+// RetryPolicy controls retries for query errors or no-data responses.
+type RetryPolicy struct {
+	RetryInterval   time.Duration
+	MaxAttempts     int
+	ExhaustedAction FailureAction
+}
+
+// FailurePolicy controls how consecutive success/failure evaluations accumulate.
+type FailurePolicy struct {
+	ReevaluationInterval time.Duration
+	ConsecutiveFailures  int
+	ConsecutiveSuccesses int
+	ExceededAction       FailureAction
+}
+
 // Check is a single PromQL health check within a RolloutHealthCheck.
 type Check struct {
 	Name          string
 	CurrentRange  time.Duration
 	BaselineRange time.Duration
 	QueryTimeout  time.Duration
-	QueryRetries  int
-	OnFailure     FailureAction
-	OnNoData      FailureAction
+	ErrorPolicy   RetryPolicy
+	FailurePolicy FailurePolicy
+	NoDataPolicy  RetryPolicy
 	Disabled      bool
 	Query         string
 	SuccessQuery  string
@@ -139,9 +160,22 @@ func parseCheck(m map[string]interface{}, index int) (Check, error) {
 		CurrentRange:  defaultCurrentRange,
 		BaselineRange: defaultBaselineRange,
 		QueryTimeout:  defaultQueryTimeout,
-		QueryRetries:  defaultQueryRetries,
-		OnFailure:     ActionPause,
-		OnNoData:      ActionPause,
+		ErrorPolicy: RetryPolicy{
+			RetryInterval:   defaultErrorRetryInterval,
+			MaxAttempts:     defaultErrorMaxAttempts,
+			ExhaustedAction: ActionPause,
+		},
+		FailurePolicy: FailurePolicy{
+			ReevaluationInterval: defaultReevaluationInterval,
+			ConsecutiveFailures:  defaultConsecutiveFailures,
+			ConsecutiveSuccesses: defaultConsecutiveSuccesses,
+			ExceededAction:       ActionPause,
+		},
+		NoDataPolicy: RetryPolicy{
+			RetryInterval:   defaultNoDataRetryInterval,
+			MaxAttempts:     defaultNoDataMaxAttempts,
+			ExhaustedAction: ActionPause,
+		},
 	}
 
 	name, ok := m["name"].(string)
@@ -188,34 +222,6 @@ func parseCheck(m map[string]interface{}, index int) (Check, error) {
 		}
 		check.BaselineRange = d
 	}
-	if v, found := m["queryTimeout"]; found {
-		d, err := parseDurationField(v, "queryTimeout", index)
-		if err != nil {
-			return Check{}, err
-		}
-		check.QueryTimeout = d
-	}
-	if v, found := m["queryRetries"]; found {
-		n, ok := asInt(v)
-		if !ok || n < 0 {
-			return Check{}, fmt.Errorf("invalid value: checks[%d].queryRetries must be >= 0", index)
-		}
-		check.QueryRetries = n
-	}
-	if v, found := m["onFailure"]; found {
-		action, err := parseFailureAction(v, "onFailure", index)
-		if err != nil {
-			return Check{}, err
-		}
-		check.OnFailure = action
-	}
-	if v, found := m["onNoData"]; found {
-		action, err := parseFailureAction(v, "onNoData", index)
-		if err != nil {
-			return Check{}, err
-		}
-		check.OnNoData = action
-	}
 	if v, found := m["disabled"]; found {
 		disabled, ok := v.(bool)
 		if !ok {
@@ -223,8 +229,96 @@ func parseCheck(m map[string]interface{}, index int) (Check, error) {
 		}
 		check.Disabled = disabled
 	}
+	if v, found := m["errorPolicy"]; found {
+		policy, err := parseRetryPolicy(v, "errorPolicy", index, check.ErrorPolicy)
+		if err != nil {
+			return Check{}, err
+		}
+		check.ErrorPolicy = policy
+	}
+	if v, found := m["noDataPolicy"]; found {
+		policy, err := parseRetryPolicy(v, "noDataPolicy", index, check.NoDataPolicy)
+		if err != nil {
+			return Check{}, err
+		}
+		check.NoDataPolicy = policy
+	}
+	if v, found := m["failurePolicy"]; found {
+		policy, err := parseFailurePolicy(v, index, check.FailurePolicy)
+		if err != nil {
+			return Check{}, err
+		}
+		check.FailurePolicy = policy
+	}
 
 	return check, nil
+}
+
+func parseRetryPolicy(v interface{}, field string, index int, defaults RetryPolicy) (RetryPolicy, error) {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return RetryPolicy{}, fmt.Errorf("invalid value: checks[%d].%s must be an object", index, field)
+	}
+	policy := defaults
+	if raw, found := m["retryInterval"]; found {
+		d, err := parseDurationField(raw, field+".retryInterval", index)
+		if err != nil {
+			return RetryPolicy{}, err
+		}
+		policy.RetryInterval = d
+	}
+	if raw, found := m["maxAttempts"]; found {
+		n, ok := asInt(raw)
+		if !ok || n < 1 {
+			return RetryPolicy{}, fmt.Errorf("invalid value: checks[%d].%s.maxAttempts must be >= 1", index, field)
+		}
+		policy.MaxAttempts = n
+	}
+	if raw, found := m["exhaustedAction"]; found {
+		action, err := parseFailureAction(raw, field+".exhaustedAction", index)
+		if err != nil {
+			return RetryPolicy{}, err
+		}
+		policy.ExhaustedAction = action
+	}
+	return policy, nil
+}
+
+func parseFailurePolicy(v interface{}, index int, defaults FailurePolicy) (FailurePolicy, error) {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return FailurePolicy{}, fmt.Errorf("invalid value: checks[%d].failurePolicy must be an object", index)
+	}
+	policy := defaults
+	if raw, found := m["reevaluationInterval"]; found {
+		d, err := parseDurationField(raw, "failurePolicy.reevaluationInterval", index)
+		if err != nil {
+			return FailurePolicy{}, err
+		}
+		policy.ReevaluationInterval = d
+	}
+	if raw, found := m["consecutiveFailures"]; found {
+		n, ok := asInt(raw)
+		if !ok || n < 1 {
+			return FailurePolicy{}, fmt.Errorf("invalid value: checks[%d].failurePolicy.consecutiveFailures must be >= 1", index)
+		}
+		policy.ConsecutiveFailures = n
+	}
+	if raw, found := m["consecutiveSuccesses"]; found {
+		n, ok := asInt(raw)
+		if !ok || n < 1 {
+			return FailurePolicy{}, fmt.Errorf("invalid value: checks[%d].failurePolicy.consecutiveSuccesses must be >= 1", index)
+		}
+		policy.ConsecutiveSuccesses = n
+	}
+	if raw, found := m["exceededAction"]; found {
+		action, err := parseFailureAction(raw, "failurePolicy.exceededAction", index)
+		if err != nil {
+			return FailurePolicy{}, err
+		}
+		policy.ExceededAction = action
+	}
+	return policy, nil
 }
 
 func parseDurationField(v interface{}, field string, index int) (time.Duration, error) {
@@ -260,7 +354,7 @@ func asInt(v interface{}) (int, bool) {
 	case int64:
 		return int(n), true
 	case int:
-		return n, true
+		return int(n), true
 	case float64:
 		if n == float64(int(n)) {
 			return int(n), true
