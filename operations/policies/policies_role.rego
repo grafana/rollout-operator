@@ -25,6 +25,11 @@ expected_rules = [
   },
   {
     "apiGroups": [""],
+    "resources": ["events"],
+    "verbs": ["create"],
+  },
+  {
+    "apiGroups": [""],
     "resources": ["configmaps"],
     "verbs": ["get", "update", "create"],
   },

@@ -283,6 +283,12 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resources:
   - configmaps
   verbs:
   - get

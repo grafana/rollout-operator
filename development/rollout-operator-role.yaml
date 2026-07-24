@@ -45,6 +45,12 @@ rules:
       - watch
       - patch
   - apiGroups:
+      -
+    resources:
+      - events
+    verbs:
+      - create
+  - apiGroups:
       - rollout-operator.grafana.com
     resources:
       - zoneawarepoddisruptionbudgets
