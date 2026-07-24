@@ -420,6 +420,10 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 		return admission.ZoneAwarePdbValidatingWebhookHandler(ctx, l, ar)
 	}
 
+	rolloutHealthCheckValidationFunc := func(ctx context.Context, l log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {
+		return admission.RolloutHealthCheckValidatingWebhookHandler(ctx, l, ar)
+	}
+
 	tlsSrv, err := newTLSServer(cfg, logger, cert, metrics)
 	if err != nil {
 		fatal(fmt.Errorf("failed to create tls server: %w", err))
@@ -428,7 +432,8 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 	// Each webhook that issues Kubernetes API calls gets its own dedicated client, so that an overloaded
 	// webhook is rate limited independently (its own per-API-group buckets) and cannot throttle the other
 	// webhooks or the core controller. The pod-eviction webhook uses the eviction controller's dedicated
-	// client; the zpdb-validation webhook makes no API calls, so it is served with a nil client.
+	// client; the zpdb-validation and rollout-health-check-validation webhooks make no API calls, so
+	// they are served with a nil client.
 	noDownscaleKubeClient, err := newDedicatedKubeClient(wireComponentConfig("no-downscale"))
 	if err != nil {
 		fatal(fmt.Errorf("failed to create no-downscale webhook Kubernetes client: %w", err))
@@ -449,6 +454,7 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, prepareDownscaleKubeClient, webhookHandlerTimeout))
 	tlsSrv.Handle(zpdb.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, nil, webhookHandlerTimeout))
 	tlsSrv.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(zpdbValidationFunc, logger, nil, webhookHandlerTimeout))
+	tlsSrv.Handle(admission.RolloutHealthCheckValidatorWebhookPath, admission.Serve(rolloutHealthCheckValidationFunc, logger, nil, webhookHandlerTimeout))
 	if err := tlsSrv.Start(); err != nil {
 		fatal(fmt.Errorf("failed to start tls server: %w", err))
 	}
