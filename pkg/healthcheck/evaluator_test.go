@@ -39,22 +39,39 @@ func scalar(v float64) model.Value {
 	return &model.Scalar{Value: model.SampleValue(v), Timestamp: model.Now()}
 }
 
+func testCheck() Check {
+	return Check{
+		Name:          "errors",
+		CurrentRange:  time.Minute,
+		BaselineRange: 2 * time.Minute,
+		QueryTimeout:  time.Second,
+		ErrorPolicy: RetryPolicy{
+			RetryInterval:   0,
+			MaxAttempts:     1,
+			ExhaustedAction: ActionPause,
+		},
+		NoDataPolicy: RetryPolicy{
+			RetryInterval:   0,
+			MaxAttempts:     1,
+			ExhaustedAction: ActionPause,
+		},
+		FailurePolicy: FailurePolicy{
+			ReevaluationInterval: time.Millisecond,
+			ConsecutiveFailures:  1,
+			ConsecutiveSuccesses: 1,
+			ExceededAction:       ActionPause,
+		},
+		Query:        `scalar(sum(rate(errors{${targetMatchers}}[${range}])))`,
+		SuccessQuery: `(${current} < bool 1) or (${current} < bool (2 * ${baseline}))`,
+	}
+}
+
 func TestEvaluator_PassFailNoDataError(t *testing.T) {
 	baseCfg := &Config{
 		Name:          "hc",
 		PrometheusURL: "http://prometheus",
 		Selector:      labels.SelectorFromSet(labels.Set{"rollout-group": "ingester"}),
-		Checks: []Check{{
-			Name:          "errors",
-			CurrentRange:  time.Minute,
-			BaselineRange: 2 * time.Minute,
-			QueryTimeout:  time.Second,
-			QueryRetries:  0,
-			OnFailure:     ActionPause,
-			OnNoData:      ActionPause,
-			Query:         `scalar(sum(rate(errors{${targetMatchers}}[${range}])))`,
-			SuccessQuery:  `(${current} < bool 1) or (${current} < bool (2 * ${baseline}))`,
-		}},
+		Checks:        []Check{testCheck()},
 	}
 
 	t.Run("pass", func(t *testing.T) {
@@ -68,15 +85,15 @@ func TestEvaluator_PassFailNoDataError(t *testing.T) {
 			Config:        baseCfg,
 			Namespace:     "ns",
 			RolloutGroup:  "ingester",
-			CandidatePods: []string{"ingester-zone-a-0"},
-			StablePods:    []string{"ingester-zone-b-0"},
+			CandidatePods: TargetPods{Names: []string{"ingester-zone-a-0"}, Zones: []string{"ingester-zone-a"}},
+			StablePods:    TargetPods{Names: []string{"ingester-zone-b-0"}, Zones: []string{"ingester-zone-b"}},
 			Now:           time.Now(),
 			BaselineTime:  time.Now().Add(-time.Hour),
 		})
-		require.Equal(t, OutcomePass, resp.Outcome)
-		require.Equal(t, ResultPass, resp.CheckResults["errors"])
+		require.Equal(t, ResultPass, resp.Results["errors"])
 		require.Len(t, q.calls, 3)
 		require.True(t, strings.Contains(q.calls[0], `pod=~"ingester-zone-a-0"`))
+		require.True(t, strings.Contains(q.calls[0], `name=~"ingester-zone-a"`))
 		require.True(t, strings.Contains(q.calls[0], `[1m]`))
 		require.True(t, strings.Contains(q.calls[1], `pod=~"ingester-zone-b-0"`))
 		require.True(t, strings.Contains(q.calls[1], `[2m]`))
@@ -84,7 +101,7 @@ func TestEvaluator_PassFailNoDataError(t *testing.T) {
 		require.True(t, strings.Contains(q.calls[2], "0.2"))
 	})
 
-	t.Run("fail pauses", func(t *testing.T) {
+	t.Run("fail", func(t *testing.T) {
 		q := &fakeQuerier{sequence: []func() (model.Value, error){
 			func() (model.Value, error) { return scalar(5), nil },
 			func() (model.Value, error) { return scalar(0.1), nil },
@@ -92,65 +109,25 @@ func TestEvaluator_PassFailNoDataError(t *testing.T) {
 		}}
 		e := NewEvaluator(func(string) (Querier, error) { return q, nil }, nil, log.NewNopLogger())
 		resp := e.Evaluate(context.Background(), EvaluateRequest{Config: baseCfg, Namespace: "ns", RolloutGroup: "ingester", Now: time.Now()})
-		require.Equal(t, OutcomePause, resp.Outcome)
-		require.Equal(t, ResultFail, resp.CheckResults["errors"])
+		require.Equal(t, ResultFail, resp.Results["errors"])
 	})
 
-	t.Run("no data pauses", func(t *testing.T) {
+	t.Run("no data", func(t *testing.T) {
 		q := &fakeQuerier{sequence: []func() (model.Value, error){
 			func() (model.Value, error) { return model.Vector{}, nil },
 		}}
 		e := NewEvaluator(func(string) (Querier, error) { return q, nil }, nil, log.NewNopLogger())
 		resp := e.Evaluate(context.Background(), EvaluateRequest{Config: baseCfg, Namespace: "ns", RolloutGroup: "ingester", Now: time.Now()})
-		require.Equal(t, OutcomePause, resp.Outcome)
-		require.Equal(t, ResultNoData, resp.CheckResults["errors"])
+		require.Equal(t, ResultNoData, resp.Results["errors"])
 	})
 
-	t.Run("error pauses", func(t *testing.T) {
+	t.Run("error", func(t *testing.T) {
 		q := &fakeQuerier{sequence: []func() (model.Value, error){
 			func() (model.Value, error) { return nil, errors.New("boom") },
 		}}
 		e := NewEvaluator(func(string) (Querier, error) { return q, nil }, nil, log.NewNopLogger())
 		resp := e.Evaluate(context.Background(), EvaluateRequest{Config: baseCfg, Namespace: "ns", RolloutGroup: "ingester", Now: time.Now()})
-		require.Equal(t, OutcomePause, resp.Outcome)
-		require.Equal(t, ResultError, resp.CheckResults["errors"])
-	})
-
-	t.Run("warn on failure", func(t *testing.T) {
-		cfg := *baseCfg
-		cfg.Checks = append([]Check(nil), baseCfg.Checks...)
-		cfg.Checks[0].OnFailure = ActionWarn
-		q := &fakeQuerier{sequence: []func() (model.Value, error){
-			func() (model.Value, error) { return scalar(5), nil },
-			func() (model.Value, error) { return scalar(0.1), nil },
-			func() (model.Value, error) { return scalar(0), nil },
-		}}
-		e := NewEvaluator(func(string) (Querier, error) { return q, nil }, nil, log.NewNopLogger())
-		resp := e.Evaluate(context.Background(), EvaluateRequest{Config: &cfg, Namespace: "ns", RolloutGroup: "ingester", Now: time.Now()})
-		require.Equal(t, OutcomeWarn, resp.Outcome)
-	})
-
-	t.Run("retries then succeeds", func(t *testing.T) {
-		cfg := *baseCfg
-		cfg.Checks = append([]Check(nil), baseCfg.Checks...)
-		cfg.Checks[0].QueryRetries = 2
-		attempts := 0
-		q := &fakeQuerier{sequence: []func() (model.Value, error){
-			func() (model.Value, error) {
-				attempts++
-				return nil, errors.New("transient")
-			},
-			func() (model.Value, error) {
-				attempts++
-				return scalar(0.1), nil
-			},
-			func() (model.Value, error) { return scalar(0.2), nil },
-			func() (model.Value, error) { return scalar(1), nil },
-		}}
-		e := NewEvaluator(func(string) (Querier, error) { return q, nil }, nil, log.NewNopLogger())
-		resp := e.Evaluate(context.Background(), EvaluateRequest{Config: &cfg, Namespace: "ns", RolloutGroup: "ingester", Now: time.Now()})
-		require.Equal(t, OutcomePass, resp.Outcome)
-		require.Equal(t, 2, attempts)
+		require.Equal(t, ResultError, resp.Results["errors"])
 	})
 
 	t.Run("disabled check skipped", func(t *testing.T) {
@@ -160,12 +137,15 @@ func TestEvaluator_PassFailNoDataError(t *testing.T) {
 		q := &fakeQuerier{}
 		e := NewEvaluator(func(string) (Querier, error) { return q, nil }, nil, log.NewNopLogger())
 		resp := e.Evaluate(context.Background(), EvaluateRequest{Config: &cfg, Namespace: "ns", RolloutGroup: "ingester", Now: time.Now()})
-		require.Equal(t, OutcomePass, resp.Outcome)
+		require.Equal(t, ResultSkipped, resp.Results["errors"])
 		require.Empty(t, q.calls)
 	})
 }
 
 func TestBuildTargetMatchers(t *testing.T) {
-	require.Equal(t, `namespace="ns",pod=~"^$"`, buildTargetMatchers("ns", nil))
-	require.Equal(t, `namespace="ns",pod=~"a-0|b-1"`, buildTargetMatchers("ns", []string{"a-0", "b-1"}))
+	require.Equal(t, `namespace="ns",pod=~"^$"`, buildTargetMatchers("ns", TargetPods{}))
+	require.Equal(t, `namespace="ns",name=~"a|b",pod=~"a-0|b-1"`, buildTargetMatchers("ns", TargetPods{
+		Names: []string{"a-0", "b-1"},
+		Zones: []string{"a", "b"},
+	}))
 }

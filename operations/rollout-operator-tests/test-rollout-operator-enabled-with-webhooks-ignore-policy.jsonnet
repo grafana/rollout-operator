@@ -7,5 +7,6 @@ rollout_operator {
     ignore_rollout_operator_prepare_downscale_webhook_failures: true,
     ignore_rollout_operator_zpdb_eviction_webhook_failures: true,
     ignore_rollout_operator_zpdb_validation_webhook_failures: true,
+    ignore_rollout_operator_rollout_health_check_validation_webhook_failures: true,
   },
 }

@@ -184,12 +184,21 @@ spec:
     - name: request-error-rate
       currentRange: 5m
       baselineRange: 10m
-      queryTimeout: 10s
-      queryRetries: 3
-      onFailure: Pause   # Pause | Warn | Disabled
-      onNoData: Pause
-      # ${targetMatchers} is replaced with namespace + pod matchers for candidate or stable pods.
-      # ${range} is replaced with currentRange or baselineRange.
+      errorPolicy:
+        retryInterval: 10s
+        maxAttempts: 3
+        exhaustedAction: Pause   # Pause | Warn | Disabled
+      failurePolicy:
+        reevaluationInterval: 2m30s
+        consecutiveFailures: 3
+        consecutiveSuccesses: 1
+        exceededAction: Pause   # Pause | Warn | Disabled
+      noDataPolicy:
+        retryInterval: 30s
+        maxAttempts: 3
+        exhaustedAction: Pause
+      # ${targetMatchers} is replaced with namespace, zone (pod "name" label), and pod matchers
+      # for candidate or stable pods. ${range} is replaced with currentRange or baselineRange.
       query: |
         scalar(
           sum(
@@ -216,12 +225,16 @@ spec:
 Behavior:
 
 - The first zone always rolls without a health evaluation (minimum blast radius is one zone).
-- Before starting a subsequent zone, each enabled check runs against candidate pods (already updated) and stable pods (not yet updated). Failed, no-data, or unreachable checks with `onFailure`/`onNoData: Pause` block progression.
+- Before starting a subsequent zone, each enabled check runs against candidate pods (already updated) and stable pods (not yet updated).
+- Query errors use `errorPolicy` (retries spaced by `retryInterval` across reconciles, then `exhaustedAction`). No-data uses `noDataPolicy` the same way. Defaults pause when attempts are exhausted.
+- Failed success queries accumulate under `failurePolicy`. Progression pauses until `consecutiveSuccesses` pass results are observed (default 1). After `consecutiveFailures`, `exceededAction` applies (`Pause` by default). Re-queries that update those counters are spaced by `reevaluationInterval`.
 - `Warn` emits a warning event/log and continues. `Disabled` (or `disabled: true` on a check) skips that check.
 - If the annotation references a missing `RolloutHealthCheck`, or the check's selector does not match the StatefulSet, the rollout proceeds as today and the operator emits an error log, a Kubernetes event, and increments `rollout_operator_health_check_misconfigured_total`.
 - Remove the annotation (or set individual checks to `Disabled`) to bypass the gate. The operator never reverts workload versions.
 
 The operator stores `grafana.com/rollout-health-check-started-at: <updateRevision>=<RFC3339>` on StatefulSets when it first observes pods needing that revision; the earliest timestamp in the group is used as the baseline evaluation time.
+
+Create/update of `RolloutHealthCheck` objects is validated by the `/admission/rollout-health-check-validation` webhook when webhooks are enabled.
 
 ## Operations
 
@@ -250,6 +263,10 @@ Offers a `ValidatingAdmissionWebhook` which can apply a `ZoneAwarePodDisruptionB
 #### `/admission/zpdb-validation`
 
 Offers a `ValidatingAdmissionWebhook` to validate `ZoneAwarePodDisruptionBudget` configuration files and will reject any misconfigured files.
+
+#### `/admission/rollout-health-check-validation`
+
+Offers a `ValidatingAdmissionWebhook` to validate `RolloutHealthCheck` configuration and will reject misconfigured objects.
 
 
 ### RBAC

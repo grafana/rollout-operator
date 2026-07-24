@@ -12,10 +12,19 @@ spec:
     - name: request-error-rate
       currentRange: 5m
       baselineRange: 10m
-      queryTimeout: 10s
-      queryRetries: 3
-      onFailure: Pause
-      onNoData: Pause
+      errorPolicy:
+        retryInterval: 10s
+        maxAttempts: 3
+        exhaustedAction: Pause
+      failurePolicy:
+        reevaluationInterval: 2m30s
+        consecutiveFailures: 3
+        consecutiveSuccesses: 1
+        exceededAction: Pause
+      noDataPolicy:
+        retryInterval: 30s
+        maxAttempts: 3
+        exhaustedAction: Pause
       query: |
         scalar(
           sum(
