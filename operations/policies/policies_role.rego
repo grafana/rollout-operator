@@ -23,6 +23,11 @@ expected_rules = [
     "resources": ["configmaps"],
     "verbs": ["get", "update", "create"],
   },
+  {
+    "apiGroups": ["coordination.k8s.io"],
+    "resources": ["leases"],
+    "verbs": ["get", "create", "update"],
+  },
 ]
 
 extra_zpdb_rule = {

@@ -1,12 +1,89 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"testing"
 	"time"
 
+	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
+
+func TestConfigValidateLeaderElection(t *testing.T) {
+	tests := map[string]func(*config){
+		"empty lease name": func(cfg *config) {
+			cfg.leaderElectionLeaseName = ""
+		},
+		"subsecond lease duration": func(cfg *config) {
+			cfg.leaderElectionLeaseDuration = 500 * time.Millisecond
+			cfg.leaderElectionRenewDeadline = 400 * time.Millisecond
+			cfg.leaderElectionRetryPeriod = 100 * time.Millisecond
+		},
+		"lease duration not greater than renew deadline": func(cfg *config) {
+			cfg.leaderElectionLeaseDuration = cfg.leaderElectionRenewDeadline
+		},
+		"serialized lease duration not greater than renew deadline": func(cfg *config) {
+			cfg.leaderElectionLeaseDuration = 1500 * time.Millisecond
+			cfg.leaderElectionRenewDeadline = 1400 * time.Millisecond
+			cfg.leaderElectionRetryPeriod = 100 * time.Millisecond
+		},
+		"renew deadline does not allow for retry jitter": func(cfg *config) {
+			cfg.leaderElectionRenewDeadline = 110 * time.Millisecond
+			cfg.leaderElectionRetryPeriod = 100 * time.Millisecond
+		},
+		"non-positive retry period": func(cfg *config) {
+			cfg.leaderElectionRetryPeriod = 0
+		},
+	}
+
+	for name, modify := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := newValidConfig(t)
+			modify(&cfg)
+			require.Error(t, cfg.validate())
+		})
+	}
+}
+
+func TestRunWithLeaderElectionAcquiresLease(t *testing.T) {
+	cfg := newValidConfig(t)
+	cfg.leaderElectionLeaseDuration = 2 * time.Second
+	cfg.leaderElectionRenewDeadline = time.Second
+	cfg.leaderElectionRetryPeriod = 100 * time.Millisecond
+
+	client := fake.NewSimpleClientset()
+	ready := atomic.NewBool(false)
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	result := make(chan error, 1)
+
+	go func() {
+		result <- runWithLeaderElection(ctx, client, cfg, "test-pod", log.NewNopLogger(), ready, func(leaderCtx context.Context) {
+			ready.Store(true)
+			close(started)
+			<-leaderCtx.Done()
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting to acquire leader election lease")
+	}
+
+	lease, err := client.CoordinationV1().Leases(cfg.kubeNamespace).Get(t.Context(), cfg.leaderElectionLeaseName, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, lease.Spec.HolderIdentity)
+	require.Equal(t, "test-pod", *lease.Spec.HolderIdentity)
+
+	cancel()
+	require.NoError(t, <-result)
+	require.False(t, ready.Load())
+}
 
 // newValidConfig returns a config populated with the flag defaults and the minimum required fields set,
 // so that cfg.validate() passes. Individual tests override only the field under test.

@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/google/uuid"
 	"github.com/grafana/dskit/clusterutil"
 	"github.com/grafana/dskit/middleware"
 	"github.com/grafana/dskit/tracing"
@@ -25,12 +26,16 @@ import (
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // Required to get the GCP auth provider working.
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"github.com/grafana/rollout-operator/pkg/admission"
@@ -62,6 +67,11 @@ type config struct {
 	podClientTimeout     time.Duration
 	reconcileInterval    time.Duration
 	clusterValidationCfg clusterutil.ClusterValidationProtocolConfigForHTTP
+
+	leaderElectionLeaseName     string
+	leaderElectionLeaseDuration time.Duration
+	leaderElectionRenewDeadline time.Duration
+	leaderElectionRetryPeriod   time.Duration
 
 	serverTLSEnabled        bool
 	serverTLSPort           int
@@ -97,6 +107,11 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
 	cfg.clusterValidationCfg.RegisterFlagsWithPrefix("server.cluster-validation.http.", fs)
+
+	fs.StringVar(&cfg.leaderElectionLeaseName, "leader-election.lease-name", "rollout-operator", "Name of the Lease used to ensure only one rollout-operator is active in the namespace.")
+	fs.DurationVar(&cfg.leaderElectionLeaseDuration, "leader-election.lease-duration", 15*time.Second, "Duration that non-leaders wait before attempting to acquire an unrenewed leader election Lease.")
+	fs.DurationVar(&cfg.leaderElectionRenewDeadline, "leader-election.renew-deadline", 10*time.Second, "Duration that the leader retries refreshing its Lease before giving up leadership.")
+	fs.DurationVar(&cfg.leaderElectionRetryPeriod, "leader-election.retry-period", 2*time.Second, "Interval between attempts to acquire or renew the leader election Lease.")
 
 	fs.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
 	fs.IntVar(&cfg.serverTLSPort, "server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
@@ -135,6 +150,25 @@ func (cfg config) validate() error {
 	}
 	if cfg.kubeClientQPS > 0 && cfg.kubeClientBurst < 1 {
 		return errors.New("-kubernetes.client-burst must be at least 1 when -kubernetes.client-qps is greater than 0, since each request consumes one token")
+	}
+	if cfg.leaderElectionLeaseName == "" {
+		return errors.New("-leader-election.lease-name cannot be an empty string")
+	}
+	if cfg.leaderElectionLeaseDuration < time.Second {
+		return errors.New("-leader-election.lease-duration must be at least one second")
+	}
+	if cfg.leaderElectionRenewDeadline <= 0 {
+		return errors.New("-leader-election.renew-deadline must be positive")
+	}
+	if cfg.leaderElectionRetryPeriod <= 0 {
+		return errors.New("-leader-election.retry-period must be positive")
+	}
+	serializedLeaseDuration := cfg.leaderElectionLeaseDuration.Truncate(time.Second)
+	if serializedLeaseDuration <= cfg.leaderElectionRenewDeadline {
+		return errors.New("-leader-election.lease-duration, truncated to whole seconds by Kubernetes, must be greater than -leader-election.renew-deadline")
+	}
+	if cfg.leaderElectionRenewDeadline <= time.Duration(leaderelection.JitterFactor*float64(cfg.leaderElectionRetryPeriod)) {
+		return errors.New("-leader-election.renew-deadline must be greater than -leader-election.retry-period multiplied by the client-go jitter factor")
 	}
 	if cfg.serverTLSRequestTimeout <= 0 {
 		return errors.New("-server-tls.request-timeout must be positive")
@@ -258,6 +292,43 @@ func main() {
 		fatal(fmt.Errorf("failed to init dynamicClient: %w", err))
 	}
 
+	hostname, err := os.Hostname()
+	if err != nil {
+		fatal(fmt.Errorf("failed to determine leader election identity: %w", err))
+	}
+	identity := fmt.Sprintf("%s_%s", hostname, uuid.NewString())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		waitForSignalOrRestart(logger, restart)
+		cancel()
+	}()
+
+	err = runWithLeaderElection(ctx, coreKubeClient, cfg, identity, logger, ready, func(leaderCtx context.Context) {
+		runOperator(leaderCtx, cfg, kubeConfig, podHTTPClient, logger, coreKubeClient, dynamicClient, restMapper, scaleClient, restart, reg, metrics, zpdbMetrics, ready)
+	})
+	if err != nil {
+		fatal(err)
+	}
+}
+
+func runOperator(
+	ctx context.Context,
+	cfg config,
+	kubeConfig *rest.Config,
+	podHTTPClient *instrumentation.PodHTTPClient,
+	logger log.Logger,
+	coreKubeClient *kubernetes.Clientset,
+	dynamicClient dynamic.Interface,
+	restMapper meta.RESTMapper,
+	scaleClient scale.ScalesGetter,
+	restart chan string,
+	reg *prometheus.Registry,
+	metrics *metrics,
+	zpdbMetrics *zpdb.Metrics,
+	ready *atomic.Bool,
+) {
 	// watches for validating webhooks being added - this is only started if the TLS server is started
 	webhookObserver := tlscert.NewWebhookObserver(coreKubeClient, cfg.kubeNamespace, logger)
 
@@ -295,9 +366,10 @@ func main() {
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
 
-	// Listen to sigterm, as well as for restart (like for certificate renewal).
+	// Stop all leader-only work before another pod can take over.
 	go func() {
-		waitForSignalOrRestart(logger, restart)
+		<-ctx.Done()
+		ready.Store(false)
 		c.Stop()
 		evictionController.Stop()
 		webhookObserver.Stop()
@@ -312,6 +384,66 @@ func main() {
 
 	// Run and block until stopped.
 	c.Run()
+	if ctx.Err() == nil {
+		fatal(errors.New("rollout controller stopped unexpectedly"))
+	}
+}
+
+func runWithLeaderElection(
+	ctx context.Context,
+	client kubernetes.Interface,
+	cfg config,
+	identity string,
+	logger log.Logger,
+	ready *atomic.Bool,
+	run func(context.Context),
+) error {
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:      cfg.leaderElectionLeaseName,
+			Namespace: cfg.kubeNamespace,
+		},
+		Client: client.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: identity,
+		},
+	}
+
+	elector, err := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
+		Lock:          lock,
+		LeaseDuration: cfg.leaderElectionLeaseDuration,
+		RenewDeadline: cfg.leaderElectionRenewDeadline,
+		RetryPeriod:   cfg.leaderElectionRetryPeriod,
+		// OnStartedLeading runs asynchronously, so waiting for expiration prevents a replacement
+		// from taking over before all leader-only controllers and webhooks have stopped.
+		ReleaseOnCancel: false,
+		Name:            "rollout-operator",
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(leaderCtx context.Context) {
+				level.Info(logger).Log("msg", "acquired leader election lease", "lease", cfg.leaderElectionLeaseName, "identity", identity)
+				run(leaderCtx)
+			},
+			OnStoppedLeading: func() {
+				// Followers must not receive webhook traffic because admission state is process-local.
+				ready.Store(false)
+			},
+			OnNewLeader: func(newIdentity string) {
+				if newIdentity != identity {
+					level.Info(logger).Log("msg", "new leader elected", "lease", cfg.leaderElectionLeaseName, "identity", newIdentity)
+				}
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to configure leader election: %w", err)
+	}
+
+	elector.Run(ctx)
+	ready.Store(false)
+	if ctx.Err() != nil {
+		return nil
+	}
+	return errors.New("leader election lease lost")
 }
 
 func waitForSignalOrRestart(logger log.Logger, restart chan string) {
