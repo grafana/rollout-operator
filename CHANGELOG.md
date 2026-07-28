@@ -10,6 +10,7 @@
   * `k8s.io/apiextensions-apiserver` from `v0.36.2` to `v0.36.3`
   * `k8s.io/apimachinery` from `v0.36.2` to `v0.36.3`
   * `k8s.io/client-go` from `v0.36.2` to `v0.36.3`
+* [BUGFIX] Avoid doubling a leading `/` when building prepare-downscale pod URLs from `grafana.com/prepare-downscale-http-path`. #468
 
 ## v0.38.1
 
