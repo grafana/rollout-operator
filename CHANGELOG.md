@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [FEATURE] Add a read-only `/status/` HTML page for StatefulSet rollout group progress (phase, replicas, revisions, pause state).
 * [CHANGE] Prefer `grafana.com/min-time-between-zones-downscale` as a StatefulSet annotation instead of a label. The label remains supported as a fallback and logs a deprecation warning when used. #463
 * [BUGFIX] Allow a StatefulSet rollout to recover when pods from a previous failed update are stuck in an unrecoverable state (e.g. `CrashLoopBackOff` or `ImagePullBackOff`): outdated stuck pods are deleted even when the `rollout-max-unavailable` budget is exhausted, since deleting an already-unavailable pod doesn't reduce availability. A subsequent Spec update can then replace them without a manual delete. #466
 * [ENHANCEMENT] Updated dependencies, including: #470
