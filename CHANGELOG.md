@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [FEATURE] Add a read-only `/status/` HTML page for StatefulSet rollout group progress (phase, replicas, revisions, pause state).
 * [ENHANCEMENT] Update Go to `1.27` #494
 * [ENHANCEMENT] Updated dependencies, including: #491
   * `github.com/stretchr/testify` from `v1.12.0` to `v1.12.1`
