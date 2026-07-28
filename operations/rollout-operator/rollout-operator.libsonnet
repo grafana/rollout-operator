@@ -134,6 +134,9 @@
         policyRule.withApiGroups('') +
         policyRule.withResources(['configmaps']) +
         policyRule.withVerbs(['get', 'update', 'create']),
+        policyRule.withApiGroups('coordination.k8s.io') +
+        policyRule.withResources(['leases']) +
+        policyRule.withVerbs(['get', 'create', 'update']),
       ] +
       (
         if $._config.rollout_operator_replica_template_access_enabled then [
