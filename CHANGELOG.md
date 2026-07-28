@@ -3,6 +3,7 @@
 ## main / unreleased
 
 * [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
+* [FEATURE] Add a read-only `/status/` HTML page for StatefulSet rollout group progress (phase, replicas, revisions, pause state).
 
 ## v0.40.0
 
