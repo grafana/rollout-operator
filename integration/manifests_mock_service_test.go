@@ -65,6 +65,15 @@ func mockServiceService(name string) (*corev1.Service, error) {
 	}, nil
 }
 
+// mockServiceStatefulSetCrashing returns a StatefulSet whose pods exit immediately on startup,
+// so they end up in CrashLoopBackOff.
+func mockServiceStatefulSetCrashing(name, version string, replicas int) *appsv1.StatefulSet {
+	sts := mockServiceStatefulSet(name, version, false, replicas)
+	container := &sts.Spec.Template.Spec.Containers[0]
+	container.Env = append(container.Env, corev1.EnvVar{Name: "CRASH", Value: "true"})
+	return sts
+}
+
 func mockServiceStatefulSet(name, version string, ready bool, replicas int) *appsv1.StatefulSet {
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{

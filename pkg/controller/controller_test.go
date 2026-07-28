@@ -264,7 +264,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedDeletedPods: []string{"ingester-zone-a-0"},
 		},
-		"should give priority to StatefulSet with not-Ready pods and take not-Ready pods on update revision into account when honoring max unavailable": {
+		"should give priority to StatefulSet with not-Ready pods and take not-Ready pods in account when honoring max unavailable": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision()),
 				mockStatefulSet("ingester-zone-b", withPrevRevision(), withReplicas(3, 2)),
@@ -273,14 +273,13 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
-				// One pod already on the update revision and not Ready consumes 1 of maxUnavailable=2.
-				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash, withNotReady()),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
 			},
-			expectedDeletedPods: []string{"ingester-zone-b-1"},
+			expectedDeletedPods: []string{"ingester-zone-b-0"}, // Max unavailable = 2 but there's 1 not-Ready pod
 		},
-		"should do nothing if not-Ready pods already on update revision >= max unavailable": {
+		"should do nothing if the number of not-Ready pods >= max unavailable": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision()),
 				mockStatefulSet("ingester-zone-b", withPrevRevision(), withReplicas(3, 1)),
@@ -289,37 +288,53 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
-				// Two pods already updated but not Ready consume the full maxUnavailable=2 budget.
-				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash, withNotReady()),
-				mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash, withNotReady()),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
 			},
-			expectedDeletedPods: nil,
+			expectedDeletedPods: nil, // Max unavailable = 2 and there are 2 not-Ready pods
 		},
 		// Reproduces https://github.com/grafana/rollout-operator/issues/339:
-		// a failed rollout left pods not-Ready on an outdated revision; a subsequent
-		// StatefulSet update must still be allowed to delete those pods.
-		"should delete outdated not-Ready pods when StatefulSet is updated again": {
+		// a failed rollout left a pod in CrashLoopBackOff on an outdated revision. It consumes the
+		// whole maxUnavailable=1 budget, but it must still be deleted so a subsequent StatefulSet
+		// update can replace it without a manual delete.
+		"should delete outdated pods stuck in CrashLoopBackOff even when max unavailable is reached": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2), func(sts *v1.StatefulSet) {
 					sts.Annotations[config.RolloutMaxUnavailableAnnotationKey] = "1"
 				}),
 			},
 			pods: []runtime.Object{
-				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash, withNotReady()),
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash, withCrashLoopBackOff()),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+			},
+			// Only the stuck pod is deleted: healthy outdated pods keep honoring maxUnavailable.
+			expectedDeletedPods: []string{"ingester-zone-a-0"},
+		},
+		"should delete outdated pods stuck in ImagePullBackOff on an init container even when max unavailable is reached": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2), func(sts *v1.StatefulSet) {
+					sts.Annotations[config.RolloutMaxUnavailableAnnotationKey] = "1"
+				}),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash, withInitContainerImagePullBackOff()),
 				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
 			},
 			expectedDeletedPods: []string{"ingester-zone-a-0"},
 		},
-		"should count missing desired pods when StatefulSet status has caught up": {
+		"should not delete outdated not-Ready pods which are not stuck": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2), func(sts *v1.StatefulSet) {
-					sts.Status.Replicas = 2
 					sts.Annotations[config.RolloutMaxUnavailableAnnotationKey] = "1"
 				}),
 			},
 			pods: []runtime.Object{
+				// Not Ready (e.g. failing readiness probe) but not in an unrecoverable state:
+				// it consumes the budget and is not fair game for an out-of-budget delete.
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash, withNotReady()),
 				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
 			},
@@ -1585,6 +1600,39 @@ func withNotReady() func(pod *corev1.Pod) {
 		for i := range pod.Status.ContainerStatuses {
 			pod.Status.ContainerStatuses[i].Ready = false
 		}
+	}
+}
+
+func withCrashLoopBackOff() func(pod *corev1.Pod) {
+	return func(pod *corev1.Pod) {
+		// A crashlooping pod keeps the Running phase: the container is waiting in
+		// CrashLoopBackOff between restart attempts.
+		for i := range pod.Status.ContainerStatuses {
+			pod.Status.ContainerStatuses[i].Ready = false
+			pod.Status.ContainerStatuses[i].State = corev1.ContainerState{
+				Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"},
+			}
+		}
+	}
+}
+
+func withInitContainerImagePullBackOff() func(pod *corev1.Pod) {
+	return func(pod *corev1.Pod) {
+		// A pod whose init container can't pull its image never leaves the Pending phase.
+		pod.Status.Phase = corev1.PodPending
+		for i := range pod.Status.ContainerStatuses {
+			pod.Status.ContainerStatuses[i].Ready = false
+			pod.Status.ContainerStatuses[i].State = corev1.ContainerState{
+				Waiting: &corev1.ContainerStateWaiting{Reason: "PodInitializing"},
+			}
+		}
+		pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+			Name:  "init",
+			Ready: false,
+			State: corev1.ContainerState{
+				Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"},
+			},
+		}}
 	}
 }
 

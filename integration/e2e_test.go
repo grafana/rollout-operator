@@ -73,8 +73,8 @@ func TestRolloutHappyCase(t *testing.T) {
 }
 
 // TestRolloutRecoversFromFailedUpdate reproduces https://github.com/grafana/rollout-operator/issues/339:
-// after a bad rollout leaves pods not Ready, a subsequent StatefulSet update must still roll those pods
-// to the fixed revision without requiring a manual pod delete.
+// after a bad rollout leaves pods in CrashLoopBackOff, a subsequent StatefulSet update must still
+// roll those pods to the fixed revision without requiring a manual pod delete.
 func TestRolloutRecoversFromFailedUpdate(t *testing.T) {
 	ctx := context.Background()
 
@@ -94,15 +94,17 @@ func TestRolloutRecoversFromFailedUpdate(t *testing.T) {
 	requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 
-	// Bad rollout: version 2 never becomes ready.
-	_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-a", "2", false, 1), metav1.UpdateOptions{})
+	// Bad rollout: version 2 crashes on startup.
+	_, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSetCrashing("mock-zone-a", "2", 1), metav1.UpdateOptions{})
 	require.NoError(t, err, "Can't update StatefulSet")
-	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-b", "2", false, 1), metav1.UpdateOptions{})
+	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSetCrashing("mock-zone-b", "2", 1), metav1.UpdateOptions{})
 	require.NoError(t, err, "Can't update StatefulSet")
-	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSet("mock-zone-c", "2", false, 1), metav1.UpdateOptions{})
+	_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, mockServiceStatefulSetCrashing("mock-zone-c", "2", 1), metav1.UpdateOptions{})
 	require.NoError(t, err, "Can't update StatefulSet")
 
-	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectNotReady(), expectVersion("2"))
+	// The rollout starts with zone-a and gets stuck there: the new pod crashloops and the other
+	// zones are never rolled.
+	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectVersion("2"), expectNotReady(), expectContainerWaitingReason("CrashLoopBackOff"))
 	requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectReady(), expectVersion("1"))
 	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectReady(), expectVersion("1"))
 

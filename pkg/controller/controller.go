@@ -557,40 +557,51 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	if len(podsToUpdate) > 0 {
 		maxUnavailable := getMaxUnavailableForStatefulSet(sts, c.logger)
-		// Only pods already on UpdateRevision (or deletes already in flight) consume the
-		// unavailability budget. Outdated not-Ready pods from a previous failed rollout
-		// still need deleting and must not block a subsequent StatefulSet update.
-		numUnavailable, err := c.unavailablePodCountForRollout(sts)
-		if err != nil {
-			return false, fmt.Errorf("failed to count unavailable pods for StatefulSet %s: %w", sts.Name, err)
-		}
+		numNotReady := int(sts.Status.Replicas - sts.Status.ReadyReplicas)
 
-		// Exclude pods already terminating from delete candidates. They still count against
-		// maxUnavailable above, but must not consume a slot in the delete batch.
-		candidates := make([]*corev1.Pod, 0, len(podsToUpdate))
-		for _, pod := range podsToUpdate {
+		// Compute the number of pods we should update, honoring the configured maxUnavailable.
+		numPods := max(0, min(
+			maxUnavailable-numNotReady, // No more than the configured maxUnavailable (including not-Ready pods).
+			len(podsToUpdate),          // No more than the total number of pods that need to be updated.
+		))
+
+		// Select the pods to delete:
+		// - Pods within the maxUnavailable batch, unless they're already terminating.
+		// - Outdated pods stuck in a state they can't recover from on their own (e.g. CrashLoopBackOff
+		//   left behind by a previous failed rollout) are always deleted, even beyond the maxUnavailable
+		//   budget: they're already unavailable, so deleting them doesn't reduce availability any further.
+		//   This allows a follow-up StatefulSet update to replace them without a manual delete.
+		//   See https://github.com/grafana/rollout-operator/issues/339
+		var podsToDelete []*corev1.Pod
+		for i, pod := range podsToUpdate {
+			// Skip if the pod is terminating. Since "Terminating" is not a pod Phase, we can infer it by
+			// checking if the deletionTimestamp has been set (kubectl does something similar too).
 			if pod.DeletionTimestamp != nil {
 				level.Debug(c.logger).Log("msg", fmt.Sprintf("waiting for pod %s to be terminated", pod.Name))
 				continue
 			}
-			candidates = append(candidates, pod)
+
+			if i < numPods {
+				podsToDelete = append(podsToDelete, pod)
+			} else if isPodStuck(pod) {
+				level.Info(c.logger).Log(
+					"msg", "deleting stuck outdated pod regardless of max unavailable",
+					"statefulset", sts.Name,
+					"pod", pod.Name)
+				podsToDelete = append(podsToDelete, pod)
+			}
 		}
 
-		// Compute the number of pods we should update, honoring the configured maxUnavailable.
-		numPods := max(0, min(
-			maxUnavailable-numUnavailable, // No more than the configured maxUnavailable.
-			len(candidates),               // No more than the candidates that can be deleted.
-		))
-
-		if numPods == 0 {
-			level.Info(c.logger).Log(
-				"msg", "StatefulSet has some pods to be updated but maxUnavailable pods has been reached",
-				"statefulset", sts.Name,
-				"pods_to_update", len(podsToUpdate),
-				"unavailable_pods", numUnavailable,
-				"replicas", sts.Status.Replicas,
-				"ready_replicas", sts.Status.ReadyReplicas,
-				"max_unavailable", maxUnavailable)
+		if len(podsToDelete) == 0 {
+			if numPods == 0 {
+				level.Info(c.logger).Log(
+					"msg", "StatefulSet has some pods to be updated but maxUnavailable pods has been reached",
+					"statefulset", sts.Name,
+					"pods_to_update", len(podsToUpdate),
+					"replicas", sts.Status.Replicas,
+					"ready_replicas", sts.Status.ReadyReplicas,
+					"max_unavailable", maxUnavailable)
+			}
 
 			return true, nil
 		}
@@ -600,10 +611,10 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 		// Note that this will also have no effect if the pods are not within a ZPDB scope.
 		zpdbMaxUnavailableOverrideIfZero := zpdb.NewMaxUnavailableZeroOverride(maxUnavailable)
 
-		hasPartitionAwarePdb, err := c.zpdbController.HasPartitionAwarePdb(candidates[0])
+		hasPartitionAwarePdb, err := c.zpdbController.HasPartitionAwarePdb(podsToDelete[0])
 		if err != nil {
 			// Note if we ignored this error and continued processing, the same error would be raised from the MarkPodAsDeleted() below.
-			return false, fmt.Errorf("failed to determine pod zpdb configuration %s: %w", candidates[0].Name, err)
+			return false, fmt.Errorf("failed to determine pod zpdb configuration %s: %w", podsToDelete[0].Name, err)
 		}
 
 		// If the pods are covered by a partition aware ZPDB then the override is set to 1
@@ -613,7 +624,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			zpdbMaxUnavailableOverrideIfZero = zpdb.NewMaxUnavailableZeroOverride(1)
 		}
 
-		for _, pod := range candidates[:numPods] {
+		for _, pod := range podsToDelete {
 			// Use the ZPDB to determine if this pod delete is allowed.
 			// The ZPDB serializes requests from this controller and from any incoming voluntary evictions.
 			// For each request, a full set of tests is performed to confirm the state of all pods in the ZPDB scope.
@@ -676,35 +687,37 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 	return false, nil
 }
 
-// unavailablePodCountForRollout returns how many pods already consume the rollout
-// maxUnavailable budget. Outdated not-Ready pods are excluded so a follow-up StatefulSet
-// update can recover from a failed rollout (e.g. CrashLoopBackOff on the previous revision).
-func (c *RolloutController) unavailablePodCountForRollout(sts *v1.StatefulSet) (int, error) {
-	pods, err := c.listPodsByStatefulSet(sts)
-	if err != nil {
-		return 0, err
+// stuckContainerWaitingReasons are container waiting reasons which indicate the container
+// cannot start or keep running without intervention: the pod will never become Ready on its own.
+var stuckContainerWaitingReasons = map[string]struct{}{
+	"CrashLoopBackOff":           {},
+	"ImagePullBackOff":           {},
+	"ErrImagePull":               {},
+	"InvalidImageName":           {},
+	"CreateContainerConfigError": {},
+	"CreateContainerError":       {},
+}
+
+// isPodStuck returns true if the pod is not Ready and at least one of its containers is stuck
+// in a state it can't recover from without the pod being replaced (e.g. CrashLoopBackOff).
+// Such a pod is already unavailable, so deleting it doesn't reduce availability any further.
+func isPodStuck(pod *corev1.Pod) bool {
+	if util.IsPodRunningAndReady(pod) {
+		return false
 	}
 
-	updateRev := sts.Status.UpdateRevision
-	count := 0
-	for _, pod := range pods {
-		if pod.DeletionTimestamp != nil {
-			// A delete is already in flight; keep it charged against the budget until the
-			// pod is gone and replaced, otherwise we can exceed maxUnavailable.
-			count++
-			continue
+	for _, statuses := range [][]corev1.ContainerStatus{pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses} {
+		for _, status := range statuses {
+			if status.State.Waiting == nil {
+				continue
+			}
+			if _, ok := stuckContainerWaitingReasons[status.State.Waiting.Reason]; ok {
+				return true
+			}
 		}
-		if pod.Labels[v1.ControllerRevisionHashLabelKey] == updateRev && !util.IsPodRunningAndReady(pod) {
-			count++
-		}
 	}
 
-	// Pods not yet recreated after a delete are also unavailable for the purposes of the budget.
-	if missing := int(*sts.Spec.Replicas) - len(pods); missing > 0 {
-		count += missing
-	}
-
-	return count, nil
+	return false
 }
 
 func (c *RolloutController) podsNotMatchingUpdateRevision(sts *v1.StatefulSet) ([]*corev1.Pod, error) {
