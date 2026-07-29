@@ -12,7 +12,6 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/frontend"
 )
 
@@ -20,7 +19,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "Listen address for the status UI preview server.")
 	flag.Parse()
 
-	c, err := controller.NewDemoController()
+	c, err := newDemoController()
 	if err != nil {
 		log.Fatal(err)
 	}
