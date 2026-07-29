@@ -1,4 +1,4 @@
-// Command status-ui-preview serves the rollout status UI with demo data.
+// Command status-ui-preview serves the rollout status UI with demo Kubernetes objects.
 //
 //	go run ./cmd/status-ui-preview
 //	# or: make status-ui-preview
@@ -12,15 +12,21 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/frontend"
-	"github.com/grafana/rollout-operator/pkg/status"
 )
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "Listen address for the status UI preview server.")
 	flag.Parse()
 
-	ui, err := frontend.New(status.DemoReader{})
+	c, err := controller.NewDemoController()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer c.Stop()
+
+	ui, err := frontend.New(c)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -28,10 +34,10 @@ func main() {
 	r := mux.NewRouter()
 	ui.Register(r)
 	r.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		http.Redirect(w, req, frontend.BasePath+"/", http.StatusFound)
+		http.Redirect(w, req, "/ui/", http.StatusFound)
 	})
 
-	url := fmt.Sprintf("http://%s%s/", *addr, frontend.BasePath)
-	log.Printf("serving status UI preview with demo data at %s", url)
+	url := fmt.Sprintf("http://%s/ui/", *addr)
+	log.Printf("serving status UI preview from mock StatefulSets/Pods at %s", url)
 	log.Fatal(http.ListenAndServe(*addr, r))
 }
