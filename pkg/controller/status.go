@@ -151,21 +151,25 @@ func statefulSetHasNotReadyPods(sts *v1.StatefulSet, pods []*corev1.Pod) bool {
 }
 
 // applyZoneGating mirrors reconcile ordering: only one StatefulSet is actively
-// updated at a time. When exactly one set is not-ready, reconcile moves it to the
-// front; otherwise name order applies and paused sets do not block.
+// updated at a time. Multi not-ready (including paused) blocks everything; a sole
+// not-ready paused set does not, because updateStatefulSetPods skips it.
 func applyZoneGating(members []status.Member) {
-	var notReady []string
+	var notReady, notReadyActive []string
 	for _, m := range members {
-		if m.NotReady {
-			notReady = append(notReady, m.Name)
+		if !m.NotReady {
+			continue
+		}
+		notReady = append(notReady, m.Name)
+		if !m.Paused {
+			notReadyActive = append(notReadyActive, m.Name)
 		}
 	}
 	if len(notReady) > 1 {
 		// Reconcile refuses to roll any zone until pods recover.
 		return
 	}
-	if len(notReady) == 1 {
-		blocker := notReady[0]
+	if len(notReadyActive) == 1 {
+		blocker := notReadyActive[0]
 		for i := range members {
 			m := &members[i]
 			if m.Name == blocker {

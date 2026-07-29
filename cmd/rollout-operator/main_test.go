@@ -73,4 +73,5 @@ func TestConfigDefaults(t *testing.T) {
 	// these back to 0 would silently turn off client-side throttling, so assert them explicitly.
 	require.Equal(t, float64(5), cfg.kubeClientQPS)
 	require.Equal(t, 10, cfg.kubeClientBurst)
+	require.Equal(t, []string{"admission/no-downscale", "admission/prepare-downscale", "ui"}, defaultClusterValidationExcludePaths)
 }
