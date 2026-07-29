@@ -1,4 +1,4 @@
-package controller
+package main
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/controller"
 	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
@@ -39,12 +40,11 @@ func (demoEvictionController) HasPartitionAwarePdb(*corev1.Pod) (bool, error) {
 	return false, nil
 }
 
-// NewDemoController returns a RolloutController whose informers are seeded with
-// mock StatefulSets and Pods covering typical UI states (complete, progressing, paused).
-// Call Stop() when the preview server shuts down.
-func NewDemoController() (*RolloutController, error) {
+// newDemoController returns a RolloutController whose informers are seeded with
+// mock StatefulSets and Pods covering typical UI states.
+func newDemoController() (*controller.RolloutController, error) {
 	kubeClient := fake.NewClientset(demoObjects()...)
-	c := NewRolloutController(
+	c := controller.NewRolloutController(
 		kubeClient,
 		nil,
 		nil,
@@ -79,7 +79,7 @@ func demoObjects() []runtime.Object {
 		demoPod("ingester-zone-c-1", demoIngesterOldRev),
 		demoPod("ingester-zone-c-2", demoIngesterOldRev),
 
-		// Store-gateway: zone-a paused mid-rollout, zone-b waiting to start.
+		// Store-gateway: zone-a paused mid-rollout, zone-b continues (pause does not block).
 		demoStatefulSet("store-gateway-zone-a", "store-gateway", 2, 2, demoStoreGatewayOldRev, demoStoreGatewayNewRev,
 			func(sts *appsv1.StatefulSet) {
 				sts.Annotations[config.RolloutPausedAnnotationKey] = config.RolloutPausedAnnotationValue
