@@ -174,8 +174,9 @@ func TestRolloutController_Snapshot(t *testing.T) {
 					{
 						Name: "ingester-zone-b", DesiredReplicas: 3, ReadyReplicas: 1,
 						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
-						UpdatedPods: 3, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
-						Phase: status.PhaseWaiting, Reason: "waiting for pods to become Ready",
+						UpdatedPods: 3, TotalPods: 3, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseWaiting, Reason: "waiting for pods to become Ready",
 					},
 				},
 			}},
@@ -197,8 +198,9 @@ func TestRolloutController_Snapshot(t *testing.T) {
 					{
 						Name: "ingester-zone-a", DesiredReplicas: 3, ReadyReplicas: 2,
 						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
-						UpdatedPods: 3, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
-						Phase: status.PhaseWaiting, Reason: "waiting for pods to become Ready",
+						UpdatedPods: 3, TotalPods: 3, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseWaiting, Reason: "waiting for pods to become Ready",
 					},
 				},
 			}},
@@ -224,14 +226,118 @@ func TestRolloutController_Snapshot(t *testing.T) {
 					{
 						Name: "ingester-zone-a", DesiredReplicas: 3, ReadyReplicas: 2,
 						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
-						UpdatedPods: 0, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
-						Phase: status.PhaseProgressing, Reason: "0 of 3 pods updated",
+						UpdatedPods: 0, TotalPods: 3, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseProgressing, Reason: "0 of 3 pods updated",
 					},
 					{
 						Name: "ingester-zone-b", DesiredReplicas: 3, ReadyReplicas: 1,
 						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 0, TotalPods: 3, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseProgressing, Reason: "0 of 3 pods updated",
+					},
+				},
+			}},
+		},
+		"not-ready later zone blocks earlier zone needing update": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision()),
+				mockStatefulSet("ingester-zone-b", withPrevRevision(), withReplicas(3, 1)),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			wantGroups: []status.Group{{
+				Name:   "ingester",
+				Phase:  status.PhaseProgressing,
+				Reason: "0 of 3 pods updated",
+				Members: []status.Member{
+					{
+						Name: "ingester-zone-a", DesiredReplicas: 3, ReadyReplicas: 3,
+						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
 						UpdatedPods: 0, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
-						Phase: status.PhaseWaiting, Reason: "waiting for ingester-zone-a",
+						Phase: status.PhaseWaiting, Reason: "waiting for ingester-zone-b",
+					},
+					{
+						Name: "ingester-zone-b", DesiredReplicas: 3, ReadyReplicas: 1,
+						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 0, TotalPods: 3, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseProgressing, Reason: "0 of 3 pods updated",
+					},
+				},
+			}},
+		},
+		"scale-up with matching revision is waiting not progressing": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withReplicas(5, 3)),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+			},
+			wantGroups: []status.Group{{
+				Name:   "ingester",
+				Phase:  status.PhaseWaiting,
+				Reason: "waiting for pods to become Ready",
+				Members: []status.Member{
+					{
+						Name: "ingester-zone-a", DesiredReplicas: 5, ReadyReplicas: 3,
+						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 3, TotalPods: 3, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseWaiting, Reason: "waiting for pods to become Ready",
+					},
+				},
+			}},
+		},
+		"multi-zone scale-up with matching revisions is not a multi not-ready block": {
+			statefulSets: []runtime.Object{
+				// Status.Replicas still at old size while Spec desires more: reconcile does not
+				// treat this as not-ready (it compares Status.Replicas to ReadyReplicas).
+				mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) {
+					replicas := int32(5)
+					sts.Spec.Replicas = &replicas
+					sts.Status.Replicas = 3
+					sts.Status.ReadyReplicas = 3
+				}),
+				mockStatefulSet("ingester-zone-b", func(sts *v1.StatefulSet) {
+					replicas := int32(5)
+					sts.Spec.Replicas = &replicas
+					sts.Status.Replicas = 3
+					sts.Status.ReadyReplicas = 3
+				}),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testLastRevisionHash),
+			},
+			wantGroups: []status.Group{{
+				Name:  "ingester",
+				Phase: status.PhaseComplete,
+				Members: []status.Member{
+					{
+						Name: "ingester-zone-a", DesiredReplicas: 5, ReadyReplicas: 3,
+						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 3, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase: status.PhaseComplete,
+					},
+					{
+						Name: "ingester-zone-b", DesiredReplicas: 5, ReadyReplicas: 3,
+						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 3, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase: status.PhaseComplete,
 					},
 				},
 			}},
