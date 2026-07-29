@@ -179,14 +179,17 @@ and pause state. The page is served from the same HTTP server as `/metrics` and 
 
 Access is expected via port-forward or a private network path. The endpoint is read-only:
 mutation methods are rejected. Treat rollout names, images, and related status as
-operationally sensitive.
+operationally sensitive. `/ui` redirects to `/ui/status`.
 
 To preview the UI locally with demo data (no Kubernetes required):
 
 ```bash
 make status-ui-preview
-# open http://127.0.0.1:8080/ui/status
+# open http://127.0.0.1:8080/ui
 ```
+
+The preview seeds a fake client-go store with mock StatefulSets and Pods and
+renders status through the same snapshot path as the live operator.
 
 ### HTTPS endpoints
 

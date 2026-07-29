@@ -159,6 +159,23 @@ func TestFrontendStaticAsset(t *testing.T) {
 	require.Contains(t, rec.Body.String(), ".phase-complete")
 }
 
+func TestFrontendUIRedirect(t *testing.T) {
+	f := newTestFrontend(t, fakeReader{snap: &status.Snapshot{}})
+	router := mux.NewRouter()
+	f.Register(router)
+
+	for _, path := range []string{"/ui", "/ui/"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusFound, rec.Code)
+			require.Equal(t, BasePath+"/", rec.Header().Get("Location"))
+		})
+	}
+}
+
 func TestFrontendHead(t *testing.T) {
 	f := newTestFrontend(t, fakeReader{snap: &status.Snapshot{Namespace: "mimir"}})
 	router := mux.NewRouter()
