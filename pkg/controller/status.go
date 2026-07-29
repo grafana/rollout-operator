@@ -59,6 +59,7 @@ func (c *RolloutController) Snapshot(ctx context.Context) (*status.Snapshot, err
 			}
 			members = append(members, member)
 		}
+		applyZoneGating(members)
 
 		group := status.Group{
 			Name:    groupName,
@@ -157,6 +158,29 @@ func memberHasNotReadyPods(m status.Member) bool {
 		return true
 	}
 	return m.Phase == status.PhaseWaiting
+}
+
+// applyZoneGating mirrors reconcile ordering: only one StatefulSet is actively
+// updated at a time. Later zones that still need updates are marked waiting for
+// the active predecessor. Paused sets are skipped by the controller and do not block.
+func applyZoneGating(members []status.Member) {
+	var blocker string
+	for i := range members {
+		m := &members[i]
+		switch m.Phase {
+		case status.PhaseComplete, status.PhaseDegraded, status.PhasePaused:
+			continue
+		case status.PhaseProgressing, status.PhaseWaiting:
+			if blocker == "" {
+				blocker = m.Name
+				continue
+			}
+			if m.Phase == status.PhaseProgressing {
+				m.Phase = status.PhaseWaiting
+				m.Reason = fmt.Sprintf("waiting for %s", blocker)
+			}
+		}
+	}
 }
 
 func aggregateGroupPhase(members []status.Member, notReadyMembers int) (status.Phase, string) {
