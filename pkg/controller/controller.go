@@ -698,14 +698,10 @@ var stuckContainerWaitingReasons = map[string]struct{}{
 	"CreateContainerError":       {},
 }
 
-// isPodStuck returns true if the pod is not Ready and at least one of its containers is stuck
-// in a state it can't recover from without the pod being replaced (e.g. CrashLoopBackOff).
-// Such a pod is already unavailable, so deleting it doesn't reduce availability any further.
+// isPodStuck returns true if at least one of the pod's containers is stuck in a state it can't
+// recover from without the pod being replaced (e.g. CrashLoopBackOff). Such a pod is already
+// unavailable, so deleting it doesn't reduce availability any further.
 func isPodStuck(pod *corev1.Pod) bool {
-	if util.IsPodRunningAndReady(pod) {
-		return false
-	}
-
 	for _, statuses := range [][]corev1.ContainerStatus{pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses} {
 		for _, status := range statuses {
 			if status.State.Waiting == nil {

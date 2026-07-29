@@ -325,6 +325,19 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedDeletedPods: []string{"ingester-zone-a-0"},
 		},
+		"should delete outdated pods with a crashlooping restartable init sidecar even when application containers are ready": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2), func(sts *v1.StatefulSet) {
+					sts.Annotations[config.RolloutMaxUnavailableAnnotationKey] = "1"
+				}),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash, withCrashLoopingInitSidecar()),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-a-0"},
+		},
 		"should not delete outdated not-Ready pods which are not stuck": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2), func(sts *v1.StatefulSet) {
@@ -1631,6 +1644,23 @@ func withInitContainerImagePullBackOff() func(pod *corev1.Pod) {
 			Ready: false,
 			State: corev1.ContainerState{
 				Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"},
+			},
+		}}
+	}
+}
+
+func withCrashLoopingInitSidecar() func(pod *corev1.Pod) {
+	return func(pod *corev1.Pod) {
+		always := corev1.ContainerRestartPolicyAlways
+		pod.Spec.InitContainers = []corev1.Container{{
+			Name:          "sidecar",
+			RestartPolicy: &always,
+		}}
+		pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+			Name:  "sidecar",
+			Ready: false,
+			State: corev1.ContainerState{
+				Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"},
 			},
 		}}
 	}
