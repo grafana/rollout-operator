@@ -53,14 +53,23 @@ func New(reader status.Reader) (*Frontend, error) {
 const BasePath = "/ui/status"
 
 // Register mounts the status UI under /ui/status on the given router.
+// /ui and /ui/ redirect to /ui/status/ while it is the only page.
 func (f *Frontend) Register(r *mux.Router) {
-	statusRouter := r.PathPrefix(BasePath).Subrouter()
-	statusRouter.Use(readOnlyMiddleware)
-	statusRouter.Use(securityHeadersMiddleware)
+	uiRouter := r.PathPrefix("/ui").Subrouter()
+	uiRouter.Use(readOnlyMiddleware)
+	uiRouter.Use(securityHeadersMiddleware)
 
+	statusRouter := uiRouter.PathPrefix("/status").Subrouter()
 	statusRouter.HandleFunc("/", f.handleIndex)
 	statusRouter.HandleFunc("", f.handleIndex)
 	statusRouter.PathPrefix("/static/").Handler(http.StripPrefix(BasePath+"/static/", f.static))
+
+	uiRouter.HandleFunc("/", redirectToStatus)
+	uiRouter.HandleFunc("", redirectToStatus)
+}
+
+func redirectToStatus(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, BasePath+"/", http.StatusFound)
 }
 
 type pageData struct {
