@@ -52,9 +52,12 @@ type Member struct {
 	UpdatedPods     int
 	TotalPods       int
 	Paused          bool
-	UpdateStrategy  string
-	Phase           Phase
-	Reason          string
+	// NotReady matches reconcile's not-ready detection (Status.Replicas / pod readiness),
+	// not Spec.Replicas, so scale-up is not treated as a multi-zone rollout block.
+	NotReady       bool
+	UpdateStrategy string
+	Phase          Phase
+	Reason         string
 }
 
 // Holder is a Reader that can be bound after informer initialization.
