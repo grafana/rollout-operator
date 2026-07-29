@@ -1,4 +1,4 @@
-package controller
+package main
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewDemoController(t *testing.T) {
-	c, err := NewDemoController()
+	c, err := newDemoController()
 	require.NoError(t, err)
 	defer c.Stop()
 
