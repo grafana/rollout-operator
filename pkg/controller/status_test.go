@@ -118,6 +118,42 @@ func TestRolloutController_Snapshot(t *testing.T) {
 				},
 			}},
 		},
+		"paused not-ready zone does not block later zone": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 1), withAnnotations(map[string]string{
+					config.RolloutPausedAnnotationKey: config.RolloutPausedAnnotationValue,
+				})),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			wantGroups: []status.Group{{
+				Name:   "ingester",
+				Phase:  status.PhaseProgressing,
+				Reason: "0 of 3 pods updated",
+				Members: []status.Member{
+					{
+						Name: "ingester-zone-a", DesiredReplicas: 3, ReadyReplicas: 1,
+						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 0, TotalPods: 3, Paused: true, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhasePaused, Reason: "rollout paused",
+					},
+					{
+						Name: "ingester-zone-b", DesiredReplicas: 3, ReadyReplicas: 3,
+						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 0, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase: status.PhaseProgressing, Reason: "0 of 3 pods updated",
+					},
+				},
+			}},
+		},
 		"invalid update strategy": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) {
