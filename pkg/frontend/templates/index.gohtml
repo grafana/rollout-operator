@@ -35,10 +35,9 @@
           <tr>
             <th>StatefulSet</th>
             <th>Phase</th>
-            <th>Replicas</th>
+            <th>Ready</th>
             <th>Updated</th>
             <th>Revisions</th>
-            <th>Paused</th>
             <th>Reason</th>
           </tr>
         </thead>
@@ -53,7 +52,6 @@
               <div>current: <code>{{.CurrentRevision}}</code></div>
               <div>update: <code>{{.UpdateRevision}}</code></div>
             </td>
-            <td>{{if .Paused}}yes{{else}}no{{end}}</td>
             <td>{{.Reason}}</td>
           </tr>
           {{end}}
