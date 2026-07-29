@@ -28,7 +28,8 @@ func TestNewDemoController(t *testing.T) {
 	require.Len(t, byName["ingester"].Members, 3)
 	require.Equal(t, status.PhaseComplete, byName["ingester"].Members[0].Phase)
 	require.Equal(t, status.PhaseProgressing, byName["ingester"].Members[1].Phase)
-	require.Equal(t, status.PhaseProgressing, byName["ingester"].Members[2].Phase)
+	require.Equal(t, status.PhaseWaiting, byName["ingester"].Members[2].Phase)
+	require.Equal(t, "waiting for ingester-zone-b", byName["ingester"].Members[2].Reason)
 
 	require.Equal(t, status.PhaseProgressing, byName["store-gateway"].Phase)
 	require.Equal(t, status.PhasePaused, byName["store-gateway"].Members[0].Phase)
