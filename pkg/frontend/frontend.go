@@ -49,15 +49,18 @@ func New(reader status.Reader) (*Frontend, error) {
 	}, nil
 }
 
-// Register mounts the status UI under /status/ on the given router.
+// BasePath is the URL prefix where the status UI is mounted.
+const BasePath = "/ui/status"
+
+// Register mounts the status UI under /ui/status on the given router.
 func (f *Frontend) Register(r *mux.Router) {
-	statusRouter := r.PathPrefix("/status").Subrouter()
+	statusRouter := r.PathPrefix(BasePath).Subrouter()
 	statusRouter.Use(readOnlyMiddleware)
 	statusRouter.Use(securityHeadersMiddleware)
 
 	statusRouter.HandleFunc("/", f.handleIndex)
 	statusRouter.HandleFunc("", f.handleIndex)
-	statusRouter.PathPrefix("/static/").Handler(http.StripPrefix("/status/static/", f.static))
+	statusRouter.PathPrefix("/static/").Handler(http.StripPrefix(BasePath+"/static/", f.static))
 }
 
 type pageData struct {

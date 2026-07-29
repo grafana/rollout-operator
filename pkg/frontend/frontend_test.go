@@ -57,7 +57,7 @@ func TestFrontendIndex(t *testing.T) {
 	router := mux.NewRouter()
 	f.Register(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/status/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/status/", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -79,7 +79,7 @@ func TestFrontendEmpty(t *testing.T) {
 	router := mux.NewRouter()
 	f.Register(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/status/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/status/", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -92,7 +92,7 @@ func TestFrontendUnavailable(t *testing.T) {
 	router := mux.NewRouter()
 	f.Register(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/status/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/status/", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -105,7 +105,7 @@ func TestFrontendSnapshotError(t *testing.T) {
 	router := mux.NewRouter()
 	f.Register(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/status/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/status/", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -135,7 +135,7 @@ func TestFrontendEscapesMemberFields(t *testing.T) {
 	router := mux.NewRouter()
 	f.Register(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/status/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/status/", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -151,7 +151,7 @@ func TestFrontendStaticAsset(t *testing.T) {
 	router := mux.NewRouter()
 	f.Register(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/status/static/status.css", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/status/static/status.css", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -164,7 +164,7 @@ func TestFrontendHead(t *testing.T) {
 	router := mux.NewRouter()
 	f.Register(router)
 
-	req := httptest.NewRequest(http.MethodHead, "/status/", nil)
+	req := httptest.NewRequest(http.MethodHead, "/ui/status/", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -180,7 +180,7 @@ func TestFrontendRejectsMutations(t *testing.T) {
 
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/status/", strings.NewReader("x"))
+			req := httptest.NewRequest(method, "/ui/status/", strings.NewReader("x"))
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 			require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
