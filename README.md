@@ -170,7 +170,7 @@ Readiness probe endpoint.
 
 Prometheus metrics endpoint.
 
-#### `/status/`
+#### `/ui/status`
 
 Read-only HTML status page for StatefulSet rollout groups managed by this operator.
 It shows per-group and per-zone phase, replica readiness, revisions, updated pod counts,
@@ -180,6 +180,13 @@ and pause state. The page is served from the same HTTP server as `/metrics` and 
 Access is expected via port-forward or a private network path. The endpoint is read-only:
 mutation methods are rejected. Treat rollout names, images, and related status as
 operationally sensitive.
+
+To preview the UI locally with demo data (no Kubernetes required):
+
+```bash
+make status-ui-preview
+# open http://127.0.0.1:8080/ui/status
+```
 
 ### HTTPS endpoints
 
