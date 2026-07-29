@@ -54,7 +54,7 @@ func (c *RolloutController) Snapshot(ctx context.Context) (*status.Snapshot, err
 			if err != nil {
 				return nil, err
 			}
-			if memberHasNotReadyPods(member) {
+			if member.NotReady {
 				notReadyMembers++
 			}
 			members = append(members, member)
@@ -111,11 +111,11 @@ func (c *RolloutController) memberStatus(sts *v1.StatefulSet) (status.Member, er
 	}
 
 	hasNotReady := statefulSetHasNotReadyPods(sts, pods)
+	member.NotReady = hasNotReady
+
+	// Only pods present but not yet on updateRevision count as an in-progress rollout.
+	// Missing pods during scale-up are readiness/creation lag (hasNotReady), not a revision rollout.
 	needsUpdate := updateRev != "" && updated < len(pods)
-	// Missing pods also mean the set is not fully updated to the desired revision.
-	if updateRev != "" && int32(len(pods)) < desired {
-		needsUpdate = true
-	}
 
 	switch {
 	case needsUpdate && paused:
@@ -150,20 +150,35 @@ func statefulSetHasNotReadyPods(sts *v1.StatefulSet, pods []*corev1.Pod) bool {
 	return len(notRunningAndReady(pods)) > 0
 }
 
-func memberHasNotReadyPods(m status.Member) bool {
-	if m.Phase == status.PhaseDegraded {
-		return false
-	}
-	if m.ReadyReplicas < m.DesiredReplicas || m.TotalPods < int(m.DesiredReplicas) {
-		return true
-	}
-	return m.Phase == status.PhaseWaiting
-}
-
 // applyZoneGating mirrors reconcile ordering: only one StatefulSet is actively
-// updated at a time. Later zones that still need updates are marked waiting for
-// the active predecessor. Paused sets are skipped by the controller and do not block.
+// updated at a time. When exactly one set is not-ready, reconcile moves it to the
+// front; otherwise name order applies and paused sets do not block.
 func applyZoneGating(members []status.Member) {
+	var notReady []string
+	for _, m := range members {
+		if m.NotReady {
+			notReady = append(notReady, m.Name)
+		}
+	}
+	if len(notReady) > 1 {
+		// Reconcile refuses to roll any zone until pods recover.
+		return
+	}
+	if len(notReady) == 1 {
+		blocker := notReady[0]
+		for i := range members {
+			m := &members[i]
+			if m.Name == blocker {
+				continue
+			}
+			if m.Phase == status.PhaseProgressing {
+				m.Phase = status.PhaseWaiting
+				m.Reason = fmt.Sprintf("waiting for %s", blocker)
+			}
+		}
+		return
+	}
+
 	var blocker string
 	for i := range members {
 		m := &members[i]
