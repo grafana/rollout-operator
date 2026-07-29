@@ -48,7 +48,7 @@ const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hou
 const deprecatedZPDBPodReadyAnnotationPatchTimeoutFlag = "zpdb.pod-ready-annotation-patch-timeout"
 
 var (
-	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale"}
+	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale", "ui"}
 )
 
 type config struct {
