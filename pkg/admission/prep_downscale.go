@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-kit/log"
@@ -458,21 +459,29 @@ func checkReplicasChange(logger log.Logger, oldInfo, newInfo *objectInfo) *admis
 	return nil
 }
 
-func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInfo, port, path, serviceName, clusterDomain string) []endpoint {
+func createEndpoints(ar admissionv1.AdmissionReview, oldInfo, newInfo *objectInfo, port, httpPath, serviceName, clusterDomain string) []endpoint {
 	diff := (*oldInfo.replicas - *newInfo.replicas)
 	eps := make([]endpoint, diff)
 
 	for i := range int(diff) {
 		index := int(*oldInfo.replicas) - i - 1 // nr in statefulset
-		eps[i].url = fmt.Sprintf("%s:%s/%s",
+		eps[i].url = fmt.Sprintf("%s:%s%s",
 			util.StatefulSetPodFQDN(ar.Request.Namespace, ar.Request.Name, index, serviceName, clusterDomain),
 			port,
-			path,
+			prepareDownscalePath(httpPath),
 		)
 		eps[i].index = index
 	}
 
 	return eps
+}
+
+// prepareDownscalePath adds a leading slash without changing the configured path.
+func prepareDownscalePath(p string) string {
+	if !strings.HasPrefix(p, "/") {
+		return "/" + p
+	}
+	return p
 }
 
 func invokePrepareShutdown(ctx context.Context, method string, parentLogger log.Logger, client *instrumentation.PodHTTPClient, ep endpoint) error {
