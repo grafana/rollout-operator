@@ -201,6 +201,8 @@ func statefulSetHasNotReadyPods(sts *v1.StatefulSet, pods []*corev1.Pod) bool {
 	return len(notRunningAndReady(pods)) > 0
 }
 
+const multipleNotReadyReason = "multiple StatefulSets have not-Ready pods"
+
 // applyZoneGating mirrors reconcile ordering: only one StatefulSet is actively
 // updated at a time. Multi not-ready (including paused) blocks everything; a sole
 // not-ready paused set does not, because updateStatefulSetPods skips it.
@@ -216,7 +218,12 @@ func applyZoneGating(members []status.Member) {
 		}
 	}
 	if len(notReady) > 1 {
-		// Reconcile refuses to roll any zone until pods recover.
+		for i := range members {
+			if members[i].Phase == status.PhaseProgressing {
+				members[i].Phase = status.PhaseWaiting
+				members[i].Reason = multipleNotReadyReason
+			}
+		}
 		return
 	}
 	if len(notReadyActive) == 1 {
@@ -265,7 +272,7 @@ func aggregateGroupPhase(members []status.Member, notReadyMembers int) (status.P
 	}
 
 	if notReadyMembers > 1 {
-		return status.PhaseWaiting, "multiple StatefulSets have not-Ready pods"
+		return status.PhaseWaiting, multipleNotReadyReason
 	}
 
 	priority := []status.Phase{
