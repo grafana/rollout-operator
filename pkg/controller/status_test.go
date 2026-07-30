@@ -241,10 +241,11 @@ func TestRolloutController_Snapshot(t *testing.T) {
 				},
 			}},
 		},
-		"multiple not-ready sets wait at group level": {
+		"multiple not-ready sets block all progressing members": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2)),
 				mockStatefulSet("ingester-zone-b", withPrevRevision(), withReplicas(3, 1)),
+				mockStatefulSet("ingester-zone-c", withPrevRevision()),
 			},
 			pods: []runtime.Object{
 				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
@@ -253,6 +254,9 @@ func TestRolloutController_Snapshot(t *testing.T) {
 				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
 				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-c-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-c-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-c-2", testPrevRevisionHash),
 			},
 			wantGroups: []status.Group{{
 				Name:   "ingester",
@@ -264,14 +268,21 @@ func TestRolloutController_Snapshot(t *testing.T) {
 						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
 						UpdatedPods: 0, TotalPods: 3, NotReady: true,
 						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
-						Phase:          status.PhaseProgressing, Reason: "0 of 3 pods updated",
+						Phase:          status.PhaseWaiting, Reason: multipleNotReadyReason,
 					},
 					{
 						Name: "ingester-zone-b", DesiredReplicas: 3, ReadyReplicas: 1,
 						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
 						UpdatedPods: 0, TotalPods: 3, NotReady: true,
 						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
-						Phase:          status.PhaseProgressing, Reason: "0 of 3 pods updated",
+						Phase:          status.PhaseWaiting, Reason: multipleNotReadyReason,
+					},
+					{
+						Name: "ingester-zone-c", DesiredReplicas: 3, ReadyReplicas: 3,
+						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 0, TotalPods: 3,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseWaiting, Reason: multipleNotReadyReason,
 					},
 				},
 			}},
