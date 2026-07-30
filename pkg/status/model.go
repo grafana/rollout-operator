@@ -29,9 +29,17 @@ type Reader interface {
 
 // Snapshot is a point-in-time view of managed rollouts in a namespace.
 type Snapshot struct {
-	Namespace  string
-	ObservedAt time.Time
-	Groups     []Group
+	Namespace      string
+	ObservedAt     time.Time
+	Groups         []Group
+	Configurations map[string][]ConfigurationEntry
+}
+
+// ConfigurationEntry is one StatefulSet setting used by the rollout operator.
+type ConfigurationEntry struct {
+	Source string
+	Name   string
+	Value  string
 }
 
 // Group is the status of one rollout-group of StatefulSets.
