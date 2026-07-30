@@ -42,7 +42,7 @@ body {
 }
 
 .page-header, main {
-  max-width: 1100px;
+  max-width: 1300px;
   margin: 0 auto;
   padding: 1.25rem 1.5rem;
 }
@@ -104,6 +104,10 @@ code {
 .phase-degraded { color: var(--degraded); }
 .phase-unknown { color: var(--unknown); }
 
+.table-scroll {
+  overflow-x: auto;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -127,7 +131,57 @@ th {
 
 .revisions div + div { margin-top: 0.2rem; }
 
+.config-link, .back-link {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  color: var(--muted);
+}
+
+.statefulset-name {
+  margin: 0 0 0.35rem;
+  font-size: 1.1rem;
+}
+
+.configuration-page {
+  max-width: 56rem;
+  padding: 0.5rem 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.configuration-page dl {
+  margin: 0;
+}
+
+.configuration-page dl div {
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.configuration-page dl div:last-child {
+  border-bottom: 0;
+}
+
+.configuration-page dt span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.configuration-page dd {
+  margin: 0.1rem 0 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 800px) {
   table { font-size: 0.9rem; }
-  th:nth-child(5), td:nth-child(5) { display: none; }
+  th:nth-child(5), td:nth-child(5),
+  th:nth-child(7), td:nth-child(7) { display: none; }
 }

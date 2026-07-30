@@ -432,3 +432,24 @@ func TestRolloutController_Snapshot(t *testing.T) {
 		})
 	}
 }
+
+func TestStatefulSetConfiguration(t *testing.T) {
+	sts := mockStatefulSet("ingester-zone-a", withAnnotations(map[string]string{
+		config.RolloutPausedAnnotationKey:             config.RolloutPausedAnnotationValue,
+		config.RolloutDownscaleLeaderAnnotationKey:    "ingester-zone-b",
+		"unrelated.example.com/ignored-configuration": "secret",
+	}))
+
+	entries := statefulSetConfiguration(sts)
+	values := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		values[entry.Source+":"+entry.Name] = entry.Value
+	}
+
+	assert.Equal(t, "3", values["spec:replicas"])
+	assert.Equal(t, string(v1.OnDeleteStatefulSetStrategyType), values["spec:updateStrategy.type"])
+	assert.Equal(t, "ingester", values["label:"+config.RolloutGroupLabelKey])
+	assert.Equal(t, config.RolloutPausedAnnotationValue, values["annotation:"+config.RolloutPausedAnnotationKey])
+	assert.Equal(t, "ingester-zone-b", values["annotation:"+config.RolloutDownscaleLeaderAnnotationKey])
+	assert.NotContains(t, values, "annotation:unrelated.example.com/ignored-configuration")
+}

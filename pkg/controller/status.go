@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	v1 "k8s.io/api/apps/v1"
@@ -34,9 +35,10 @@ func (c *RolloutController) Snapshot(ctx context.Context) (*status.Snapshot, err
 	sort.Strings(groupNames)
 
 	out := &status.Snapshot{
-		Namespace:  c.namespace,
-		ObservedAt: time.Now().UTC(),
-		Groups:     make([]status.Group, 0, len(groupNames)),
+		Namespace:      c.namespace,
+		ObservedAt:     time.Now().UTC(),
+		Groups:         make([]status.Group, 0, len(groupNames)),
+		Configurations: make(map[string][]status.ConfigurationEntry, len(sets)),
 	}
 
 	for _, groupName := range groupNames {
@@ -54,6 +56,7 @@ func (c *RolloutController) Snapshot(ctx context.Context) (*status.Snapshot, err
 			if err != nil {
 				return nil, err
 			}
+			out.Configurations[sts.Name] = statefulSetConfiguration(sts)
 			if member.NotReady {
 				notReadyMembers++
 			}
@@ -70,6 +73,54 @@ func (c *RolloutController) Snapshot(ctx context.Context) (*status.Snapshot, err
 	}
 
 	return out, nil
+}
+
+var rolloutLabelKeys = []string{
+	config.RolloutGroupLabelKey,
+	config.NoDownscaleLabelKey,
+	config.PrepareDownscaleLabelKey,
+	config.MinTimeBetweenZonesDownscaleLabelKey,
+}
+
+var rolloutAnnotationKeys = []string{
+	config.RolloutMaxUnavailableAnnotationKey,
+	config.RolloutDownscaleLeaderAnnotationKey,
+	config.RolloutLeaderReadyAnnotationKey,
+	config.RolloutMirrorReplicasFromResourceNameAnnotationKey,
+	config.RolloutMirrorReplicasFromResourceKindAnnotationKey,
+	config.RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey,
+	config.RolloutMirrorReplicasFromResourceWriteBackStatusReplicas,
+	config.RolloutDelayedDownscaleAnnotationKey,
+	config.RolloutDelayedDownscalePrepareUrlAnnotationKey,
+	config.RolloutForceReplicasAnnotationKey,
+	config.RolloutPausedAnnotationKey,
+	config.MinTimeBetweenZonesDownscaleAnnotationKey,
+	config.PrepareDownscalePathAnnotationKey,
+	config.PrepareDownscalePortAnnotationKey,
+	config.LastDownscaleAnnotationKey,
+}
+
+func statefulSetConfiguration(sts *v1.StatefulSet) []status.ConfigurationEntry {
+	replicas := int32(0)
+	if sts.Spec.Replicas != nil {
+		replicas = *sts.Spec.Replicas
+	}
+	entries := []status.ConfigurationEntry{
+		{Source: "spec", Name: "replicas", Value: strconv.FormatInt(int64(replicas), 10)},
+		{Source: "spec", Name: "updateStrategy.type", Value: string(sts.Spec.UpdateStrategy.Type)},
+	}
+
+	for _, key := range rolloutLabelKeys {
+		if value, ok := sts.Labels[key]; ok {
+			entries = append(entries, status.ConfigurationEntry{Source: "label", Name: key, Value: value})
+		}
+	}
+	for _, key := range rolloutAnnotationKeys {
+		if value, ok := sts.Annotations[key]; ok {
+			entries = append(entries, status.ConfigurationEntry{Source: "annotation", Name: key, Value: value})
+		}
+	}
+	return entries
 }
 
 func (c *RolloutController) memberStatus(sts *v1.StatefulSet) (status.Member, error) {
