@@ -29,6 +29,13 @@ DOC_SOURCES_PATH := docs
 
 REGO_POLICIES_PATH=operations/policies
 
+# CRDs checked for backward-incompatible schema changes.
+CRD_PATHS := \
+	operations/rollout-operator/crds/replica-templates.yaml \
+	operations/rollout-operator/crds/zone-aware-pod-disruption-budget.yaml
+CRD_BASE_REF ?= $(shell git merge-base HEAD origin/main)
+CRDIFY ?= crdify
+
 # path to jsonnetfmt
 JSONNET_FMT := jsonnetfmt
 
@@ -124,6 +131,14 @@ check-jsonnet-manifests: ## Check the rollout-operator manifests.
 check-jsonnet-manifests: format-jsonnet
 	@echo "Checking diff:"
 	@./tools/find-diff-or-untracked.sh $(JSONNET_MANIFESTS_PATHS) || (echo "Please format jsonnet by running 'make format-jsonnet'" && false)
+
+.PHONY: check-crd-compatibility
+check-crd-compatibility: ## Check CRDs for backward-incompatible schema changes.
+	@test -n "$(CRD_BASE_REF)" || (echo "CRD_BASE_REF is required" >&2 && false)
+	@for crd in $(CRD_PATHS); do \
+		echo "Checking $$crd against $(CRD_BASE_REF)"; \
+		$(CRDIFY) "git://$(CRD_BASE_REF)?path=$$crd" "file://$$crd" || exit 1; \
+	done
 
 .PHONY: format-jsonnet
 format-jsonnet: ## Format the rollout-operator manifests.
