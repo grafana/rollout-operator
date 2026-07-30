@@ -60,6 +60,7 @@ func (f *Frontend) Register(r *mux.Router) {
 	uiRouter.Use(securityHeadersMiddleware)
 
 	statusRouter := uiRouter.PathPrefix("/status").Subrouter()
+	statusRouter.HandleFunc("/statefulset/{name}", f.handleStatefulSet)
 	statusRouter.HandleFunc("/", f.handleIndex)
 	statusRouter.HandleFunc("", f.handleIndex)
 	statusRouter.PathPrefix("/static/").Handler(http.StripPrefix(BasePath+"/static/", f.static))
@@ -113,6 +114,53 @@ func (f *Frontend) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = f.templates.ExecuteTemplate(w, "index.gohtml", data)
+}
+
+type statefulSetPageData struct {
+	Title         string
+	Namespace     string
+	ObservedAt    time.Time
+	Name          string
+	Configuration []status.ConfigurationEntry
+	Error         string
+	Unavailable   bool
+}
+
+func (f *Frontend) handleStatefulSet(w http.ResponseWriter, r *http.Request) {
+	name := mux.Vars(r)["name"]
+	data := statefulSetPageData{
+		Title: "StatefulSet configuration",
+		Name:  name,
+	}
+	code := http.StatusOK
+
+	snap, err := f.reader.Snapshot(r.Context())
+	switch {
+	case errors.Is(err, status.ErrUnavailable):
+		data.Unavailable = true
+		data.Error = "Status is not available yet; the operator is still starting."
+		code = http.StatusServiceUnavailable
+	case err != nil || snap == nil:
+		data.Error = "Failed to load StatefulSet configuration."
+		code = http.StatusInternalServerError
+	default:
+		data.Namespace = snap.Namespace
+		data.ObservedAt = snap.ObservedAt
+		var found bool
+		data.Configuration, found = snap.Configurations[name]
+		if !found {
+			data.Error = "StatefulSet not found."
+			code = http.StatusNotFound
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+	if r.Method == http.MethodHead {
+		return
+	}
+	_ = f.templates.ExecuteTemplate(w, "statefulset.gohtml", data)
 }
 
 func readOnlyMiddleware(next http.Handler) http.Handler {

@@ -174,8 +174,8 @@ Prometheus metrics endpoint.
 
 Read-only HTML status page for StatefulSet rollout groups managed by this operator.
 It shows per-group and per-zone phase, replica readiness, revisions, updated pod counts,
-and pause state. The page is served from the same HTTP server as `/metrics` and `/ready`
-(port `-server.port`, default `8001`).
+pause state, and operator configuration for each StatefulSet. The page is served from
+the same HTTP server as `/metrics` and `/ready` (port `-server.port`, default `8001`).
 
 Access is expected via port-forward or a private network path. The endpoint is read-only:
 mutation methods are rejected. Treat rollout names, images, and related status as

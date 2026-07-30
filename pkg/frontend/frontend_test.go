@@ -51,6 +51,12 @@ func TestFrontendIndex(t *testing.T) {
 				Reason:          "0 of 3 pods updated",
 			}},
 		}},
+		Configurations: map[string][]status.ConfigurationEntry{
+			"ingester-zone-a": {
+				{Source: "spec", Name: "updateStrategy.type", Value: "OnDelete"},
+				{Source: "annotation", Name: "rollout-max-unavailable", Value: "2"},
+			},
+		},
 	}
 
 	f := newTestFrontend(t, fakeReader{snap: snap})
@@ -70,6 +76,9 @@ func TestFrontendIndex(t *testing.T) {
 	require.Contains(t, body, "progressing")
 	require.Contains(t, body, "Namespace <code>mimir</code>")
 	require.Contains(t, body, "Read-only")
+	require.Contains(t, body, `href="/ui/status/statefulset/ingester-zone-a"`)
+	require.NotContains(t, body, "rollout-max-unavailable")
+	require.NotContains(t, body, "<dialog")
 	require.NotContains(t, body, "<form")
 	require.NotContains(t, body, "method=\"post\"")
 }
@@ -144,6 +153,46 @@ func TestFrontendEscapesMemberFields(t *testing.T) {
 	require.Contains(t, body, "&lt;script&gt;evil()&lt;/script&gt;")
 	require.Contains(t, body, "&lt;img src=x onerror=alert(1)&gt;")
 	require.Contains(t, body, "ok &amp; &lt;b&gt;bold&lt;/b&gt;")
+}
+
+func TestFrontendStatefulSetConfiguration(t *testing.T) {
+	snap := &status.Snapshot{
+		Namespace: "mimir",
+		Configurations: map[string][]status.ConfigurationEntry{
+			"ingester-zone-a": {
+				{Source: "annotation", Name: `<img src=x onerror=alert(1)>`, Value: `<script>config()</script>`},
+			},
+		},
+	}
+	f := newTestFrontend(t, fakeReader{snap: snap})
+	router := mux.NewRouter()
+	f.Register(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/status/statefulset/ingester-zone-a", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	require.Contains(t, body, "StatefulSet configuration")
+	require.Contains(t, body, "<code>ingester-zone-a</code>")
+	require.Contains(t, body, `href="/ui/status/"`)
+	require.Contains(t, body, "&lt;img src=x onerror=alert(1)&gt;")
+	require.Contains(t, body, "&lt;script&gt;config()&lt;/script&gt;")
+	require.NotContains(t, body, `<script>config()</script>`)
+}
+
+func TestFrontendStatefulSetConfigurationNotFound(t *testing.T) {
+	f := newTestFrontend(t, fakeReader{snap: &status.Snapshot{Configurations: map[string][]status.ConfigurationEntry{}}})
+	router := mux.NewRouter()
+	f.Register(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/status/statefulset/missing", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Contains(t, rec.Body.String(), "StatefulSet not found.")
 }
 
 func TestFrontendStaticAsset(t *testing.T) {

@@ -30,6 +30,7 @@
         <span class="phase {{phaseClass .Phase}}">{{.Phase}}</span>
         {{if .Reason}}<span class="reason">{{.Reason}}</span>{{end}}
       </summary>
+      <div class="table-scroll">
       <table>
         <thead>
           <tr>
@@ -38,6 +39,7 @@
             <th>Ready</th>
             <th>Updated</th>
             <th>Revisions</th>
+            <th>Config</th>
             <th>Reason</th>
           </tr>
         </thead>
@@ -52,11 +54,15 @@
               <div>current: <code>{{.CurrentRevision}}</code></div>
               <div>update: <code>{{.UpdateRevision}}</code></div>
             </td>
+            <td>
+              <a class="config-link" href="/ui/status/statefulset/{{.Name}}">View</a>
+            </td>
             <td>{{.Reason}}</td>
           </tr>
           {{end}}
         </tbody>
       </table>
+      </div>
     </details>
     {{end}}
   </main>
