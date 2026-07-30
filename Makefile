@@ -8,6 +8,10 @@ GIT_REVISION := $(shell git rev-parse --short HEAD)
 
 IMAGE_PREFIX ?= grafana
 IMAGE_TAG ?= $(subst /,-,$(GIT_BRANCH))-$(GIT_REVISION)
+# Optional second tag applied on publish (e.g. main-<datetime>-<sha> from CI).
+ADDITIONAL_IMAGE_TAG ?=
+ADDITIONAL_IMAGE_TAG_FLAG = $(if $(ADDITIONAL_IMAGE_TAG),-t $(IMAGE_PREFIX)/rollout-operator:$(ADDITIONAL_IMAGE_TAG),)
+ADDITIONAL_BORINGCRYPTO_IMAGE_TAG_FLAG = $(if $(ADDITIONAL_IMAGE_TAG),-t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(ADDITIONAL_IMAGE_TAG),)
 
 # Support gsed on OSX (installed via brew), falling back to sed. On Linux
 # systems gsed won't be installed, so will use sed as expected.
@@ -64,11 +68,11 @@ publish-images: publish-standard-image publish-boringcrypto-image ## Build and p
 
 .PHONY: publish-standard-image
 publish-standard-image: clean ## Build and publish only the standard rollout-operator image
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) $(ADDITIONAL_IMAGE_TAG_FLAG) .
 
 .PHONY: publish-boringcrypto-image
 publish-boringcrypto-image: clean ## Build and publish only the boring-crypto rollout-operator image
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) -f Dockerfile.boringcrypto .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) $(ADDITIONAL_BORINGCRYPTO_IMAGE_TAG_FLAG) -f Dockerfile.boringcrypto .
 
 .PHONY: release-notes 
 release-notes: ## Generate the release notes for a GitHub release

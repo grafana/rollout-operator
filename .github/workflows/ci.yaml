@@ -308,7 +308,11 @@ jobs:
           if [[ "$REF_TYPE" == "tag" ]]; then
             echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
           else
+            # Keep main-<sha> for continuity, and add a sortable datetime tag
+            # based on commit time (stable across workflow re-runs).
+            DATETIME="$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S "$SHA")"
             echo "tag=main-$SHA" >> "$GITHUB_OUTPUT"
+            echo "additional_tag=main-${DATETIME}-${SHA}" >> "$GITHUB_OUTPUT"
           fi
         env:
           REF_TYPE: ${{ github.ref_type }}
@@ -324,6 +328,7 @@ jobs:
         env:
           REF_TYPE: ${{ github.ref_type }}
           IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
+          ADDITIONAL_IMAGE_TAG: ${{ steps.image_tag.outputs.additional_tag }}
           # Push to the GAR mirror repo; gar-image-mirror copies these to
           # docker.io/grafana. The Publish release step below intentionally does
           # not set IMAGE_PREFIX, so the release notes keep the public grafana/ name.
