@@ -19,7 +19,9 @@ import (
 
 const (
 	// How frequently informers should resync
-	informerSyncInterval = 5 * time.Minute
+	informerSyncInterval    = 5 * time.Minute
+	initialCacheSyncTimeout = 10 * time.Second
+	readinessCheckInterval  = 30 * time.Second
 )
 
 // An configObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the configCache.
@@ -74,26 +76,75 @@ func (c *configObserver) start() error {
 	if err != nil {
 		return err
 	}
+	if err := c.pdbInformer.SetWatchErrorHandler(func(_ *k8cache.Reflector, err error) {
+		c.metrics.ConfigObserverReady.Set(0)
+		level.Warn(c.logger).Log("msg", "zpdb config observer unavailable", "err", err)
+	}); err != nil {
+		return err
+	}
 
-	_, listErr := c.pdbResource.List(context.Background(), metav1.ListOptions{Limit: 1})
+	ctx, cancel := context.WithTimeout(context.Background(), initialCacheSyncTimeout)
+	_, listErr := c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
+	cancel()
 	if listErr != nil && !apierrors.IsNotFound(listErr) {
 		return listErr
 	}
 
 	go c.pdbFactory.Start(c.stopCh)
+	go c.observeReadiness()
+	syncResult := make(chan bool, 1)
+	go func() {
+		syncResult <- c.waitForCacheSync()
+	}()
 
 	if apierrors.IsNotFound(listErr) {
 		level.Warn(c.logger).Log("msg", "zpdb custom resource is unavailable; informer will retry", "err", listErr)
 		return nil
 	}
 
-	level.Info(c.logger).Log("msg", "zpdb config informer caches are syncing")
-	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbInformer.HasSynced); !ok {
-		return errors.New("zpdb config informer caches failed to sync")
+	select {
+	case synced := <-syncResult:
+		if !synced {
+			return errors.New("zpdb config informer caches failed to sync")
+		}
+	case <-time.After(initialCacheSyncTimeout):
+		level.Warn(c.logger).Log("msg", "zpdb config informer cache sync timed out; continuing startup")
 	}
-	level.Info(c.logger).Log("msg", "zpdb config informer caches have synced")
 
 	return nil
+}
+
+func (c *configObserver) waitForCacheSync() bool {
+	level.Info(c.logger).Log("msg", "zpdb config informer caches are syncing")
+	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbInformer.HasSynced); !ok {
+		return false
+	}
+	c.metrics.ConfigObserverReady.Set(1)
+	level.Info(c.logger).Log("msg", "zpdb config informer caches have synced")
+	return true
+}
+
+func (c *configObserver) observeReadiness() {
+	c.updateReadiness()
+	ticker := time.NewTicker(readinessCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case <-ticker.C:
+			c.updateReadiness()
+		}
+	}
+}
+
+func (c *configObserver) updateReadiness() {
+	_, err := c.pdbResource.List(context.Background(), metav1.ListOptions{Limit: 1})
+	if err == nil && c.pdbInformer.HasSynced() {
+		c.metrics.ConfigObserverReady.Set(1)
+	} else {
+		c.metrics.ConfigObserverReady.Set(0)
+	}
 }
 
 func (c *configObserver) addOrUpdate(obj *unstructured.Unstructured) {
