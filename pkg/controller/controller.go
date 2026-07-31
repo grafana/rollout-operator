@@ -296,9 +296,10 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	durationTimer := prometheus.NewTimer(c.groupReconcileDuration.WithLabelValues(groupName))
 	failed := c.groupReconcileFailed.WithLabelValues(groupName)
 	lastSuccess := c.groupReconcileLastSuccess.WithLabelValues(groupName)
+	scalingFailed := false
 	defer func() {
 		durationTimer.ObserveDuration()
-		if returnErr != nil {
+		if returnErr != nil || scalingFailed {
 			failed.Inc()
 		} else {
 			lastSuccess.SetToCurrentTime()
@@ -313,6 +314,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// up-to-date.
 	updated, err := c.adjustStatefulSetsGroupReplicas(ctx, groupName, sets)
 	if err != nil {
+		scalingFailed = true
 		level.Warn(c.logger).Log("msg", "unable to adjust desired replicas of StatefulSet", "group", groupName, "err", err)
 	}
 	if err == nil && updated {

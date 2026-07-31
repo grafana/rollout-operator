@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/kubernetes/scheme"
 
+	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/util"
 )
 
@@ -119,6 +121,56 @@ func TestRolloutRecoversFromFailedUpdate(t *testing.T) {
 	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectReady(), expectVersion("3"))
 	requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectReady(), expectVersion("3"))
 	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectReady(), expectVersion("3"))
+}
+
+func TestRolloutOperatorStartsWithoutCRDs(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := createKindCluster(t, "rollout-operator:latest")
+	api := cluster.API()
+	path := initManifestFiles(t, "webhooks-not-enabled")
+
+	createRolloutOperatorWithoutCRDs(t, ctx, api, cluster.ExtAPI(), path, false)
+	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+
+	metricsMatch := func(pattern *regexp.Regexp) func() bool {
+		return func() bool {
+			metrics, err := api.CoreV1().RESTClient().Get().
+				Namespace(corev1.NamespaceDefault).
+				Resource("pods").
+				Name(rolloutOperatorPod + ":8001").
+				SubResource("proxy").
+				Suffix("metrics").
+				DoRaw(ctx)
+			if err != nil {
+				t.Logf("failed to query rollout-operator metrics: %s", err)
+				return false
+			}
+			return pattern.Match(metrics)
+		}
+	}
+
+	sts := mockServiceStatefulSet("missing-replica-template", "1", true, 0)
+	sts.Annotations = map[string]string{
+		config.RolloutMirrorReplicasFromResourceNameAnnotationKey:       "missing",
+		config.RolloutMirrorReplicasFromResourceKindAnnotationKey:       "ReplicaTemplate",
+		config.RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey: "rollout-operator.grafana.com/v1",
+	}
+	requireCreateStatefulSet(ctx, t, api, sts)
+
+	failedReconcile := regexp.MustCompile(`(?m)^rollout_operator_group_reconciles_failed_total\{rollout_group="mock"\} [1-9][0-9]*(?:\.[0-9]+)?$`)
+	require.Eventually(t, metricsMatch(failedReconcile), time.Minute, time.Second, "missing CRDs did not cause a failed reconcile metric")
+
+	createZoneAwarePodDistruptionBudgetCustomResourceDefinition(t, cluster.ExtAPI())
+	require.Eventually(t, func() bool {
+		_, err := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).
+			Create(ctx, zoneAwarePodDisruptionBudget(corev1.NamespaceDefault, "late-zpdb", "mock", 1), metav1.CreateOptions{})
+		return err == nil
+	}, time.Minute, time.Second, "failed to create ZPDB after installing its CRD")
+
+	observedZPDB := regexp.MustCompile(`(?m)^rollout_operator_zpdb_configurations_observed_total\{result="updated"\} [1-9][0-9]*(?:\.[0-9]+)?$`)
+	require.Eventually(t, metricsMatch(observedZPDB), time.Minute, time.Second, "operator did not observe ZPDB created after startup")
 }
 
 // TestRolloutHappyCaseWithZpdb performs pod updates via the rolling update controller and uses the zpdb to determine if the pod delete is safe or not

@@ -10,11 +10,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	rolloutconfig "github.com/grafana/rollout-operator/pkg/config"
 )
@@ -86,6 +88,29 @@ func TestObserver_NewPdbObserver(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("stopCh should be closed after Stop()")
 	}
+}
+
+func TestObserver_StartWithoutCRD(t *testing.T) {
+	dynamicClient, observer := newConfigObserverTestCase()
+	dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{
+			Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
+			Resource: ZoneAwarePodDisruptionBudgetsNamePlural,
+		}, "")
+	})
+
+	started := make(chan error, 1)
+	go func() {
+		started <- observer.start()
+	}()
+
+	select {
+	case err := <-started:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("observer did not start while the CRD was missing")
+	}
+	observer.stop()
 }
 
 // TestObserver_InvalidObject - tests that no panics occur if an invalid object is passed from the informers
