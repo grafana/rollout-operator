@@ -311,8 +311,9 @@ jobs:
             # Keep main-<sha> for continuity, and add a sortable datetime tag
             # based on commit time (stable across workflow re-runs).
             DATETIME="$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S "$SHA")"
-            echo "tag=main-$SHA" >> "$GITHUB_OUTPUT"
-            echo "additional_tag=main-${DATETIME}-${SHA}" >> "$GITHUB_OUTPUT"
+            SHORT_SHA="${SHA:0:7}"
+            echo "tag=main-$SHORT_SHA" >> "$GITHUB_OUTPUT"
+            echo "additional_tag=main-${DATETIME}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           fi
         env:
           REF_TYPE: ${{ github.ref_type }}
