@@ -29,10 +29,7 @@ DOC_SOURCES_PATH := docs
 
 REGO_POLICIES_PATH=operations/policies
 
-# CRDs checked for backward-incompatible schema changes.
-CRD_PATHS := \
-	operations/rollout-operator/crds/replica-templates.yaml \
-	operations/rollout-operator/crds/zone-aware-pod-disruption-budget.yaml
+CRD_PATHS := $(wildcard operations/rollout-operator/crds/*.yaml)
 CRD_BASE_REF ?= $(shell git merge-base HEAD origin/main)
 CRDIFY ?= crdify
 
