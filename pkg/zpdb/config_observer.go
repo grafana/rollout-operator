@@ -1,12 +1,15 @@
 package zpdb
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -27,6 +30,7 @@ type configObserver struct {
 	metrics     *Metrics
 
 	dynamicClient dynamic.Interface
+	pdbResource   dynamic.ResourceInterface
 	logger        log.Logger
 
 	// Used to signal when the controller should stop.
@@ -52,6 +56,7 @@ func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 		pdbInformer:   pdbInformer.Informer(),
 		pdbCache:      newConfigCache(),
 		dynamicClient: dynamic,
+		pdbResource:   dynamic.Resource(gvr).Namespace(namespace),
 		metrics:       metrics,
 		logger:        logger,
 		stopCh:        make(chan struct{}),
@@ -70,9 +75,18 @@ func (c *configObserver) start() error {
 		return err
 	}
 
+	_, listErr := c.pdbResource.List(context.Background(), metav1.ListOptions{Limit: 1})
+	if listErr != nil && !apierrors.IsNotFound(listErr) {
+		return listErr
+	}
+
 	go c.pdbFactory.Start(c.stopCh)
 
-	// Wait until all informer caches have been synced.
+	if apierrors.IsNotFound(listErr) {
+		level.Warn(c.logger).Log("msg", "zpdb custom resource is unavailable; informer will retry", "err", listErr)
+		return nil
+	}
+
 	level.Info(c.logger).Log("msg", "zpdb config informer caches are syncing")
 	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbInformer.HasSynced); !ok {
 		return errors.New("zpdb config informer caches failed to sync")

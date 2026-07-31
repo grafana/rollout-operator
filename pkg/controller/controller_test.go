@@ -62,6 +62,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		expectedPatchedSets               map[string][]string
 		expectedPatchedResources          map[string][]string
 		expectedErr                       string
+		expectedFailureMetric             bool
 		zpdbErrors                        []error
 		zpdbPartitionMode                 bool
 	}{
@@ -692,7 +693,8 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
 				})),
 			},
-			expectedErr: "", // reconciliation continues if scaling fails
+			expectedErr:           "", // reconciliation continues if scaling fails
+			expectedFailureMetric: true,
 		},
 		"should not fail if scaling based on custom resource fails due to scale subresource not being available": {
 			statefulSets: []runtime.Object{
@@ -702,8 +704,9 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
 				})),
 			},
-			getScaleErr: fmt.Errorf("cannot get scale subresource"),
-			expectedErr: "", // reconciliation continues if scaling fails
+			getScaleErr:           fmt.Errorf("cannot get scale subresource"),
+			expectedErr:           "", // reconciliation continues if scaling fails
+			expectedFailureMetric: true,
 		},
 		"all statefulsets are considered": {
 			statefulSets: []runtime.Object{
@@ -920,7 +923,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 			// Assert on metrics.
 			expectedFailures := 0
-			if testData.expectedErr != "" {
+			if testData.expectedErr != "" || testData.expectedFailureMetric || testData.kubePatchErr != nil || testData.getScaleErr != nil {
 				expectedFailures = 1
 			}
 
