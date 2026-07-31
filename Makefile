@@ -29,6 +29,10 @@ DOC_SOURCES_PATH := docs
 
 REGO_POLICIES_PATH=operations/policies
 
+CRD_PATHS := $(wildcard operations/rollout-operator/crds/*.yaml)
+CRD_BASE_REF ?= $(shell git merge-base HEAD origin/main)
+CRDIFY ?= crdify
+
 # path to jsonnetfmt
 JSONNET_FMT := jsonnetfmt
 
@@ -124,6 +128,18 @@ check-jsonnet-manifests: ## Check the rollout-operator manifests.
 check-jsonnet-manifests: format-jsonnet
 	@echo "Checking diff:"
 	@./tools/find-diff-or-untracked.sh $(JSONNET_MANIFESTS_PATHS) || (echo "Please format jsonnet by running 'make format-jsonnet'" && false)
+
+.PHONY: check-crd-compatibility
+check-crd-compatibility: ## Check CRDs for backward-incompatible schema changes.
+	@test -n "$(CRD_BASE_REF)" || (echo "CRD_BASE_REF is required" >&2 && false)
+	@for crd in $(CRD_PATHS); do \
+		if ! git cat-file -e "$(CRD_BASE_REF):$$crd" 2>/dev/null; then \
+			echo "Skipping new CRD $$crd"; \
+			continue; \
+		fi; \
+		echo "Checking $$crd against $(CRD_BASE_REF)"; \
+		$(CRDIFY) "git://$(CRD_BASE_REF)?path=$$crd" "file://$$crd" || exit 1; \
+	done
 
 .PHONY: format-jsonnet
 format-jsonnet: ## Format the rollout-operator manifests.
