@@ -133,6 +133,10 @@ check-jsonnet-manifests: format-jsonnet
 check-crd-compatibility: ## Check CRDs for backward-incompatible schema changes.
 	@test -n "$(CRD_BASE_REF)" || (echo "CRD_BASE_REF is required" >&2 && false)
 	@for crd in $(CRD_PATHS); do \
+		if ! git cat-file -e "$(CRD_BASE_REF):$$crd" 2>/dev/null; then \
+			echo "Skipping new CRD $$crd"; \
+			continue; \
+		fi; \
 		echo "Checking $$crd against $(CRD_BASE_REF)"; \
 		$(CRDIFY) "git://$(CRD_BASE_REF)?path=$$crd" "file://$$crd" || exit 1; \
 	done
