@@ -60,7 +60,15 @@ func initManifestFiles(t *testing.T, test string) string {
 }
 
 func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook bool, extraEnv ...corev1.EnvVar) {
-	createRolloutOperatorDependencies(t, ctx, api, extApi, directory, webhook)
+	createRolloutOperatorWithCRDs(t, ctx, api, extApi, directory, webhook, true, extraEnv...)
+}
+
+func createRolloutOperatorWithoutCRDs(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook bool, extraEnv ...corev1.EnvVar) {
+	createRolloutOperatorWithCRDs(t, ctx, api, extApi, directory, webhook, false, extraEnv...)
+}
+
+func createRolloutOperatorWithCRDs(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook, installCRDs bool, extraEnv ...corev1.EnvVar) {
+	createRolloutOperatorDependencies(t, ctx, api, extApi, directory, webhook, installCRDs)
 
 	deployment := loadFromDisk[appsv1.Deployment](t, directory+yamlDeployment, &appsv1.Deployment{})
 	deployment.Spec.Template.Spec.Containers[0].Image = "rollout-operator:latest"
@@ -71,7 +79,7 @@ func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Cl
 	require.NoError(t, err)
 }
 
-func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook bool) {
+func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook, installCRDs bool) {
 
 	serviceAccount := loadFromDisk[corev1.ServiceAccount](t, directory+yamlServiceAccount, &corev1.ServiceAccount{})
 	_, err := api.CoreV1().ServiceAccounts(corev1.NamespaceDefault).Create(ctx, serviceAccount, metav1.CreateOptions{})
@@ -85,10 +93,14 @@ func createRolloutOperatorDependencies(t *testing.T, ctx context.Context, api *k
 	_, err = api.RbacV1().RoleBindings(corev1.NamespaceDefault).Create(ctx, roleBinding, metav1.CreateOptions{})
 	require.NoError(t, err)
 
-	_ = createZoneAwarePodDistruptionBudgetCustomResourceDefinition(t, extApi)
+	if installCRDs {
+		_ = createZoneAwarePodDistruptionBudgetCustomResourceDefinition(t, extApi)
+	}
 
 	if webhook {
-		_ = createReplicaTemplateCustomResourceDefinition(t, extApi)
+		if installCRDs {
+			_ = createReplicaTemplateCustomResourceDefinition(t, extApi)
+		}
 
 		operatorRole := loadFromDisk[rbacv1.Role](t, directory+yamlRoleSecret, &rbacv1.Role{})
 		_, err = api.RbacV1().Roles(corev1.NamespaceDefault).Create(ctx, operatorRole, metav1.CreateOptions{})
