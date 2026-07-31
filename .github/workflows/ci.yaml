@@ -312,7 +312,7 @@ jobs:
             # based on commit time (stable across workflow re-runs).
             DATETIME="$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S "$SHA")"
             SHORT_SHA="${SHA:0:7}"
-            echo "tag=main-$SHORT_SHA" >> "$GITHUB_OUTPUT"
+            echo "tag=main-$SHA" >> "$GITHUB_OUTPUT"
             echo "additional_tag=main-${DATETIME}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           fi
         env:
