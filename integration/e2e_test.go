@@ -128,11 +128,20 @@ func TestRolloutOperatorStartsWithoutCRDs(t *testing.T) {
 
 	cluster := createKindCluster(t, "rollout-operator:latest")
 	api := cluster.API()
-	path := initManifestFiles(t, "webhooks-not-enabled")
+	path := initManifestFiles(t, "missing-crds")
 
-	createRolloutOperatorWithoutCRDs(t, ctx, api, cluster.ExtAPI(), path, false)
+	createRolloutOperatorWithoutCRDs(t, ctx, api, cluster.ExtAPI(), path, true)
 	rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
 	requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		logs, err := api.CoreV1().Pods(corev1.NamespaceDefault).GetLogs(rolloutOperatorPod, &corev1.PodLogOptions{}).DoRaw(ctx)
+		if err == nil {
+			t.Logf("rollout-operator logs:\n%s", logs)
+		}
+	})
 
 	metricsMatch := func(pattern *regexp.Regexp) func() bool {
 		return func() bool {
@@ -151,6 +160,11 @@ func TestRolloutOperatorStartsWithoutCRDs(t *testing.T) {
 		}
 	}
 
+	replicaTemplateNotReady := regexp.MustCompile(`(?m)^rollout_operator_replica_template_observer_ready 0$`)
+	zpdbNotReady := regexp.MustCompile(`(?m)^rollout_operator_zpdb_config_observer_ready 0$`)
+	require.Eventually(t, metricsMatch(replicaTemplateNotReady), time.Minute, time.Second, "missing ReplicaTemplate CRD was not reported")
+	require.Eventually(t, metricsMatch(zpdbNotReady), time.Minute, time.Second, "missing ZPDB CRD was not reported")
+
 	sts := mockServiceStatefulSet("missing-replica-template", "1", true, 0)
 	sts.Annotations = map[string]string{
 		config.RolloutMirrorReplicasFromResourceNameAnnotationKey:       "missing",
@@ -162,6 +176,19 @@ func TestRolloutOperatorStartsWithoutCRDs(t *testing.T) {
 	failedReconcile := regexp.MustCompile(`(?m)^rollout_operator_group_reconciles_failed_total\{rollout_group="mock"\} [1-9][0-9]*(?:\.[0-9]+)?$`)
 	require.Eventually(t, metricsMatch(failedReconcile), time.Minute, time.Second, "missing CRDs did not cause a failed reconcile metric")
 
+	// Future CRDs should cover both startup without the CRD and recovery when it is installed later.
+	createReplicaTemplateCustomResourceDefinition(t, cluster.ExtAPI())
+	require.Eventually(t, func() bool {
+		_, err := cluster.DynK().Resource(replicaTemplateSchema()).Namespace(corev1.NamespaceDefault).
+			Create(ctx, replicaTemplate(corev1.NamespaceDefault, "missing", 0), metav1.CreateOptions{})
+		return err == nil
+	}, time.Minute, time.Second, "failed to create ReplicaTemplate after installing its CRD")
+
+	successfulReconcile := regexp.MustCompile(`(?m)^rollout_operator_last_successful_group_reconcile_timestamp_seconds\{rollout_group="mock"\} [1-9][0-9.e+]*$`)
+	replicaTemplateReady := regexp.MustCompile(`(?m)^rollout_operator_replica_template_observer_ready 1$`)
+	require.Eventually(t, metricsMatch(replicaTemplateReady), time.Minute, time.Second, "ReplicaTemplate observer did not become ready")
+	require.Eventually(t, metricsMatch(successfulReconcile), time.Minute, time.Second, "operator did not recover after installing the ReplicaTemplate CRD")
+
 	createZoneAwarePodDistruptionBudgetCustomResourceDefinition(t, cluster.ExtAPI())
 	require.Eventually(t, func() bool {
 		_, err := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault).
@@ -171,6 +198,8 @@ func TestRolloutOperatorStartsWithoutCRDs(t *testing.T) {
 
 	observedZPDB := regexp.MustCompile(`(?m)^rollout_operator_zpdb_configurations_observed_total\{result="updated"\} [1-9][0-9]*(?:\.[0-9]+)?$`)
 	require.Eventually(t, metricsMatch(observedZPDB), time.Minute, time.Second, "operator did not observe ZPDB created after startup")
+	zpdbReady := regexp.MustCompile(`(?m)^rollout_operator_zpdb_config_observer_ready 1$`)
+	require.Eventually(t, metricsMatch(zpdbReady), time.Minute, time.Second, "ZPDB observer did not become ready")
 }
 
 // TestRolloutHappyCaseWithZpdb performs pod updates via the rolling update controller and uses the zpdb to determine if the pod delete is safe or not

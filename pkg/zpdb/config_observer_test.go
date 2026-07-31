@@ -3,6 +3,7 @@ package zpdb
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,6 +74,7 @@ func newPDB(name string) *unstructured.Unstructured {
 func TestObserver_NewPdbObserver(t *testing.T) {
 	_, observer := newConfigObserverTestCase()
 	require.NoError(t, observer.start())
+	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigObserverReady))
 
 	select {
 	case <-observer.stopCh:
@@ -107,10 +109,36 @@ func TestObserver_StartWithoutCRD(t *testing.T) {
 	select {
 	case err := <-started:
 		require.NoError(t, err)
+		require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigObserverReady))
 	case <-time.After(time.Second):
 		t.Fatal("observer did not start while the CRD was missing")
 	}
 	observer.stop()
+}
+
+func TestObserver_ReadinessRecoversWithoutObjects(t *testing.T) {
+	dynamicClient, observer := newConfigObserverTestCase()
+	var unavailable atomic.Bool
+	dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
+		if !unavailable.Load() {
+			return false, nil, nil
+		}
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{
+			Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
+			Resource: ZoneAwarePodDisruptionBudgetsNamePlural,
+		}, "")
+	})
+
+	require.NoError(t, observer.start())
+	observer.stop()
+
+	unavailable.Store(true)
+	observer.updateReadiness()
+	require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigObserverReady))
+
+	unavailable.Store(false)
+	observer.updateReadiness()
+	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigObserverReady))
 }
 
 // TestObserver_InvalidObject - tests that no panics occur if an invalid object is passed from the informers
