@@ -19,9 +19,9 @@ import (
 
 const (
 	// How frequently informers should resync
-	informerSyncInterval    = 5 * time.Minute
-	initialCacheSyncTimeout = 10 * time.Second
-	readinessCheckInterval  = 30 * time.Second
+	informerSyncInterval        = 5 * time.Minute
+	initialResourceCheckTimeout = 10 * time.Second
+	readinessCheckInterval      = 30 * time.Second
 )
 
 // An configObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the configCache.
@@ -83,7 +83,7 @@ func (c *configObserver) start() error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), initialCacheSyncTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), initialResourceCheckTimeout)
 	_, listErr := c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
 	cancel()
 	if listErr != nil && !apierrors.IsNotFound(listErr) {
@@ -92,23 +92,15 @@ func (c *configObserver) start() error {
 
 	go c.pdbFactory.Start(c.stopCh)
 	go c.observeReadiness()
-	syncResult := make(chan bool, 1)
-	go func() {
-		syncResult <- c.waitForCacheSync()
-	}()
 
 	if apierrors.IsNotFound(listErr) {
 		level.Warn(c.logger).Log("msg", "zpdb custom resource is unavailable; informer will retry", "err", listErr)
+		go c.waitForCacheSync()
 		return nil
 	}
 
-	select {
-	case synced := <-syncResult:
-		if !synced {
-			return errors.New("zpdb config informer caches failed to sync")
-		}
-	case <-time.After(initialCacheSyncTimeout):
-		level.Warn(c.logger).Log("msg", "zpdb config informer cache sync timed out; continuing startup")
+	if !c.waitForCacheSync() {
+		return errors.New("zpdb config informer caches failed to sync")
 	}
 
 	return nil
