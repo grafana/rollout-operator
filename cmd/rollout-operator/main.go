@@ -28,6 +28,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // Required to get the GCP auth provider working.
@@ -55,6 +56,21 @@ const deprecatedZPDBPodReadyAnnotationPatchTimeoutFlag = "zpdb.pod-ready-annotat
 var (
 	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale", "ui"}
 )
+
+type replicaTemplateResourceMapper struct {
+	delegate scale.PreferredResourceMapper
+}
+
+func (m replicaTemplateResourceMapper) ResourceFor(resource schema.GroupVersionResource) (schema.GroupVersionResource, error) {
+	if resource.Group == "rollout-operator.grafana.com" && resource.Resource == "replicatemplates" {
+		return schema.GroupVersionResource{
+			Group:    resource.Group,
+			Version:  "v1",
+			Resource: resource.Resource,
+		}, nil
+	}
+	return m.delegate.ResourceFor(resource)
+}
 
 type config struct {
 	logFormat string
@@ -319,7 +335,7 @@ func main() {
 	// we don't use cached discovery because DiscoveryScaleKindResolver does its own caching,
 	// so we want to re-fetch every time when we actually ask for it
 	scaleKindResolver := scale.NewDiscoveryScaleKindResolver(coreKubeClient.Discovery())
-	scaleClient, err := scale.NewForConfig(coreConfig, restMapper, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
+	scaleClient, err := scale.NewForConfig(coreConfig, replicaTemplateResourceMapper{delegate: restMapper}, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
 	if err != nil {
 		fatal(fmt.Errorf("failed to init scaleClient: %w", err))
 	}
@@ -425,7 +441,7 @@ func runOperator(
 	}
 
 	// Init the controller
-	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
+	c := controller.NewRolloutController(coreKubeClient, coreKubeClient.Discovery(), restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
 	if cfg.watchReplicaTemplates {
 		c.WatchReplicaTemplates()
 	}
