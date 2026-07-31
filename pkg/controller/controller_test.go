@@ -860,7 +860,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			// Pass in a slice of errors. Each eviction request takes and removes from the head and uses this as the eviction response. Once exhausted no evictions will return an error.
 			evictionController := &mockEvictionController{nextErrorsIfAny: testData.zpdbErrors, hasPartitionAwarePdb: testData.zpdbPartitionMode}
 
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), evictionController)
+			c := NewRolloutController(kubeClient, nil, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), evictionController)
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -1366,7 +1366,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, podClientRoundTripper.client(), 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
+			c := NewRolloutController(kubeClient, nil, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, podClientRoundTripper.client(), 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -1468,7 +1468,7 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 
 	// Create the controller and start informers.
 	reg := prometheus.NewPedanticRegistry()
-	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
+	c := NewRolloutController(kubeClient, nil, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
 	require.NoError(t, c.Init())
 	defer c.Stop()
 
