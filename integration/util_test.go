@@ -131,6 +131,19 @@ func expectVersion(expectedVersion string) func(t *testing.T, pod *corev1.Pod) b
 	}
 }
 
+func expectContainerWaitingReason(expectedReason string) func(t *testing.T, pod *corev1.Pod) bool {
+	return func(t *testing.T, pod *corev1.Pod) bool {
+		for _, s := range pod.Status.ContainerStatuses {
+			if s.State.Waiting != nil && s.State.Waiting.Reason == expectedReason {
+				t.Logf("Pod %s container %s is waiting with reason %q as expected.", pod.Name, s.Name, expectedReason)
+				return true
+			}
+		}
+		t.Logf("No container of pod %s is waiting with reason %q", pod.Name, expectedReason)
+		return false
+	}
+}
+
 func expectedPodReadyState(expectedReady bool) func(t *testing.T, pod *corev1.Pod) bool {
 	return func(t *testing.T, pod *corev1.Pod) bool {
 		if len(pod.Status.ContainerStatuses) == 0 {

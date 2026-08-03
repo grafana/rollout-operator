@@ -11,6 +11,11 @@ import (
 )
 
 func main() {
+	// Simulate a service which crashes on startup (e.g. a bad rollout ending up in CrashLoopBackOff).
+	if os.Getenv("CRASH") == "true" {
+		log.Fatal("CRASH=true: exiting immediately to simulate a crashing service")
+	}
+
 	alive := &atomic.Int64{}
 	alive.Store(1)
 	ready := &atomic.Int64{}
