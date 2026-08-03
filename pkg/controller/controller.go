@@ -19,8 +19,10 @@ import (
 	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -43,6 +45,17 @@ const (
 
 var tracer = otel.Tracer("pkg/controller")
 
+var replicaTemplateGroupKind = schema.GroupKind{
+	Group: "rollout-operator.grafana.com",
+	Kind:  "ReplicaTemplate",
+}
+
+var replicaTemplateGVR = schema.GroupVersionResource{
+	Group:    replicaTemplateGroupKind.Group,
+	Version:  "v1",
+	Resource: "replicatemplates",
+}
+
 type ZPDBEvictionController interface {
 	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string, override zpdb.MaxUnavailableZeroOverride) error
 	HasPartitionAwarePdb(pod *corev1.Pod) (bool, error)
@@ -50,6 +63,7 @@ type ZPDBEvictionController interface {
 
 type RolloutController struct {
 	kubeClient           kubernetes.Interface
+	discoveryClient      discovery.DiscoveryInterface
 	clusterDomain        string
 	namespace            string
 	reconcileInterval    time.Duration
@@ -78,13 +92,15 @@ type RolloutController struct {
 	groupReconcileFailed      *prometheus.CounterVec
 	groupReconcileDuration    *prometheus.HistogramVec
 	groupReconcileLastSuccess *prometheus.GaugeVec
+	replicaTemplateReady      prometheus.Gauge
+	replicaTemplateAvailable  atomic.Bool
 
 	// Keep track of discovered rollout groups. We use this information to delete metrics
 	// related to rollout groups that have been decommissioned.
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, podHTTPClient *instrumentation.PodHTTPClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController ZPDBEvictionController) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, discoveryClient discovery.DiscoveryInterface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, podHTTPClient *instrumentation.PodHTTPClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController ZPDBEvictionController) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -101,6 +117,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 
 	c := &RolloutController{
 		kubeClient:           kubeClient,
+		discoveryClient:      discoveryClient,
 		clusterDomain:        clusterDomain,
 		namespace:            namespace,
 		reconcileInterval:    reconcileInterval,
@@ -135,7 +152,12 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 			Name: "rollout_operator_last_successful_group_reconcile_timestamp_seconds",
 			Help: "Timestamp of the last successful reconcile for a specific rollout group.",
 		}, []string{"rollout_group"}),
+		replicaTemplateReady: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "rollout_operator_replica_template_observer_ready",
+			Help: "Whether the ReplicaTemplate resource is discoverable by the rollout controller.",
+		}),
 	}
+	c.replicaTemplateReady.Set(0)
 
 	return c
 }
@@ -167,6 +189,9 @@ func (c *RolloutController) Init() error {
 	// Start informers.
 	go c.statefulSetsFactory.Start(c.stopCh)
 	go c.podsFactory.Start(c.stopCh)
+	if c.discoveryClient != nil {
+		go c.observeReplicaTemplate()
+	}
 
 	// Wait until all informer caches have been synced.
 	level.Info(c.logger).Log("msg", "informer caches are syncing")
@@ -176,6 +201,45 @@ func (c *RolloutController) Init() error {
 	level.Info(c.logger).Log("msg", "informer caches have synced")
 
 	return nil
+}
+
+func (c *RolloutController) observeReplicaTemplate() {
+	update := func() {
+		resourceAvailable := false
+		scaleAvailable := false
+		resources, err := c.discoveryClient.ServerResourcesForGroupVersion(replicaTemplateGVR.GroupVersion().String())
+		if err == nil {
+			for _, resource := range resources.APIResources {
+				switch resource.Name {
+				case replicaTemplateGVR.Resource:
+					resourceAvailable = true
+				case replicaTemplateGVR.Resource + "/scale":
+					scaleAvailable = true
+				}
+			}
+		}
+		available := resourceAvailable && scaleAvailable
+		if available {
+			c.replicaTemplateReady.Set(1)
+		} else {
+			c.replicaTemplateReady.Set(0)
+		}
+		if !c.replicaTemplateAvailable.Swap(available) && available {
+			c.enqueueReconcile()
+		}
+	}
+
+	update()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case <-ticker.C:
+			update()
+		}
+	}
 }
 
 func (c *RolloutController) onAdded(obj interface{}) {
@@ -296,9 +360,10 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	durationTimer := prometheus.NewTimer(c.groupReconcileDuration.WithLabelValues(groupName))
 	failed := c.groupReconcileFailed.WithLabelValues(groupName)
 	lastSuccess := c.groupReconcileLastSuccess.WithLabelValues(groupName)
+	scalingFailed := false
 	defer func() {
 		durationTimer.ObserveDuration()
-		if returnErr != nil {
+		if returnErr != nil || scalingFailed {
 			failed.Inc()
 		} else {
 			lastSuccess.SetToCurrentTime()
@@ -313,6 +378,7 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// up-to-date.
 	updated, err := c.adjustStatefulSetsGroupReplicas(ctx, groupName, sets)
 	if err != nil {
+		scalingFailed = true
 		level.Warn(c.logger).Log("msg", "unable to adjust desired replicas of StatefulSet", "group", groupName, "err", err)
 	}
 	if err == nil && updated {
