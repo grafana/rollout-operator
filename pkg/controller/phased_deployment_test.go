@@ -110,6 +110,7 @@ func TestPhasedDeploymentController_BypassUnpauses(t *testing.T) {
 	require.Equal(t, bypassEventReason, events.Items[0].Reason)
 
 	// Second reconcile must not re-emit bypass telemetry.
+	c = newTestPhasedController(t, api)
 	require.NoError(t, c.reconcile(context.Background()))
 	events, err = api.CoreV1().Events(testNamespace).List(context.Background(), metav1.ListOptions{})
 	require.NoError(t, err)
@@ -138,6 +139,7 @@ func TestPhasedDeploymentController_BypassHonorsPreExistingPause(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 
+	c = newTestPhasedController(t, api)
 	require.NoError(t, c.reconcile(context.Background()))
 	events, err = api.CoreV1().Events(testNamespace).List(context.Background(), metav1.ListOptions{})
 	require.NoError(t, err)
