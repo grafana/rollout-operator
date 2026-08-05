@@ -9,9 +9,9 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 
 	"github.com/grafana/rollout-operator/pkg/config"
@@ -78,22 +78,30 @@ type Decision struct {
 
 // Request is the input for a between-zone gate evaluation.
 type Request struct {
-	RolloutGroup  string
-	Namespace     string
-	Sets          []*appsv1.StatefulSet
-	NextSTS       *appsv1.StatefulSet
-	CandidatePods []*corev1.Pod
-	StablePods    []*corev1.Pod
-	BaselineTime  time.Time
-	Now           time.Time
+	RolloutGroup string
+	// StateKey isolates cached policy progress when workloads share a rollout group.
+	// It defaults to RolloutGroup.
+	StateKey          string
+	Namespace         string
+	TargetName        string
+	TargetKind        string
+	TargetLabels      map[string]string
+	TargetAnnotations map[string]string
+	EventTarget       runtime.Object
+	CandidatePods     []*corev1.Pod
+	StablePods        []*corev1.Pod
+	BaselineTime      time.Time
+	Now               time.Time
 }
 
-// Evaluate resolves the RolloutHealthCheck annotation on NextSTS and evaluates checks.
+// Evaluate resolves the RolloutHealthCheck annotation on the target workload and evaluates checks.
 // Missing / mismatched bindings proceed (ShouldPause=false) but emit misconfiguration signals.
 func (g *Gate) Evaluate(ctx context.Context, req Request) Decision {
-	checkName := strings.TrimSpace(req.NextSTS.Annotations[config.RolloutHealthCheckAnnotationKey])
+	stateKey := requestStateKey(req)
+	checkName := strings.TrimSpace(req.TargetAnnotations[config.RolloutHealthCheckAnnotationKey])
 	if checkName == "" {
-		g.clearGroupProgress(req.RolloutGroup)
+		g.clearGroupProgress(stateKey)
+		g.clearMisconfigured(stateKey, req.RolloutGroup)
 		g.setBlocked(req.RolloutGroup, false)
 		return Decision{}
 	}
@@ -105,8 +113,8 @@ func (g *Gate) Evaluate(ctx context.Context, req Request) Decision {
 		return Decision{Reason: msg}
 	}
 
-	if !cfg.MatchesLabels(labels.Set(req.NextSTS.Labels)) {
-		msg := fmt.Sprintf("RolloutHealthCheck %q selector does not match StatefulSet %s", checkName, req.NextSTS.Name)
+	if !cfg.MatchesLabels(labels.Set(req.TargetLabels)) {
+		msg := fmt.Sprintf("RolloutHealthCheck %q selector does not match %s %s", checkName, req.TargetKind, req.TargetName)
 		g.reportMisconfigured(req, msg)
 		return Decision{Reason: msg}
 	}
@@ -117,7 +125,7 @@ func (g *Gate) Evaluate(ctx context.Context, req Request) Decision {
 	}
 
 	// Skip Prometheus queries while every check is still inside its retry/reevaluation window.
-	if cached, ok := g.cachedDecision(req.RolloutGroup, cfg, now); ok {
+	if cached, ok := g.cachedDecision(stateKey, cfg, now); ok {
 		return g.finalize(req, cached, false)
 	}
 
@@ -136,27 +144,27 @@ func (g *Gate) Evaluate(ctx context.Context, req Request) Decision {
 		return g.finalize(req, Decision{ShouldPause: true, Reason: resp.ClientError}, true)
 	}
 
-	decision := g.applyPolicies(req.RolloutGroup, cfg, resp, now)
+	decision := g.applyPolicies(stateKey, cfg, resp, now)
 	return g.finalize(req, decision, true)
 }
 
 func (g *Gate) finalize(req Request, decision Decision, emitEvent bool) Decision {
 	if decision.ShouldPause {
-		level.Warn(g.logger).Log("msg", "rollout blocked by health check", "rollout_group", req.RolloutGroup, "statefulset", req.NextSTS.Name, "detail", decision.Reason)
+		level.Warn(g.logger).Log("msg", "rollout blocked by health check", "rollout_group", req.RolloutGroup, "workload_kind", req.TargetKind, "workload", req.TargetName, "detail", decision.Reason)
 		if emitEvent {
-			g.event(req.NextSTS, corev1.EventTypeWarning, eventBlocked, decision.Reason)
+			g.event(req.EventTarget, corev1.EventTypeWarning, eventBlocked, decision.Reason)
 		}
-		g.clearMisconfigured(req.RolloutGroup)
+		g.clearMisconfigured(requestStateKey(req), req.RolloutGroup)
 		g.setBlocked(req.RolloutGroup, true)
 		return decision
 	}
 	if decision.Reason != "" {
-		level.Warn(g.logger).Log("msg", "health check warning", "rollout_group", req.RolloutGroup, "statefulset", req.NextSTS.Name, "detail", decision.Reason)
+		level.Warn(g.logger).Log("msg", "health check warning", "rollout_group", req.RolloutGroup, "workload_kind", req.TargetKind, "workload", req.TargetName, "detail", decision.Reason)
 		if emitEvent {
-			g.event(req.NextSTS, corev1.EventTypeWarning, eventWarn, decision.Reason)
+			g.event(req.EventTarget, corev1.EventTypeWarning, eventWarn, decision.Reason)
 		}
 	}
-	g.clearMisconfigured(req.RolloutGroup)
+	g.clearMisconfigured(requestStateKey(req), req.RolloutGroup)
 	g.setBlocked(req.RolloutGroup, false)
 	return decision
 }
@@ -381,10 +389,10 @@ func progressKey(rolloutGroup, configName, checkName string) string {
 }
 
 func (g *Gate) reportMisconfigured(req Request, msg string) {
-	level.Error(g.logger).Log("msg", "rollout health check misconfigured", "rollout_group", req.RolloutGroup, "statefulset", req.NextSTS.Name, "detail", msg)
-	_, already := g.misconfiguredGroups.LoadOrStore(req.RolloutGroup, struct{}{})
+	level.Error(g.logger).Log("msg", "rollout health check misconfigured", "rollout_group", req.RolloutGroup, "workload_kind", req.TargetKind, "workload", req.TargetName, "detail", msg)
+	_, already := g.misconfiguredGroups.LoadOrStore(requestStateKey(req), struct{}{})
 	if !already {
-		g.event(req.NextSTS, corev1.EventTypeWarning, eventMisconfigured, msg)
+		g.event(req.EventTarget, corev1.EventTypeWarning, eventMisconfigured, msg)
 		if g.metrics != nil {
 			g.metrics.MisconfiguredTotal.WithLabelValues(req.RolloutGroup).Inc()
 		}
@@ -395,12 +403,19 @@ func (g *Gate) reportMisconfigured(req Request, msg string) {
 	g.setBlocked(req.RolloutGroup, false)
 }
 
-func (g *Gate) clearMisconfigured(rolloutGroup string) {
-	if _, loaded := g.misconfiguredGroups.LoadAndDelete(rolloutGroup); loaded || g.metrics != nil {
+func (g *Gate) clearMisconfigured(stateKey, rolloutGroup string) {
+	if _, loaded := g.misconfiguredGroups.LoadAndDelete(stateKey); loaded || g.metrics != nil {
 		if g.metrics != nil {
 			g.metrics.Misconfigured.WithLabelValues(rolloutGroup).Set(0)
 		}
 	}
+}
+
+func requestStateKey(req Request) string {
+	if req.StateKey != "" {
+		return req.StateKey
+	}
+	return req.RolloutGroup
 }
 
 func (g *Gate) setBlocked(rolloutGroup string, blocked bool) {
@@ -414,11 +429,11 @@ func (g *Gate) setBlocked(rolloutGroup string, blocked bool) {
 	g.metrics.Blocked.WithLabelValues(rolloutGroup).Set(val)
 }
 
-func (g *Gate) event(sts *appsv1.StatefulSet, eventType, reason, message string) {
-	if g.recorder == nil || sts == nil {
+func (g *Gate) event(target runtime.Object, eventType, reason, message string) {
+	if g.recorder == nil || target == nil {
 		return
 	}
-	g.recorder.Event(sts, eventType, reason, message)
+	g.recorder.Event(target, eventType, reason, message)
 }
 
 func targetPodsFromCore(pods []*corev1.Pod) TargetPods {

@@ -276,6 +276,8 @@ metadata:
 
 The mutating webhook `/admission/phased-deployment` (scoped to `grafana.com/rollout-phased: "true"`) pauses the main Deployment when the revision changes and re-applies `spec.paused: true` on later applies while the gate is active (including Flux server-side apply).
 
+Add `grafana.com/rollout-health-check` to a gated Deployment to evaluate the referenced `RolloutHealthCheck` after its canaries are fully rolled out and before it is unpaused. Canary pods are evaluated as the candidate and the paused Deployment's pods as the stable baseline. The `RolloutHealthCheck` selector must match the gated Deployment's labels.
+
 Disable by removing `grafana.com/rollout-canary` (the webhook clears gate state and restores the prior pause intent) and optionally the `grafana.com/rollout-phased` label. If you remove only the label while the Deployment is still paused by the operator, unpause it manually.
 
 ### Incident bypass

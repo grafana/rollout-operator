@@ -323,12 +323,14 @@ func main() {
 	// Init the controller
 	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
 	healthEvaluator := healthcheck.NewEvaluator(nil, healthMetrics, logger)
-	c.SetHealthCheck(healthcheck.NewGate(healthObserver, healthEvaluator, healthMetrics, eventRecorder, logger), healthMetrics)
+	healthGate := healthcheck.NewGate(healthObserver, healthEvaluator, healthMetrics, eventRecorder, logger)
+	c.SetHealthCheck(healthGate, healthMetrics)
 	if err := c.Init(); err != nil {
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
 
 	phasedController := controller.NewPhasedDeploymentController(coreKubeClient, cfg.kubeNamespace, cfg.reconcileInterval, reg, logger)
+	phasedController.SetHealthCheck(healthGate, healthMetrics)
 	if err := phasedController.Init(); err != nil {
 		fatal(fmt.Errorf("failed to init phased deployment controller: %w", err))
 	}

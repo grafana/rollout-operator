@@ -53,6 +53,67 @@ func TestPhasedDeploymentController_CompletesWhenCanaryReady(t *testing.T) {
 	require.False(t, main.Spec.Paused)
 }
 
+func TestPhasedDeploymentController_HealthCheckGatesReadyCanary(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		shouldPause bool
+		wantPhase   string
+		wantPaused  bool
+	}{
+		{name: "blocked", shouldPause: true, wantPhase: config.RolloutDependencyPhaseWaiting, wantPaused: true},
+		{name: "passing", shouldPause: false, wantPhase: config.RolloutDependencyPhaseComplete, wantPaused: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			replicas := int32(1)
+			canary := mockPhasedDeployment("zone-a", "", "r1", false, replicas, true)
+			main := mockPhasedDeployment("zone-b", "zone-a", "r1", true, replicas, false)
+			main.Annotations[config.RolloutDependencyPhaseAnnotationKey] = config.RolloutDependencyPhaseWaiting
+			main.Annotations[config.RolloutDependencyRevisionAnnotationKey] = "r1"
+			main.Annotations[config.RolloutHadPausedAnnotationKey] = phased.HadPausedAnnotationFalse
+			main.Annotations[config.RolloutHealthCheckAnnotationKey] = "deployment-health"
+
+			candidatePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "zone-a-0", Namespace: testNamespace, Labels: map[string]string{"name": "zone-a"}}}
+			stablePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "zone-b-0", Namespace: testNamespace, Labels: map[string]string{"name": "zone-b"}}}
+			api := fake.NewSimpleClientset(canary, main, candidatePod, stablePod)
+			c := newTestPhasedController(t, api)
+			gate := &mockHealthGate{shouldPause: tc.shouldPause}
+			c.SetHealthCheck(gate, nil)
+
+			require.NoError(t, c.reconcile(context.Background()))
+
+			main, err := api.AppsV1().Deployments(testNamespace).Get(context.Background(), "zone-b", metav1.GetOptions{})
+			require.NoError(t, err)
+			require.Equal(t, tc.wantPhase, phased.Phase(main))
+			require.Equal(t, tc.wantPaused, main.Spec.Paused)
+			require.Equal(t, 1, gate.callCount())
+			require.Equal(t, "zone-b", gate.lastReq.TargetName)
+			require.Equal(t, "Deployment", gate.lastReq.TargetKind)
+			require.Len(t, gate.lastReq.CandidatePods, 1)
+			require.Len(t, gate.lastReq.StablePods, 1)
+
+			canary, err = api.AppsV1().Deployments(testNamespace).Get(context.Background(), "zone-a", metav1.GetOptions{})
+			require.NoError(t, err)
+			require.NotEmpty(t, canary.Annotations[config.RolloutHealthCheckStartedAtAnnotationKey])
+		})
+	}
+}
+
+func TestPhasedDeploymentController_ClearsHealthStateWhenCanaryRemoved(t *testing.T) {
+	replicas := int32(1)
+	dep := mockPhasedDeployment("zone-b", "", "r1", false, replicas, true)
+	dep.Annotations[config.RolloutHealthCheckAnnotationKey] = "deployment-health"
+
+	api := fake.NewSimpleClientset(dep)
+	c := newTestPhasedController(t, api)
+	gate := &mockHealthGate{}
+	c.SetHealthCheck(gate, nil)
+
+	require.NoError(t, c.reconcile(context.Background()))
+	require.Equal(t, 1, gate.callCount())
+	require.Empty(t, gate.lastReq.TargetAnnotations)
+	require.Equal(t, "zone-b/Deployment/zone-b", gate.lastReq.StateKey)
+}
+
 func TestPhasedDeploymentController_WaitsForAllCanaries(t *testing.T) {
 	replicas := int32(1)
 	qf := mockPhasedDeployment("query-frontend-zone-a", "", "r1", false, replicas, true)

@@ -65,13 +65,16 @@ func (c *RolloutController) maybeEvaluateHealthGate(ctx context.Context, groupNa
 	}
 
 	decision := c.healthGate.Evaluate(ctx, healthcheck.Request{
-		RolloutGroup:  groupName,
-		Namespace:     c.namespace,
-		Sets:          sets,
-		NextSTS:       next,
-		CandidatePods: candidatePods,
-		StablePods:    stablePods,
-		BaselineTime:  baseline,
+		RolloutGroup:      groupName,
+		Namespace:         c.namespace,
+		TargetName:        next.Name,
+		TargetKind:        "StatefulSet",
+		TargetLabels:      next.Labels,
+		TargetAnnotations: next.Annotations,
+		EventTarget:       next,
+		CandidatePods:     candidatePods,
+		StablePods:        stablePods,
+		BaselineTime:      baseline,
 	})
 	return decision.ShouldPause, nil
 }

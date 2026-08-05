@@ -46,10 +46,13 @@ func TestGate_MisconfiguredProceeds(t *testing.T) {
 		},
 	}
 	decision := gate.Evaluate(context.Background(), Request{
-		RolloutGroup: "ingester",
-		Namespace:    "ns",
-		Sets:         []*appsv1.StatefulSet{sts},
-		NextSTS:      sts,
+		RolloutGroup:      "ingester",
+		Namespace:         "ns",
+		TargetName:        sts.Name,
+		TargetKind:        "StatefulSet",
+		TargetLabels:      sts.Labels,
+		TargetAnnotations: sts.Annotations,
+		EventTarget:       sts,
 	})
 	require.False(t, decision.ShouldPause)
 	require.Contains(t, decision.Reason, "was not found")
@@ -72,9 +75,12 @@ func TestGate_SelectorMismatchProceeds(t *testing.T) {
 		},
 	}
 	decision := gate.Evaluate(context.Background(), Request{
-		RolloutGroup: "ingester",
-		Sets:         []*appsv1.StatefulSet{sts},
-		NextSTS:      sts,
+		RolloutGroup:      "ingester",
+		TargetName:        sts.Name,
+		TargetKind:        "StatefulSet",
+		TargetLabels:      sts.Labels,
+		TargetAnnotations: sts.Annotations,
+		EventTarget:       sts,
 	})
 	require.False(t, decision.ShouldPause)
 	require.Contains(t, decision.Reason, "selector does not match")
@@ -115,12 +121,9 @@ func TestGate_ConsecutiveFailures(t *testing.T) {
 		q.sequence = failSeq()
 		q.seqIdx = 0
 		time.Sleep(2 * time.Millisecond)
-		decision := gate.Evaluate(context.Background(), Request{
-			RolloutGroup: "ingester",
-			Namespace:    "ns",
-			NextSTS:      sts,
-			Now:          now.Add(time.Duration(i) * time.Second),
-		})
+		req := requestForStatefulSet(sts)
+		req.Now = now.Add(time.Duration(i) * time.Second)
+		decision := gate.Evaluate(context.Background(), req)
 		require.True(t, decision.ShouldPause, "iteration %d", i)
 		if i < 3 {
 			require.Contains(t, decision.Reason, "consecutive failures")
@@ -152,7 +155,9 @@ func TestGate_WarnOnFailureExceeded(t *testing.T) {
 			Labels:      map[string]string{"rollout-group": "ingester"},
 		},
 	}
-	decision := gate.Evaluate(context.Background(), Request{RolloutGroup: "ingester", Namespace: "ns", NextSTS: sts, Now: time.Now()})
+	req := requestForStatefulSet(sts)
+	req.Now = time.Now()
+	decision := gate.Evaluate(context.Background(), req)
 	require.False(t, decision.ShouldPause)
 	require.NotEmpty(t, decision.Reason)
 }
@@ -185,12 +190,9 @@ func TestGate_ErrorRetriesAcrossReconciles(t *testing.T) {
 		q.sequence = []func() (model.Value, error){
 			func() (model.Value, error) { return nil, errors.New("boom") },
 		}
-		decision := gate.Evaluate(context.Background(), Request{
-			RolloutGroup: "ingester",
-			Namespace:    "ns",
-			NextSTS:      sts,
-			Now:          now.Add(time.Duration(i) * time.Second),
-		})
+		req := requestForStatefulSet(sts)
+		req.Now = now.Add(time.Duration(i) * time.Second)
+		decision := gate.Evaluate(context.Background(), req)
 		require.True(t, decision.ShouldPause, "attempt %d", i)
 		if i < 3 {
 			require.Contains(t, decision.Reason, "attempt")
@@ -229,13 +231,28 @@ func TestGate_ConsecutiveSuccessesRequired(t *testing.T) {
 	}
 	now := time.Now()
 	q.sequence = passSeq()
-	decision := gate.Evaluate(context.Background(), Request{RolloutGroup: "ingester", Namespace: "ns", NextSTS: sts, Now: now})
+	req := requestForStatefulSet(sts)
+	req.Now = now
+	decision := gate.Evaluate(context.Background(), req)
 	require.True(t, decision.ShouldPause)
 	require.Contains(t, decision.Reason, "consecutive successes")
 
 	q.seqIdx = 0
 	q.sequence = passSeq()
-	decision = gate.Evaluate(context.Background(), Request{RolloutGroup: "ingester", Namespace: "ns", NextSTS: sts, Now: now.Add(time.Second)})
+	req.Now = now.Add(time.Second)
+	decision = gate.Evaluate(context.Background(), req)
 	require.False(t, decision.ShouldPause)
 	require.Empty(t, decision.Reason)
+}
+
+func requestForStatefulSet(sts *appsv1.StatefulSet) Request {
+	return Request{
+		RolloutGroup:      "ingester",
+		Namespace:         "ns",
+		TargetName:        sts.Name,
+		TargetKind:        "StatefulSet",
+		TargetLabels:      sts.Labels,
+		TargetAnnotations: sts.Annotations,
+		EventTarget:       sts,
+	}
 }

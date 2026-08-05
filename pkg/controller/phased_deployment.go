@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/healthcheck"
 	"github.com/grafana/rollout-operator/pkg/phased"
 	"github.com/grafana/rollout-operator/pkg/util"
 )
@@ -45,6 +46,8 @@ type PhasedDeploymentController struct {
 	deploymentsInformer cache.SharedIndexInformer
 	logger              log.Logger
 	now                 func() time.Time
+	healthGate          HealthGate
+	healthMetrics       *healthcheck.Metrics
 
 	shouldReconcile atomic.Bool
 	stopCh          chan struct{}
@@ -109,6 +112,12 @@ func NewPhasedDeploymentController(kubeClient kubernetes.Interface, namespace st
 		}),
 	}
 	return c
+}
+
+// SetHealthCheck wires optional health-check gating into phased Deployment rollouts.
+func (c *PhasedDeploymentController) SetHealthCheck(gate HealthGate, metrics *healthcheck.Metrics) {
+	c.healthGate = gate
+	c.healthMetrics = metrics
 }
 
 func (c *PhasedDeploymentController) Init() error {
@@ -187,6 +196,9 @@ func (c *PhasedDeploymentController) reconcile(ctx context.Context) error {
 func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, dep *appsv1.Deployment, byName map[string]*appsv1.Deployment) error {
 	canaries := phased.Canaries(dep)
 	if len(canaries) == 0 {
+		if phased.Phase(dep) != "" || strings.TrimSpace(annotationOrEmpty(dep, config.RolloutHealthCheckAnnotationKey)) != "" {
+			c.clearDeploymentHealthGate(ctx, dep)
+		}
 		c.clearMetrics(dep.Name)
 		return nil
 	}
@@ -203,6 +215,7 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 		level.Warn(c.logger).Log("msg", "invalid rollout-bypass-until, ignoring", "deployment", dep.Name, "err", err)
 	}
 	if phased.BypassActive(dep, now) {
+		c.clearDeploymentHealthGate(ctx, dep)
 		c.bypassActive.WithLabelValues(dep.Name).Set(1)
 		needsBypassApply := phased.Phase(dep) != config.RolloutDependencyPhaseComplete ||
 			phased.DependencyRevision(dep) != revision ||
@@ -221,6 +234,9 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 		return nil
 	}
 	c.bypassActive.WithLabelValues(dep.Name).Set(0)
+	if !c.shouldEvaluateHealth(dep) {
+		c.clearDeploymentHealthGate(ctx, dep)
+	}
 
 	if phased.Phase(dep) == config.RolloutDependencyPhaseComplete && phased.DependencyRevision(dep) == revision {
 		c.setPhaseMetric(dep.Name, config.RolloutDependencyPhaseComplete)
@@ -266,6 +282,8 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 		return c.ensurePhase(ctx, dep, config.RolloutDependencyPhaseWaiting, "dependency cycle detected")
 	}
 
+	canaryDeployments := make([]*appsv1.Deployment, 0, len(canaries))
+	var healthBaseline time.Time
 	for _, canaryName := range canaries {
 		canary, err := c.getCanary(ctx, canaryName, byName)
 		if err != nil {
@@ -277,6 +295,16 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 			c.setPhaseMetric(dep.Name, config.RolloutDependencyPhaseWaiting)
 			c.blocked.DeleteLabelValues(dep.Name, "config")
 			return c.ensurePhase(ctx, dep, config.RolloutDependencyPhaseWaiting, fmt.Sprintf("waiting for canary %q to reach revision %s", canaryName, revision))
+		}
+		canaryDeployments = append(canaryDeployments, canary)
+		if c.shouldEvaluateHealth(dep) {
+			startedAt, err := c.ensureDeploymentHealthCheckStartedAt(ctx, canary, revision)
+			if err != nil {
+				return err
+			}
+			if healthBaseline.IsZero() || startedAt.Before(healthBaseline) {
+				healthBaseline = startedAt
+			}
 		}
 		if !phased.IsFullyRolledOut(canary) {
 			c.setPhaseMetric(dep.Name, config.RolloutDependencyPhaseWaiting)
@@ -292,7 +320,125 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 		"revision", revision,
 	)
 	c.blocked.DeleteLabelValues(dep.Name, "config")
+	if c.shouldEvaluateHealth(dep) {
+		pause, reason, err := c.evaluateDeploymentHealthGate(ctx, dep, canaryDeployments, healthBaseline)
+		if err != nil {
+			return err
+		}
+		if pause {
+			c.setPhaseMetric(dep.Name, config.RolloutDependencyPhaseWaiting)
+			return c.ensurePhase(ctx, dep, config.RolloutDependencyPhaseWaiting, reason)
+		}
+	}
 	return c.completeGate(ctx, dep, fmt.Sprintf("canaries ready: %s", strings.Join(canaries, ",")))
+}
+
+func (c *PhasedDeploymentController) shouldEvaluateHealth(dep *appsv1.Deployment) bool {
+	return c.healthGate != nil && strings.TrimSpace(annotationOrEmpty(dep, config.RolloutHealthCheckAnnotationKey)) != ""
+}
+
+func (c *PhasedDeploymentController) clearDeploymentHealthGate(ctx context.Context, dep *appsv1.Deployment) {
+	if c.healthGate == nil {
+		return
+	}
+	groupName := deploymentHealthGroup(dep)
+	c.healthGate.Evaluate(ctx, healthcheck.Request{
+		RolloutGroup:      groupName,
+		StateKey:          deploymentHealthStateKey(groupName, dep.Name),
+		Namespace:         c.namespace,
+		TargetName:        dep.Name,
+		TargetKind:        "Deployment",
+		TargetLabels:      dep.Labels,
+		TargetAnnotations: nil,
+		EventTarget:       dep,
+	})
+}
+
+func (c *PhasedDeploymentController) ensureDeploymentHealthCheckStartedAt(ctx context.Context, dep *appsv1.Deployment, revision string) (time.Time, error) {
+	existing := healthcheck.ParseStartedAtAnnotation(annotationOrEmpty(dep, config.RolloutHealthCheckStartedAtAnnotationKey), revision)
+	if !existing.IsZero() {
+		return existing, nil
+	}
+	startedAt := c.now().UTC()
+	value := healthcheck.FormatStartedAtAnnotation(revision, startedAt)
+	if err := c.patchDeployment(ctx, dep.Name, map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": map[string]interface{}{
+				config.RolloutHealthCheckStartedAtAnnotationKey: value,
+			},
+		},
+	}); err != nil {
+		return time.Time{}, fmt.Errorf("failed to patch health-check started-at on Deployment %s: %w", dep.Name, err)
+	}
+	return startedAt, nil
+}
+
+func (c *PhasedDeploymentController) evaluateDeploymentHealthGate(ctx context.Context, dep *appsv1.Deployment, canaries []*appsv1.Deployment, baseline time.Time) (bool, string, error) {
+	groupName := deploymentHealthGroup(dep)
+	if baseline.IsZero() {
+		reason := fmt.Sprintf("health-check baseline timestamp missing for Deployment %s", dep.Name)
+		level.Warn(c.logger).Log("msg", reason, "deployment", dep.Name)
+		if c.healthMetrics != nil {
+			c.healthMetrics.Blocked.WithLabelValues(groupName).Set(1)
+		}
+		return true, reason, nil
+	}
+
+	var candidatePods []*corev1.Pod
+	for _, canary := range canaries {
+		pods, err := c.listDeploymentPods(ctx, canary)
+		if err != nil {
+			return false, "", err
+		}
+		candidatePods = append(candidatePods, pods...)
+	}
+	stablePods, err := c.listDeploymentPods(ctx, dep)
+	if err != nil {
+		return false, "", err
+	}
+
+	decision := c.healthGate.Evaluate(ctx, healthcheck.Request{
+		RolloutGroup:      groupName,
+		StateKey:          deploymentHealthStateKey(groupName, dep.Name),
+		Namespace:         c.namespace,
+		TargetName:        dep.Name,
+		TargetKind:        "Deployment",
+		TargetLabels:      dep.Labels,
+		TargetAnnotations: dep.Annotations,
+		EventTarget:       dep,
+		CandidatePods:     candidatePods,
+		StablePods:        stablePods,
+		BaselineTime:      baseline,
+		Now:               c.now(),
+	})
+	return decision.ShouldPause, decision.Reason, nil
+}
+
+func deploymentHealthGroup(dep *appsv1.Deployment) string {
+	if groupName := dep.Labels[config.RolloutGroupLabelKey]; groupName != "" {
+		return groupName
+	}
+	return dep.Name
+}
+
+func deploymentHealthStateKey(groupName, deploymentName string) string {
+	return groupName + "/Deployment/" + deploymentName
+}
+
+func (c *PhasedDeploymentController) listDeploymentPods(ctx context.Context, dep *appsv1.Deployment) ([]*corev1.Pod, error) {
+	selector, err := metav1.LabelSelectorAsSelector(dep.Spec.Selector)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pod selector for Deployment %s: %w", dep.Name, err)
+	}
+	podList, err := c.kubeClient.CoreV1().Pods(c.namespace).List(ctx, metav1.ListOptions{LabelSelector: selector.String()})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods for Deployment %s: %w", dep.Name, err)
+	}
+	pods := make([]*corev1.Pod, 0, len(podList.Items))
+	for i := range podList.Items {
+		pods = append(pods, &podList.Items[i])
+	}
+	return pods, nil
 }
 
 func (c *PhasedDeploymentController) getCanary(ctx context.Context, name string, byName map[string]*appsv1.Deployment) (*appsv1.Deployment, error) {

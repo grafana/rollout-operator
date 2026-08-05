@@ -98,7 +98,7 @@ func TestRolloutController_HealthCheckGating(t *testing.T) {
 		c := newControllerWithHealthGate(t, objects, gate)
 		require.NoError(t, c.reconcile(context.Background()))
 		require.Equal(t, 1, gate.callCount())
-		require.Equal(t, "ingester-zone-b", gate.lastReq.NextSTS.Name)
+		require.Equal(t, "ingester-zone-b", gate.lastReq.TargetName)
 
 		for _, name := range []string{"ingester-zone-b-0", "ingester-zone-b-1", "ingester-zone-b-2"} {
 			_, err := c.kubeClient.CoreV1().Pods(testNamespace).Get(context.Background(), name, metav1.GetOptions{})
