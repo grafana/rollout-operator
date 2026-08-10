@@ -28,8 +28,33 @@ func newPodObserverTestCase(t *testing.T) (*k8sfake.Clientset, *podObserver) {
 	require.NoError(t, err)
 	require.True(t, updated)
 
-	observer := newPodObserver(client, testNamespace, 5*time.Second, cfgObserver, log.NewNopLogger())
+	observer := newPodObserver(client, testNamespace, newTestPodsFactory(client), 5*time.Second, cfgObserver, log.NewNopLogger())
 	return client, observer
+}
+
+// TestObserver_SharesThePodInformerFromTheFactory asserts that the observer attaches to the pod informer
+// owned by the factory it is given rather than building its own. The rollout controller is handed the same
+// factory, so this is what keeps the namespace's pods watched once and cached once.
+func TestObserver_SharesThePodInformerFromTheFactory(t *testing.T) {
+	client := k8sfake.NewClientset()
+	podsFactory := newTestPodsFactory(client)
+
+	cfgObserver := newConfigObserver(newFakeDynamicClient(), testNamespace, log.NewNopLogger(), NewMetrics(prometheus.NewRegistry()))
+	observer := newPodObserver(client, testNamespace, podsFactory, 5*time.Second, cfgObserver, log.NewNopLogger())
+	require.NoError(t, observer.start())
+	defer observer.stop()
+
+	require.Same(t, podsFactory.Core().V1().Pods().Informer(), observer.podsInformer)
+
+	// A second consumer taking pods off the same factory joins the running informer instead of starting a
+	// watch of its own.
+	watches := 0
+	for _, action := range client.Actions() {
+		if action.Matches("watch", "pods") {
+			watches++
+		}
+	}
+	require.Equal(t, 1, watches)
 }
 
 func createTestPod(name, namespace string) *corev1.Pod {

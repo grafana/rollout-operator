@@ -275,6 +275,9 @@ func main() {
 	// watches for validating webhooks being added - this is only started if the TLS server is started
 	webhookObserver := tlscert.NewWebhookObserver(coreKubeClient, cfg.kubeNamespace, logger)
 
+	// The single pod informer for the namespace, shared by the eviction controller and the core controller.
+	podsFactory := controller.NewPodInformerFactory(coreKubeClient, cfg.kubeNamespace)
+
 	// Controller for pod eviction.
 	// If the TLS server is started below (webhooks registered), then this controller will handle the validating webhook requests
 	// for pod evictions and zpdb configuration changes. If the webhooks are not enabled, this controller is still started
@@ -287,7 +290,7 @@ func main() {
 	if err != nil {
 		fatal(fmt.Errorf("failed to create pod eviction Kubernetes client: %w", err))
 	}
-	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
+	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, podsFactory, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
 	check(evictionController.Start())
 
 	maybeStartTLSServer(cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
@@ -304,7 +307,7 @@ func main() {
 	}
 
 	// Init the controller
-	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
+	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
 	if err := c.Init(); err != nil {
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
