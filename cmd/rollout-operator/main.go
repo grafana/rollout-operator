@@ -81,6 +81,7 @@ type config struct {
 	zoneTrackerConfigMapName string
 
 	zpdbPodReadyAnnotationPatchTimeout time.Duration
+	zpdbEvictionPodsFromInformerCache  bool
 }
 
 func (cfg *config) register(fs *flag.FlagSet) {
@@ -117,6 +118,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.zoneTrackerConfigMapName, "zone-tracker.config-map-name", "rollout-operator-zone-tracker", "The name of the ConfigMap to use for the zone tracker")
 
 	fs.DurationVar(&cfg.zpdbPodReadyAnnotationPatchTimeout, "zpdb.pod-ready-annotation-patch-timeout", 5*time.Second, "Timeout for the Kubernetes API calls that maintain the grafana.com/ready-time annotation on observed pods (used to enforce ZPDB crossZoneEvictionDelay).")
+	fs.BoolVar(&cfg.zpdbEvictionPodsFromInformerCache, "zpdb.eviction-pods-from-informer-cache", true, "Tally pod readiness in the pod eviction webhook from the pod informer cache instead of listing pods from the Kubernetes API on every request.")
 }
 
 func (cfg config) validate() error {
@@ -267,13 +269,14 @@ func main() {
 	// and will be used by the main controller to assist in validating pod deletion requests.
 	//
 	// The eviction controller gets a dedicated Kubernetes client so that a flood of pod eviction requests
-	// (its hot path: pod and StatefulSet get/list) is rate limited independently and cannot starve the core
-	// controller or the other webhooks. The dynamic client (used only to watch ZPDB config, a cold path) stays shared.
+	// (its hot path: StatefulSet get/list and the get of the pod being evicted) is rate limited independently
+	// and cannot starve the core controller or the other webhooks. The dynamic client (used only to watch
+	// ZPDB config, a cold path) stays shared.
 	evictionKubeClient, err := newDedicatedKubeClient(kubeConfig)
 	if err != nil {
 		fatal(fmt.Errorf("failed to create pod eviction Kubernetes client: %w", err))
 	}
-	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
+	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, cfg.zpdbPodReadyAnnotationPatchTimeout, cfg.zpdbEvictionPodsFromInformerCache, logger, zpdbMetrics)
 	check(evictionController.Start())
 
 	maybeStartTLSServer(cfg, kubeConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)

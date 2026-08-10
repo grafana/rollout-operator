@@ -48,6 +48,7 @@ type testContext struct {
 	logs       *dummyLogger
 	request    admissionv1.AdmissionReview
 	controller *EvictionController
+	kubeClient *fake.Clientset
 }
 
 // A dummyLogger accumulates log lines into a slice so we can assert that certain logs were recorded
@@ -95,6 +96,12 @@ func (d *dummyLogger) assertHasLog(t *testing.T, elements []string) {
 }
 
 func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawConfig *unstructured.Unstructured, objects ...runtime.Object) *testContext {
+	return newTestContextWithPodSource(t, request, pdbRawConfig, true, objects...)
+}
+
+// newTestContextWithPodSource builds a test context with the eviction webhook's pod listing served either
+// from the informer cache or from the Kubernetes API, matching -zpdb.eviction-pods-from-informer-cache.
+func newTestContextWithPodSource(t *testing.T, request admissionv1.AdmissionReview, pdbRawConfig *unstructured.Unstructured, podsFromInformerCache bool, objects ...runtime.Object) *testContext {
 	testCtx := &testContext{
 		ctx:     context.Background(),
 		logs:    newDummyLogger(),
@@ -103,7 +110,8 @@ func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawCon
 
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
-	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, 5*time.Second, testCtx.logs, zpdbMetrics)
+	testCtx.kubeClient = fake.NewClientset(objects...)
+	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, 5*time.Second, podsFromInformerCache, testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {
@@ -120,7 +128,8 @@ func newTestContextWithoutAdmissionReview(t *testing.T, pdbRawConfig *unstructur
 
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
-	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, 5*time.Second, testCtx.logs, zpdbMetrics)
+	testCtx.kubeClient = fake.NewClientset(objects...)
+	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, 5*time.Second, true, testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {
@@ -554,6 +563,69 @@ func TestPodEviction_MultiZoneClassicOverrideHasNoEffectWhenNotZero(t *testing.T
 	require.Equal(t, int32(429), response.Result.Code)
 
 	testCtx.controller.Stop()
+}
+
+// TestPodEviction_PodsAreReadFromTheInformerCache asserts that handling an eviction request does not list
+// pods from the Kubernetes API. Listing every pod of a zone once per zone per eviction is what made a burst
+// of concurrent evictions exhaust the client-side rate limiter for the core API group, so this is the
+// property worth pinning: the tallies must come from the informer cache.
+func TestPodEviction_PodsAreReadFromTheInformerCache(t *testing.T) {
+	objs := make([]runtime.Object, 0, 8)
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
+
+	for _, p := range []string{testPodZoneA0, testPodZoneA1, testPodZoneA2} {
+		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
+	}
+	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
+		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
+	}
+
+	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
+	defer testCtx.controller.Stop()
+
+	// Discard the informer's own initial list/watch so only the eviction request's calls are recorded.
+	testCtx.kubeClient.ClearActions()
+
+	response := testCtx.controller.HandlePodEvictionRequest(testCtx.ctx, testCtx.request, NewMaxUnavailableZeroOverrideNone())
+	require.True(t, response.Allowed)
+
+	for _, action := range testCtx.kubeClient.Actions() {
+		require.False(t, action.Matches("list", "pods"), "the eviction path must not list pods from the Kubernetes API")
+	}
+}
+
+// TestPodEviction_PodsAreListedFromTheAPIWhenTheCacheIsDisabled is the counterpart to the test above: with
+// -zpdb.eviction-pods-from-informer-cache=false the webhook goes back to listing pods per zone from the
+// Kubernetes API, and reaches the same decision.
+func TestPodEviction_PodsAreListedFromTheAPIWhenTheCacheIsDisabled(t *testing.T) {
+	objs := make([]runtime.Object, 0, 8)
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
+
+	for _, p := range []string{testPodZoneA0, testPodZoneA1, testPodZoneA2} {
+		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
+	}
+	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
+		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
+	}
+
+	testCtx := newTestContextWithPodSource(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), false, objs...)
+	defer testCtx.controller.Stop()
+
+	// Discard the informer's own initial list/watch so only the eviction request's calls are recorded.
+	testCtx.kubeClient.ClearActions()
+
+	response := testCtx.controller.HandlePodEvictionRequest(testCtx.ctx, testCtx.request, NewMaxUnavailableZeroOverrideNone())
+	require.True(t, response.Allowed)
+
+	listed := 0
+	for _, action := range testCtx.kubeClient.Actions() {
+		if action.Matches("list", "pods") {
+			listed++
+		}
+	}
+	require.Equal(t, 2, listed, "one pod listing per zone in the rollout group")
 }
 
 func TestPodEviction_PartitionZones(t *testing.T) {

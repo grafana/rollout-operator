@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
+	corelisters "k8s.io/client-go/listers/core/v1"
 
 	"github.com/grafana/rollout-operator/pkg/util"
 )
@@ -20,6 +21,10 @@ type k8sClient struct {
 	ctx context.Context
 	// The client we use to query for StatefulSets and Pods
 	kubeClient kubernetes.Interface
+	// Reads pods from the pod informer cache. Must be set when podsFromInformerCache is true.
+	podLister corelisters.PodLister
+	// Whether pod listings are served from podLister or from a live listing against the Kubernetes API.
+	podsFromInformerCache bool
 }
 
 // podByName searches and returns a Pod for the given namespace and name
@@ -51,6 +56,34 @@ func (a *k8sClient) owner(pod *corev1.Pod) (*appsv1.StatefulSet, error) {
 	}
 }
 
+// pods returns the pods matching the given selector. The returned pods must be treated as read-only.
+//
+// This is by far the hottest call in the eviction path: it runs once per zone per eviction request and each
+// listing returns every pod of a zone, so on a large cell a burst of concurrent evictions is enough on its
+// own to exhaust the client-side rate limiter for the core API group. Serving it from the pod informer cache
+// removes those calls entirely.
+//
+// See -zpdb.eviction-pods-from-informer-cache=true|false to control whether we serve from the informer cache or
+// issue live queries.
+func (a *k8sClient) pods(namespace string, selector labels.Selector) ([]*corev1.Pod, error) {
+	if a.podsFromInformerCache {
+		return a.podLister.Pods(namespace).List(selector)
+	}
+
+	list, err := a.kubeClient.CoreV1().Pods(namespace).List(a.ctx, metav1.ListOptions{
+		LabelSelector: selector.String(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	pods := make([]*corev1.Pod, 0, len(list.Items))
+	for i := range list.Items {
+		pods = append(pods, &list.Items[i])
+	}
+	return pods, nil
+}
+
 // findRelatedStatefulSets returns all StatefulSets which match the given Selector.
 func (a *k8sClient) findRelatedStatefulSets(namespace string, selector *labels.Selector) (*appsv1.StatefulSetList, error) {
 	return a.kubeClient.AppsV1().StatefulSets(namespace).List(a.ctx, metav1.ListOptions{LabelSelector: (*selector).String()})
@@ -60,15 +93,14 @@ func (a *k8sClient) findRelatedStatefulSets(namespace string, selector *labels.S
 // It is possible for pods to be in a state where they are not yet returned by the pod listing. These pods should be considered and are reported as unknown.
 // The number of unknown pods is determined as the difference between the StatefulSets Replica count minus the number of pods listed.
 // The given Pod is excluded from testing, but is included in the total of tested pods
+//
+// See pods() for where the pod listing comes from.
 func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, zpdb validator) (*zoneStatusResult, error) {
 	podsSelector := labels.NewSelector().Add(
 		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
 
-	list, err := a.kubeClient.CoreV1().Pods(sts.Namespace).List(a.ctx, metav1.ListOptions{
-		LabelSelector: podsSelector.String(),
-	})
-
+	pods, err := a.pods(sts.Namespace, podsSelector)
 	if err != nil {
 		return nil, err
 	}
@@ -90,14 +122,14 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 
 	matcher := zpdb.considerPod()
 
-	for _, pd := range list.Items {
+	for _, pd := range pods {
 
 		// we do not consider pods which are in a different partition
-		if !matcher(&pd) {
+		if !matcher(pd) {
 			continue
 		}
 
-		if pod.UID != pd.UID && !zpdb.isReady(&pd) {
+		if pod.UID != pd.UID && !zpdb.isReady(pd) {
 			// if a pod has recently been evicted then we assume it is not ready
 			// this is avoiding a possible race condition of concurrent eviction requests are occurring and an eviction has not yet caused a pod state change
 			result.notReady++
@@ -108,8 +140,8 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 
 	// we consider the pod as not ready if there should be a given replica count but it is not yet being found in the pods query
 	// note that the effect here is that we do not know which partition these other pods will be in, so we have to attribute them to this partition to be safe
-	if len(list.Items) < replicas {
-		result.unknown = replicas - len(list.Items)
+	if len(pods) < replicas {
+		result.unknown = replicas - len(pods)
 	}
 
 	return result, nil

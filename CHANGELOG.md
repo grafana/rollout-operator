@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] The ZPDB pod eviction webhook now tallies pod readiness from the pod informer cache instead of listing pods from the Kubernetes API. This avoids client-side rate limiting during a burst of concurrent evictions. Set `-zpdb.eviction-pods-from-informer-cache=false` to restore the previous live listing. #TODO
+* [ENHANCEMENT] Added `rollout_operator_zpdb_pod_informer_last_event_timestamp_seconds`, the timestamp of the last pod add, update or delete delivered by the pod informer's watch, excluding periodic resyncs. #TODO
 * [CHANGE] Prefer `grafana.com/min-time-between-zones-downscale` as a StatefulSet annotation instead of a label. The label remains supported as a fallback and logs a deprecation warning when used. #463
 * [BUGFIX] Allow a StatefulSet rollout to recover when pods from a previous failed update are stuck in an unrecoverable state (e.g. `CrashLoopBackOff` or `ImagePullBackOff`): outdated stuck pods are deleted even when the `rollout-max-unavailable` budget is exhausted, since deleting an already-unavailable pod doesn't reduce availability. A subsequent Spec update can then replace them without a manual delete. #466
 * [ENHANCEMENT] Updated dependencies, including: #470
