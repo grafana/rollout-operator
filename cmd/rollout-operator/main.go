@@ -118,7 +118,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.zoneTrackerConfigMapName, "zone-tracker.config-map-name", "rollout-operator-zone-tracker", "The name of the ConfigMap to use for the zone tracker")
 
 	fs.DurationVar(&cfg.zpdbPodReadyAnnotationPatchTimeout, "zpdb.pod-ready-annotation-patch-timeout", 5*time.Second, "Timeout for the Kubernetes API calls that maintain the grafana.com/ready-time annotation on observed pods (used to enforce ZPDB crossZoneEvictionDelay).")
-	fs.BoolVar(&cfg.zpdbEvictionPodsFromInformerCache, "zpdb.eviction-pods-from-informer-cache", true, "Tally pod readiness in the pod eviction webhook from the pod informer cache instead of listing pods from the Kubernetes API on every request.")
+	fs.BoolVar(&cfg.zpdbEvictionPodsFromInformerCache, "zpdb.eviction-pods-from-informer-cache", false, "Tally pod readiness in the pod eviction webhook from the pod informer cache instead of listing pods from the Kubernetes API on every request.")
 }
 
 func (cfg config) validate() error {

@@ -41,6 +41,20 @@ local utils = import 'mixin-utils/utils.libsonnet';
             message: 'A sustained number of inflight ZPDB eviction requests has been observed.',
           },
         },
+        {
+          // There is no healthy non-zero level for this counter: a request which fails to acquire a token is
+          // never sent. Any sustained rate means the client-side rate limiter has become the bottleneck, so
+          // this alerts on > 0 held for long enough to rule out a momentary burst.
+          alert: $.alertName('KubernetesAPIClientRateLimited'),
+          expr: 'sum by (namespace, api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total[5m])) > 0',
+          'for': '15m',
+          labels: {
+            severity: 'warning',
+          },
+          annotations: {
+            message: 'The rollout-operator is dropping Kubernetes API requests against the {{ $labels.api_group }} API group because its client-side rate limiter is exhausted.',
+          },
+        },
       ],
     },
   ],

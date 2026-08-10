@@ -95,8 +95,11 @@ func (d *dummyLogger) assertHasLog(t *testing.T, elements []string) {
 	require.Fail(t, "Expected log not found", strings.Join(elements, ", "))
 }
 
+// newTestContext builds a test context with the eviction webhook's pod listing served from the Kubernetes
+// API, matching the default of -zpdb.eviction-pods-from-informer-cache. Use newTestContextWithPodSource to
+// exercise the informer cache instead.
 func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawConfig *unstructured.Unstructured, objects ...runtime.Object) *testContext {
-	return newTestContextWithPodSource(t, request, pdbRawConfig, true, objects...)
+	return newTestContextWithPodSource(t, request, pdbRawConfig, false, objects...)
 }
 
 // newTestContextWithPodSource builds a test context with the eviction webhook's pod listing served either
@@ -129,7 +132,7 @@ func newTestContextWithoutAdmissionReview(t *testing.T, pdbRawConfig *unstructur
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
 	testCtx.kubeClient = fake.NewClientset(objects...)
-	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, 5*time.Second, true, testCtx.logs, zpdbMetrics)
+	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, 5*time.Second, false, testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {
@@ -565,11 +568,12 @@ func TestPodEviction_MultiZoneClassicOverrideHasNoEffectWhenNotZero(t *testing.T
 	testCtx.controller.Stop()
 }
 
-// TestPodEviction_PodsAreReadFromTheInformerCache asserts that handling an eviction request does not list
-// pods from the Kubernetes API. Listing every pod of a zone once per zone per eviction is what made a burst
-// of concurrent evictions exhaust the client-side rate limiter for the core API group, so this is the
-// property worth pinning: the tallies must come from the informer cache.
-func TestPodEviction_PodsAreReadFromTheInformerCache(t *testing.T) {
+// TestPodEviction_PodsAreReadFromTheInformerCacheWhenEnabled asserts that with
+// -zpdb.eviction-pods-from-informer-cache=true, handling an eviction request does not list pods from the
+// Kubernetes API at all. Listing every pod of a zone once per zone per eviction is what made a burst of
+// concurrent evictions exhaust the client-side rate limiter for the core API group, so this is the property
+// worth pinning: the tallies must come from the informer cache.
+func TestPodEviction_PodsAreReadFromTheInformerCacheWhenEnabled(t *testing.T) {
 	objs := make([]runtime.Object, 0, 8)
 	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
 	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
@@ -581,7 +585,7 @@ func TestPodEviction_PodsAreReadFromTheInformerCache(t *testing.T) {
 		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
 	}
 
-	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
+	testCtx := newTestContextWithPodSource(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), true, objs...)
 	defer testCtx.controller.Stop()
 
 	// Discard the informer's own initial list/watch so only the eviction request's calls are recorded.
@@ -595,10 +599,10 @@ func TestPodEviction_PodsAreReadFromTheInformerCache(t *testing.T) {
 	}
 }
 
-// TestPodEviction_PodsAreListedFromTheAPIWhenTheCacheIsDisabled is the counterpart to the test above: with
-// -zpdb.eviction-pods-from-informer-cache=false the webhook goes back to listing pods per zone from the
-// Kubernetes API, and reaches the same decision.
-func TestPodEviction_PodsAreListedFromTheAPIWhenTheCacheIsDisabled(t *testing.T) {
+// TestPodEviction_PodsAreListedFromTheAPIByDefault is the counterpart to the test above: with
+// -zpdb.eviction-pods-from-informer-cache left at its default of false, the webhook lists pods per zone from
+// the Kubernetes API and reaches the same decision.
+func TestPodEviction_PodsAreListedFromTheAPIByDefault(t *testing.T) {
 	objs := make([]runtime.Object, 0, 8)
 	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
 	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))

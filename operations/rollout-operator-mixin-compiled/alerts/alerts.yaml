@@ -26,3 +26,11 @@ groups:
           for: 5m
           labels:
             severity: warning
+        - alert: rollout-operatorKubernetesAPIClientRateLimited
+          annotations:
+            message: The rollout-operator is dropping Kubernetes API requests against the {{ $labels.api_group }} API group because its client-side rate limiter is exhausted.
+            runbook_url: https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#rollout-operatorkubernetesapiclientratelimited
+          expr: sum by (namespace, api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total[5m])) > 0
+          for: 15m
+          labels:
+            severity: warning

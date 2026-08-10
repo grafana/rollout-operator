@@ -72,6 +72,28 @@ How to **investigate**:
   - But if pods have been evicted with a failure policy of `Ignore` then there is a small possibility for a race condition which can result in a ZPDB breach
 - Ensure that the `pod-eviction` and `zpdb-validation` `ValidatingWebhookConfiguration` have a failure policy set to `Fail` before restarting the rollout-operator
 
+### rollout-operatorKubernetesAPIClientRateLimited
+
+This alert fires when the rollout-operator has been unable to send Kubernetes API requests because its own client-side rate limiter is exhausted.
+
+There is no healthy non-zero level for this: a request which fails to acquire a token is never sent at all, and the caller sees it as a failure. A sustained rate means the rate limiter, rather than the Kubernetes API, is the bottleneck.
+
+How it **works**:
+
+- The rollout-operator rate limits its calls to the Kubernetes API with a separate token bucket per API group, defaulting to `5` QPS and a burst of `10` per group
+- `rollout_operator_kubernetes_api_client_rate_limited_requests_total` counts requests which waited for a token until they exceeded their context deadline, labelled by `api_group`
+- The alert fires on any sustained rate, held for 15 minutes so that a momentary burst does not page
+- The effect is self-sustaining: eviction requests which time out are retried, which deepens the queue, so it does not usually recover on its own until the eviction rate drops
+
+How to **investigate**:
+
+- Identify the saturated API group from the `api_group` label. `core` and `apps` are the ones the eviction path uses
+- Review the rollout-operator error logs. Note that once the queue is deep enough, requests stop reaching the limiter's rejection path and time out without the `client-side rate limiter` marker, so searching for that string alone under-reports the problem. See [Recognising exhaustion](#recognising-exhaustion) for the log forms to expect
+- Check `rollout_operator_zpdb_inflight_eviction_requests`. It settles near `QPS × webhook deadline`, so a value stuck around 45 with the default limits indicates a fully saturated bucket
+- Establish what is driving the eviction volume: a rolling update with a high `rollout-max-unavailable`, a node drain, or a cluster autoscaler consolidating
+- To mitigate, either reduce the eviction concurrency at its source, or raise the limits. See [Kubernetes API client rate limiting](#kubernetes-api-client-rate-limiting)
+- If the eviction path is the source and pod listings are still being served from the Kubernetes API, moving them to the informer cache removes most of the load. See [Pod eviction readiness source](#pod-eviction-readiness-source)
+
 ## Metrics
 
 A Prometheus metrics endpoint is available at `/metrics` of the rollout-operator deployment.
@@ -118,6 +140,24 @@ Use this metric to monitor for abnormal high volumes of in-flight requests. Sinc
 
 Check that the rollout-operator error logs to gain insight into why the eviction is being delayed.
 
+### rollout_operator_zpdb_pod_informer_last_event_timestamp_seconds
+
+This is a gauge metric which records when the pod informer's watch last delivered a pod add, update or delete.
+
+Query the age of that observation rather than the metric itself:
+
+```promql
+max by (cluster, namespace) (time() - rollout_operator_zpdb_pod_informer_last_event_timestamp_seconds)
+```
+
+This matters when the pod eviction webhook is configured to tally pod readiness from the informer cache (see [Pod eviction readiness source](#pod-eviction-readiness-source), off by default). In that mode a watch which has silently stopped delivering updates means eviction decisions are being made on stale pod state with nothing else to reveal it. This metric is that signal.
+
+Periodic informer resyncs are deliberately excluded. They are replayed from the cache and keep arriving even when the watch is dead, so counting them would make a dead watch look healthy.
+
+What this therefore measures is the time since the informer last observed a pod *change*. In a namespace of any size that is a close proxy for the watch being alive, but a namespace which is genuinely idle for long enough will look stale without being stale. Treat a rising value as a prompt to investigate rather than a fault in itself: check the rollout-operator logs for watch errors, and confirm whether pods in the namespace really have been static.
+
+If the watch is confirmed unhealthy while `zpdb_eviction_pods_from_informer_cache` is enabled, set it back to `false` so eviction decisions are made from a live listing against the Kubernetes API while the watch problem is diagnosed.
+
 ### kube_customresource_zpdb_spec_max_unavailable
 
 This is a gauge metric which tracks the configured max unavailable setting for each rollout-group. For instance `kube_customresource_zpdb_spec_max_unavailable{name="ingester-rollout"}`.
@@ -143,6 +183,99 @@ _config+:: {
 ```
 
 Note that if you are using the rollout-operator [Helm chart](https://github.com/grafana/helm-charts/tree/main/charts/rollout-operator) there are equivalent [values](https://github.com/grafana/helm-charts/blob/main/charts/rollout-operator/values.yaml) for changing the webhook failure policies.
+
+### Kubernetes API client rate limiting
+
+The rollout-operator rate limits its own calls to the Kubernetes API, with a separate token bucket per API
+group (`core`, `apps`, and so on). The defaults are `5` QPS and a burst of `10` per group.
+
+Each admission webhook and the core controller get their own client, so an overloaded webhook exhausts only
+its own buckets. Within one webhook, however, the bucket is shared by every request it is serving.
+
+The default values can be overridden such as;
+
+```jsonnet
+rollout_operator_args+:: {
+    'kubernetes.client-qps': 20,
+    'kubernetes.client-burst': 40,
+}
+```
+
+Increasing these values will place additional load onto the Kubernetes API server.
+
+#### Recognising exhaustion
+
+When a bucket is exhausted, requests queue for a token until they would exceed their context deadline, at
+which point they are rejected without being sent. The rejection surfaces wrapped in whatever the caller was
+trying to do, so the same root cause appears under several different `reason` values.
+
+Pod `Get` for the pod being evicted, on the `core` group:
+
+```
+level=error method=admission.PodEviction() object.name=store-gateway-zone-b-243 object.namespace=<namespace>
+  msg="pod eviction denied" reason="unable to find pod by name"
+  err="Get \"https://<apiserver>/api/v1/namespaces/<namespace>/pods/store-gateway-zone-b-243?timeout=5m0s\":
+  client-side rate limiter for Kubernetes API group \"core\": rate: Wait(n=1) would exceed context deadline"
+```
+
+StatefulSet `List` to find the other zones in the rollout group, on the `apps` group:
+
+```
+level=error method=admission.PodEviction() object.name=store-gateway-zone-b-1 object.namespace=<namespace>
+  owner=store-gateway-zone-b msg="pod eviction denied"
+  reason="unable to find related stateful sets - a minimum of 2 StatefulSets is required"
+  err="Get \"https://<apiserver>/apis/apps/v1/namespaces/<namespace>/statefulsets?labelSelector=poddisruptionbudget-group%3Dnon-spot-store-gateway\":
+  client-side rate limiter for Kubernetes API group \"apps\": rate: Wait(n=1) would exceed context deadline"
+```
+
+Once the pile-up is deep enough, requests stop reaching the limiter's rejection path and simply run out of
+time, losing the `client-side rate limiter` marker altogether:
+
+```
+level=error method=admission.PodEviction() object.name=ingester-zone-b-503 object.namespace=<namespace>
+  msg="pod eviction denied" reason="unable to find pod owner"
+  err="unable to find StatefulSet ingester-zone-b by name:
+  Get \"https://<apiserver>/apis/apps/v1/namespaces/<namespace>/statefulsets/ingester-zone-b?timeout=5m0s\": context deadline exceeded"
+```
+
+The last form is the one to watch for, because searching only for `client-side rate limiter` will
+under-report how bad things are.
+
+Confirm with the metrics rather than the logs alone:
+
+- `rollout_operator_kubernetes_api_client_rate_limited_requests_total` counts requests which failed to
+  acquire a token, by `api_group`. Any sustained rate here means the limiter is the bottleneck.
+- `rollout_operator_kubernetes_api_client_request_duration_seconds` counts only the requests which did get a
+  token. If its rate is pinned flat at the configured QPS, the bucket is saturated.
+- `rollout_operator_zpdb_inflight_eviction_requests` will sit at a sustained non-zero level as evictions
+  queue. It settles near `QPS × webhook deadline`, so a value stuck around 45 with the defaults is a
+  fully saturated `core` bucket.
+
+The effect is self-sustaining: evictions that time out are retried, which deepens the queue. It does not
+recover on its own until the eviction rate drops.
+
+### Pod eviction readiness source
+
+The pod eviction webhook decides whether an eviction would breach the `ZPDB` by tallying how many pods in each
+zone of the rollout group are ready and running. By default those tallies are read from the Kubernetes API, one
+listing of every pod in the zone, per zone, per eviction request.
+
+On a large namespace those listings are the dominant consumer of the client-side rate limiter, and the usual
+cause of [rollout-operatorKubernetesAPIClientRateLimited](#rollout-operatorkubernetesapiclientratelimited).
+Setting this flag to `true` serves the tallies from the rollout-operator's pod informer cache instead, which
+removes them entirely.
+
+The trade-off is that the cache is eventually consistent. Evictions the rollout-operator facilitated itself are
+already covered by its own pod eviction cache; the residual risk is a pod becoming not-ready for a reason
+outside the rollout-operator's control, such as a node crash, which the informer has not observed yet. When
+enabled, monitor `rollout_operator_zpdb_pod_informer_last_event_timestamp_seconds` and revert to `false` if the
+informer's watch looks unhealthy.
+
+```jsonnet
+_config+:: {
+    zpdb_eviction_pods_from_informer_cache: true|false,
+}
+```
 
 ### Disable voluntary pod evictions
 
