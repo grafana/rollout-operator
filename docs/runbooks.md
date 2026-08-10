@@ -154,7 +154,7 @@ This matters when the pod eviction webhook is configured to tally pod readiness 
 
 Periodic informer resyncs are deliberately excluded. They are replayed from the cache and keep arriving even when the watch is dead, so counting them would make a dead watch look healthy.
 
-What this therefore measures is the time since the informer last observed a pod *change*. In a namespace of any size that is a close proxy for the watch being alive, but a namespace which is genuinely idle for long enough will look stale without being stale. Treat a rising value as a prompt to investigate rather than a fault in itself: check the rollout-operator logs for watch errors, and confirm whether pods in the namespace really have been static.
+What this therefore measures is the time since the informer last observed a pod _change_. In a namespace of any size that is a close proxy for the watch being alive, but a namespace which is genuinely idle for long enough will look stale without being stale. Treat a rising value as a prompt to investigate rather than a fault in itself: check the rollout-operator logs for watch errors, and confirm whether pods in the namespace really have been static.
 
 If the watch is confirmed unhealthy while `zpdb_eviction_pods_from_informer_cache` is enabled, set it back to `false` so eviction decisions are made from a live listing against the Kubernetes API while the watch problem is diagnosed.
 
