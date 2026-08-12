@@ -24,6 +24,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	rolloutconfig "github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 const (
@@ -630,6 +631,99 @@ func TestPodEviction_PodsAreListedFromTheAPIByDefault(t *testing.T) {
 		}
 	}
 	require.Equal(t, 2, listed, "one pod listing per zone in the rollout group")
+}
+
+// newStaleCacheObjects returns two 3-replica zones with all pods ready, for the tests below which then make
+// one of them not ready.
+func newStaleCacheObjects() []runtime.Object {
+	objs := make([]runtime.Object, 0, 8)
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
+	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
+
+	for _, p := range []string{testPodZoneA0, testPodZoneA1, testPodZoneA2} {
+		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
+	}
+	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
+		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
+	}
+
+	return objs
+}
+
+// TestPodEviction_StaleInformerCacheFailsOpen records what the two pod sources do when they disagree, which
+// is the one thing -zpdb.eviction-pods-from-informer-cache can change and the only case the tests above
+// cannot cover: they seed the informer from the same fake clientset the eviction path reads, so the two
+// sources agree by construction and the verdict carries no information about the flag.
+//
+// The pod being evicted is always fetched live (podByName), so only the *other* pods of the zone are read
+// from the flag's chosen source. Here one of them becomes not ready without the informer observing it.
+//
+// The asymmetry this pins down:
+//
+//   - from the Kubernetes API, the not-ready pod is counted and the zpdb denies the eviction
+//   - from a stale informer cache, it is counted as ready and the eviction is ALLOWED
+//
+// The second case is a fail-open: the zone ends up with two pods unavailable against maxUnavailable=1. It is
+// not a designed behaviour, it falls out of `unknown` (pod_eviction_k8s_clients.go) only catching a pod
+// missing from the listing, never a pod whose Status is stale in place. A frozen cache is complete, just
+// old, so len(pods) == replicas and nothing flags it.
+//
+// This test asserts the current behaviour so that a change to it is visible. If a cache freshness guard is
+// added, the cache expectation below becomes `false` and the reason it changed is recorded here.
+func TestPodEviction_StaleInformerCacheFailsOpen(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		podsFromInformerCache bool
+		expectAllowed         bool
+		expectMessage         string
+	}{
+		{
+			name:                  "the Kubernetes API sees the not ready pod and denies",
+			podsFromInformerCache: false,
+			expectAllowed:         false,
+			expectMessage:         "1 pod not ready in " + statefulSetZoneA,
+		},
+		{
+			name:                  "a stale informer cache does not and allows",
+			podsFromInformerCache: true,
+			expectAllowed:         true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := newStaleCacheObjects()
+
+			testCtx := newTestContextWithPodSource(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), tc.podsFromInformerCache, objs...)
+
+			// Stop the pod informer's watch, leaving its cache populated with the pods as they were listed at
+			// startup. This is the state a watch which has silently stopped delivering leaves behind, and it
+			// is what lets the two sources diverge at all: a healthy watch would deliver the update below and
+			// bring them straight back together.
+			testCtx.controller.podObserver.stop()
+			defer testCtx.controller.cfgObserver.stop()
+
+			// ingester-zone-a-1 becomes not ready. It is not the pod being evicted, so it counts towards the
+			// zone's tally.
+			notReady := objs[3].(*corev1.Pod).DeepCopy()
+			require.Equal(t, testPodZoneA1, notReady.Name)
+			notReady.Status.Phase = corev1.PodFailed
+			_, err := testCtx.kubeClient.CoreV1().Pods(testNamespace).Update(testCtx.ctx, notReady, metav1.UpdateOptions{})
+			require.NoError(t, err)
+
+			// Re-assert the pre-failure copy in the cache. Stopping the watch above races with the update
+			// having already been in flight, so pin it rather than depend on the ordering.
+			stale := objs[3].(*corev1.Pod).DeepCopy()
+			require.True(t, util.IsPodRunningAndReady(stale), "the cached copy must still look ready")
+			require.NoError(t, testCtx.controller.podObserver.podsInformer.GetIndexer().Update(stale))
+
+			response := testCtx.controller.HandlePodEvictionRequest(testCtx.ctx, testCtx.request, NewMaxUnavailableZeroOverrideNone())
+
+			require.Equal(t, tc.expectAllowed, response.Allowed)
+			if !tc.expectAllowed {
+				require.Equal(t, tc.expectMessage, response.Result.Message)
+				require.Equal(t, int32(429), response.Result.Code)
+			}
+		})
+	}
 }
 
 func TestPodEviction_PartitionZones(t *testing.T) {
