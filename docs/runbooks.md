@@ -99,7 +99,7 @@ This alert fires when a rollout-operator component is sustaining over 80% of its
 
 How it **works**:
 
-- The token bucket is per-process *and* per-component (see [Kubernetes API client rate limiting](#kubernetes-api-client-rate-limiting)), so the alert compares each pod's *and* component's own throughput against its own limit, never a sum across pods or across components. Summing across components in particular would let a genuinely idle component hide one running hot, since they all share the same nominal QPS but have entirely independent buckets
+- The token bucket is per-process _and_ per-component (see [Kubernetes API client rate limiting](#kubernetes-api-client-rate-limiting)), so the alert compares each pod's _and_ component's own throughput against its own limit, never a sum across pods or across components. Summing across components in particular would let a genuinely idle component hide one running hot, since they all share the same nominal QPS but have entirely independent buckets
 - `rollout_operator_kubernetes_api_client_rate_limit_qps` publishes the configured `-kubernetes.client-qps` value per component, but only while rate limiting is actually enabled for it (`qps` and `burst` both positive). Where it is disabled, the metric is absent and this alert cannot fire for that component - there is no ceiling to approach
 - The alert fires on throughput exceeding 80% of that limit, held for 10 minutes so a momentary burst does not page
 
