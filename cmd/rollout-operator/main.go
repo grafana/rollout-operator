@@ -205,14 +205,6 @@ func main() {
 		kubeConfig.UserAgent = rest.DefaultKubernetesUserAgent()
 	}
 
-	instrumentation.InstrumentKubernetesAPIClient(kubeConfig, reg)
-	// Enforce a client-side rate limit with an independent token bucket per Kubernetes API group.
-	// See LimitKubernetesAPIClientPerAPIGroup for why this is done at the transport level rather than
-	// via the rest.Config QPS/Burst fields. It is registered after InstrumentKubernetesAPIClient so the
-	// instrumentation transport (which measures API latency) sits inside it and does not count the time
-	// spent waiting for a rate limiter token.
-	instrumentation.LimitKubernetesAPIClientPerAPIGroup(kubeConfig, float32(cfg.kubeClientQPS), cfg.kubeClientBurst, reg)
-
 	// HTTP client side cluster validation, shared by the Kubernetes API client and the pod HTTP client.
 	reporter := func(msg string, method string) {
 		level.Warn(logger).Log("msg", msg, "method", method, "cluster_validation_label", cfg.kubeNamespace)
@@ -225,22 +217,44 @@ func main() {
 	// -pods.client-timeout (default 5s, matching the value previously hardcoded in the prepare-downscale webhook).
 	podHTTPClient := instrumentation.NewPodHTTPClient(nil, cfg.kubeNamespace, reporter, cfg.podClientTimeout, reg)
 
-	kubeConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-		return middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, rt)
-	})
+	// The instrumentation histogram and rate limiter metrics are shared across every dedicated Kubernetes
+	// client built below (core controller, pod-eviction, no-downscale, prepare-downscale), each labelled
+	// with its own component name. Each of those clients otherwise gets a fully independent config (via
+	// wireComponentConfig below): independent per-API-group rate limiter buckets, so a flood of requests
+	// from one cannot starve another, and independent instrumentation, so their throughput and rejections
+	// are distinguishable in the shared metrics rather than being indistinguishably summed together.
+	apiClientHist := instrumentation.NewKubernetesAPIClientRequestDurationHistogram(reg)
+	apiClientRateLimitMetrics := instrumentation.NewKubernetesAPIClientRateLimitMetrics(reg)
 
-	// share the transport between all clients
-	httpClient, err := rest.HTTPClientFor(kubeConfig)
+	// wireComponentConfig returns an independent copy of the base Kubernetes client config, instrumented,
+	// rate-limited and cluster-validated under the given component name. See LimitKubernetesAPIClientPerAPIGroup
+	// for why rate limiting is done at the transport level rather than via the rest.Config QPS/Burst fields.
+	// Rate limiting is applied after instrumentation so the instrumentation transport (which measures API
+	// latency) sits inside it and does not count the time spent waiting for a rate limiter token.
+	wireComponentConfig := func(component string) *rest.Config {
+		c := rest.CopyConfig(kubeConfig)
+		instrumentation.InstrumentKubernetesAPIClient(c, apiClientHist, component)
+		instrumentation.LimitKubernetesAPIClientPerAPIGroup(c, float32(cfg.kubeClientQPS), cfg.kubeClientBurst, apiClientRateLimitMetrics, component)
+		c.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+			return middleware.ClusterValidationRoundTripper(cfg.kubeNamespace, reporter, rt)
+		})
+		return c
+	}
+
+	coreConfig := wireComponentConfig("core-controller")
+
+	// share the transport between all clients which are part of the core controller
+	httpClient, err := rest.HTTPClientFor(coreConfig)
 	if err != nil {
 		fatal(fmt.Errorf("failed to create Kubernetes HTTP client: %w", err))
 	}
 
-	coreKubeClient, err := kubernetes.NewForConfigAndClient(kubeConfig, httpClient)
+	coreKubeClient, err := kubernetes.NewForConfigAndClient(coreConfig, httpClient)
 	if err != nil {
 		fatal(fmt.Errorf("failed to create Kubernetes client: %w", err))
 	}
 
-	restMapper, err := apiutil.NewDynamicRESTMapper(kubeConfig, httpClient)
+	restMapper, err := apiutil.NewDynamicRESTMapper(coreConfig, httpClient)
 	if err != nil {
 		fatal(fmt.Errorf("failed to create REST Mapper: %w", err))
 	}
@@ -248,12 +262,12 @@ func main() {
 	// we don't use cached discovery because DiscoveryScaleKindResolver does its own caching,
 	// so we want to re-fetch every time when we actually ask for it
 	scaleKindResolver := scale.NewDiscoveryScaleKindResolver(coreKubeClient.Discovery())
-	scaleClient, err := scale.NewForConfig(kubeConfig, restMapper, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
+	scaleClient, err := scale.NewForConfig(coreConfig, restMapper, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
 	if err != nil {
 		fatal(fmt.Errorf("failed to init scaleClient: %w", err))
 	}
 
-	dynamicClient, err := dynamic.NewForConfigAndClient(kubeConfig, httpClient)
+	dynamicClient, err := dynamic.NewForConfigAndClient(coreConfig, httpClient)
 	if err != nil {
 		fatal(fmt.Errorf("failed to init dynamicClient: %w", err))
 	}
@@ -269,14 +283,14 @@ func main() {
 	// The eviction controller gets a dedicated Kubernetes client so that a flood of pod eviction requests
 	// (its hot path: pod and StatefulSet get/list) is rate limited independently and cannot starve the core
 	// controller or the other webhooks. The dynamic client (used only to watch ZPDB config, a cold path) stays shared.
-	evictionKubeClient, err := newDedicatedKubeClient(kubeConfig)
+	evictionKubeClient, err := newDedicatedKubeClient(wireComponentConfig("pod-eviction"))
 	if err != nil {
 		fatal(fmt.Errorf("failed to create pod eviction Kubernetes client: %w", err))
 	}
 	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
 	check(evictionController.Start())
 
-	maybeStartTLSServer(cfg, kubeConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
+	maybeStartTLSServer(cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
 
 	// Monitors the validating and mutating webhook configurations and provides a metric
 	// which tracks the configured FailurePolicy
@@ -325,7 +339,7 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, kubeConfig *rest.Config, podHTTPClient *instrumentation.PodHTTPClient, logger log.Logger, coreKubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) {
+func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) *rest.Config, podHTTPClient *instrumentation.PodHTTPClient, logger log.Logger, coreKubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
 		return
@@ -394,11 +408,11 @@ func maybeStartTLSServer(cfg config, kubeConfig *rest.Config, podHTTPClient *ins
 	// webhook is rate limited independently (its own per-API-group buckets) and cannot throttle the other
 	// webhooks or the core controller. The pod-eviction webhook uses the eviction controller's dedicated
 	// client; the zpdb-validation webhook makes no API calls, so it is served with a nil client.
-	noDownscaleKubeClient, err := newDedicatedKubeClient(kubeConfig)
+	noDownscaleKubeClient, err := newDedicatedKubeClient(wireComponentConfig("no-downscale"))
 	if err != nil {
 		fatal(fmt.Errorf("failed to create no-downscale webhook Kubernetes client: %w", err))
 	}
-	prepareDownscaleKubeClient, err := newDedicatedKubeClient(kubeConfig)
+	prepareDownscaleKubeClient, err := newDedicatedKubeClient(wireComponentConfig("prepare-downscale"))
 	if err != nil {
 		fatal(fmt.Errorf("failed to create prepare-downscale webhook Kubernetes client: %w", err))
 	}
@@ -408,6 +422,7 @@ func maybeStartTLSServer(cfg config, kubeConfig *rest.Config, podHTTPClient *ins
 	// client-side rate limiter's wait so a burst of concurrent webhook requests can't stall it (see
 	// instrumentation.LimitKubernetesAPIClientPerAPIGroup). We use 90% of the configured request timeout.
 	webhookHandlerTimeout := cfg.serverTLSRequestTimeout * 9 / 10
+	metrics.AdmissionWebhookHandlerTimeout.Set(webhookHandlerTimeout.Seconds())
 
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, noDownscaleKubeClient, webhookHandlerTimeout))
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, prepareDownscaleKubeClient, webhookHandlerTimeout))

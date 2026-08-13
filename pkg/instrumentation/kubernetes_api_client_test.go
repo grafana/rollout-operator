@@ -59,11 +59,11 @@ func TestNilResponse(t *testing.T) {
 			Help:    "Time",
 			Buckets: []float64{1},
 		},
-		[]string{"path", "method", "status_code"},
+		[]string{"path", "method", "status_code", "api_group", "component"},
 	)
 
 	noResponseRT := &noResponseRoundTripper{}
-	k := newInstrumentation(noResponseRT, h)
+	k := newInstrumentation(noResponseRT, h, "test-component")
 
 	req, err := http.NewRequest("GET", "/test", nil)
 	require.NoError(t, err)

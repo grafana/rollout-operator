@@ -190,6 +190,24 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		return request.denyWithReason(err.Error(), http.StatusBadRequest)
 	}
 
+	// Before making any Kubernetes API calls, check whether this pod is in zpdb scope at all according to the
+	// pod informer cache. Scope is decided from labels (see config.matchesPod), which - unlike pod readiness -
+	// essentially never change on a running pod, so a stale cached copy is safe to use for this decision. We
+	// deliberately read nothing else from the cached copy: its Status may be stale, so it must never be used
+	// for anything beyond this label match. If the cache says the pod is out of scope, we can allow the
+	// eviction immediately: Kubernetes will still apply any other PDB that covers the pod, and an out-of-scope
+	// pod is allowed here regardless of its readiness anyway, so skipping the readiness check below for it
+	// changes nothing about the outcome. Otherwise - the pod is in scope, the cache found no match for it
+	// (ambiguous, more than one zpdb matched), or the pod isn't in the cache at all - fall through to the live
+	// path below exactly as before.
+	if cachedPod, cacheErr := c.podObserver.podLister.Pods(request.req.Request.Namespace).Get(request.req.Request.Name); cacheErr == nil {
+		if pdbConfig, findErr := c.cfgObserver.pdbCache.find(cachedPod); findErr == nil && pdbConfig == nil {
+			level.Debug(request.log).Log("msg", logAllowMesg, "reason", "pod is not within a zpdb scope")
+			c.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", fmt.Sprintf("%d", http.StatusOK)).Inc()
+			return request.allow()
+		}
+	}
+
 	// get the pod which has been requested for eviction
 	var pod *corev1.Pod
 	var err error

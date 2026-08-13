@@ -18,31 +18,44 @@ import (
 )
 
 type kubernetesAPIClientInstrumentation struct {
-	next http.RoundTripper
-	hist *prometheus.HistogramVec
+	next      http.RoundTripper
+	hist      *prometheus.HistogramVec
+	component string
 }
 
-func InstrumentKubernetesAPIClient(cfg *rest.Config, reg prometheus.Registerer) {
-	hist := promauto.With(reg).NewHistogramVec(
+// NewKubernetesAPIClientRequestDurationHistogram creates the histogram shared by every dedicated Kubernetes
+// API client. Call it once and pass the result to InstrumentKubernetesAPIClient for each client/component:
+// several independently rate-limited clients (see LimitKubernetesAPIClientPerAPIGroup) share this one
+// histogram, distinguished by the component label, so it must not be created more than once per registerer.
+func NewKubernetesAPIClientRequestDurationHistogram(reg prometheus.Registerer) *prometheus.HistogramVec {
+	return promauto.With(reg).NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "rollout_operator_kubernetes_api_client_request_duration_seconds",
 			Help:    "Time (in seconds) spent waiting for requests to the Kubernetes API",
 			Buckets: instrument.DefBuckets,
 		},
-		[]string{"path", "method", "status_code"},
+		[]string{"path", "method", "status_code", "api_group", "component"},
 	)
+}
 
+// InstrumentKubernetesAPIClient wraps cfg's transport to record request duration in hist, labelled with
+// component. component identifies which dedicated Kubernetes client issued the request (e.g.
+// "core-controller", "pod-eviction"): each gets its own client with its own independent rate limiter
+// buckets (see LimitKubernetesAPIClientPerAPIGroup), so without this label, throughput and rejections from
+// all of them would be indistinguishable in this shared histogram.
+func InstrumentKubernetesAPIClient(cfg *rest.Config, hist *prometheus.HistogramVec, component string) {
 	cfg.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-		return newInstrumentation(rt, hist)
+		return newInstrumentation(rt, hist, component)
 	})
 }
 
-func newInstrumentation(rt http.RoundTripper, hist *prometheus.HistogramVec) *kubernetesAPIClientInstrumentation {
+func newInstrumentation(rt http.RoundTripper, hist *prometheus.HistogramVec, component string) *kubernetesAPIClientInstrumentation {
 	return &kubernetesAPIClientInstrumentation{
 		next: otelhttp.NewTransport(rt, otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
 			return otelhttptrace.NewClientTrace(ctx)
 		})),
-		hist: hist,
+		hist:      hist,
+		component: component,
 	}
 }
 
@@ -55,7 +68,10 @@ func (k *kubernetesAPIClientInstrumentation) RoundTrip(req *http.Request) (*http
 	if resp != nil {
 		statusCode = strconv.Itoa(resp.StatusCode)
 	}
-	instrument.ObserveWithExemplar(req.Context(), k.hist.WithLabelValues(urlToResourceDescription(req.URL.EscapedPath()), req.Method, statusCode), duration.Seconds())
+	// pathToAPIGroup is the same classifier the per-API-group rate limiter buckets requests by (see
+	// kubernetes_api_client_ratelimit.go), so this metric's api_group label lines up exactly with the one on
+	// rollout_operator_kubernetes_api_client_rate_limited_requests_total.
+	instrument.ObserveWithExemplar(req.Context(), k.hist.WithLabelValues(urlToResourceDescription(req.URL.EscapedPath()), req.Method, statusCode, pathToAPIGroup(req.URL.Path), k.component), duration.Seconds())
 
 	return resp, err
 }

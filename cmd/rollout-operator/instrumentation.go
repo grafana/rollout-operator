@@ -18,6 +18,7 @@ type metrics struct {
 	InflightRequests                            *prometheus.GaugeVec
 	ClientInvalidClusterValidationLabelRequests *prometheus.CounterVec
 	ServerInvalidClusterValidaionLabelRequests  *prometheus.CounterVec
+	AdmissionWebhookHandlerTimeout              prometheus.Gauge
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -46,6 +47,10 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help: "Number of requests with invalid cluster validation label.",
 		}, []string{"method", "protocol", "request_cluster"}),
 		ServerInvalidClusterValidaionLabelRequests: middleware.NewInvalidClusterRequests(reg, "rollout_operator"),
+		AdmissionWebhookHandlerTimeout: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "rollout_operator_admission_webhook_handler_timeout_seconds",
+			Help: "Deadline imposed on each admission webhook handler's context (90% of -server-tls.request-timeout). A Kubernetes API call which would exceed this deadline is cancelled, including while waiting on the client-side rate limiter. Only set while the TLS server is enabled.",
+		}),
 	}
 }
 
