@@ -90,8 +90,25 @@ How to **investigate**:
 - Identify the saturated API group from the `api_group` label. `core` and `apps` are the ones the eviction path uses
 - Review the rollout-operator error logs. Note that once the queue is deep enough, requests stop reaching the limiter's rejection path and time out without the `client-side rate limiter` marker, so searching for that string alone under-reports the problem. See [Recognising exhaustion](#recognising-exhaustion) for the log forms to expect
 - Check `rollout_operator_zpdb_inflight_eviction_requests`. It settles near `QPS × webhook deadline`, so a value stuck around 45 with the default limits indicates a fully saturated bucket
-- Establish what is driving the eviction volume: a rolling update with a high `rollout-max-unavailable`, a node drain, or a cluster autoscaler consolidating
+- Establish what is driving the eviction volume. Rollout-operator rolls pods out sequentially, so a rolling update is not a source of concurrency here; the usual cause is a large-scale node drain - node pressure, or a cluster autoscaler consolidating - evicting many pods across many zones at once
 - To mitigate, either reduce the eviction concurrency at its source, or raise the limits. See [Kubernetes API client rate limiting](#kubernetes-api-client-rate-limiting)
+
+### rollout-operatorKubernetesAPIClientApproachingRateLimit
+
+This alert fires when a rollout-operator pod is sustaining over 80% of its own configured client-side rate limit for a given Kubernetes API group. It is an earlier, lower-urgency warning than [rollout-operatorKubernetesAPIClientRateLimited](#rollout-operatorkubernetesapiclientratelimited): nothing is being dropped yet, but the pod is close enough to its ceiling that a small increase in load would start rejecting requests.
+
+How it **works**:
+
+- The token bucket is per-process, so the alert compares each pod's own throughput against its own limit rather than a fleet-wide sum
+- `rollout_operator_kubernetes_api_client_rate_limit_qps` publishes the configured `-kubernetes.client-qps` value, but only while rate limiting is actually enabled (`qps` and `burst` both positive). Where it is disabled, the metric is absent and this alert cannot fire for that pod - there is no ceiling to approach
+- The alert fires on throughput exceeding 80% of that limit, held for 10 minutes so a momentary burst does not page
+
+How to **investigate**:
+
+- Identify the pod and API group approaching its limit from the `pod` and `api_group` labels
+- Establish what is driving the load the same way as for the saturation alert: usually a large-scale node drain rather than a rolling update, since rollout-operator rolls pods out sequentially
+- Since this fires before anything is actually being dropped, there is more room to act before impact: reduce the load at its source, or raise the limits. See [Kubernetes API client rate limiting](#kubernetes-api-client-rate-limiting)
+- If it keeps firing without ever tipping into the saturation alert, the limit may simply be sized close to normal peak load - consider raising it rather than treating every firing as an incident
 
 ## Metrics
 

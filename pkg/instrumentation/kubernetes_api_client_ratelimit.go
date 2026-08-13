@@ -46,6 +46,17 @@ func LimitKubernetesAPIClientPerAPIGroup(cfg *rest.Config, qps float32, burst in
 		Help: "Total number of Kubernetes API client requests that failed to acquire a client-side per-API-group rate limiter token and were not sent (includes requests whose context was cancelled while waiting for a token).",
 	}, []string{"api_group"})
 
+	// Published only while rate limiting is actually enabled (the same condition limiterFor uses to decide
+	// whether to install a real token bucket at all), so it can be compared against observed throughput to
+	// warn before the limiter starts rejecting requests. Publishing it unconditionally would make that
+	// comparison divide by zero whenever rate limiting is disabled (qps or burst non-positive).
+	if qps > 0 && burst > 0 {
+		promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "rollout_operator_kubernetes_api_client_rate_limit_qps",
+			Help: "The configured -kubernetes.client-qps value, i.e. the per-API-group token bucket rate. Only exposed while client-side rate limiting is enabled.",
+		}).Set(float64(qps))
+	}
+
 	cfg.Wrap(func(rt http.RoundTripper) http.RoundTripper {
 		return newPerAPIGroupRateLimiter(rt, qps, burst, throttled)
 	})

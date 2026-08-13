@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/rest"
 )
@@ -228,6 +229,49 @@ func TestLimitKubernetesAPIClientPerAPIGroup_IndependentBucketsPerTransport(t *t
 	rl1.limiterFor("apps")
 	require.Contains(t, rl1.limiters, "apps")
 	require.NotContains(t, rl2.limiters, "apps", "buckets must not be shared between transports")
+}
+
+// findMetricFamily returns the metric family with the given name from a gather, or nil if absent.
+func findMetricFamily(t *testing.T, reg *prometheus.Registry, name string) *dto.MetricFamily {
+	t.Helper()
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, mf := range families {
+		if mf.GetName() == name {
+			return mf
+		}
+	}
+	return nil
+}
+
+func TestLimitKubernetesAPIClientPerAPIGroup_PublishesConfiguredQPSOnlyWhenEnabled(t *testing.T) {
+	const metricName = "rollout_operator_kubernetes_api_client_rate_limit_qps"
+
+	for name, tc := range map[string]struct {
+		qps     float32
+		burst   int
+		enabled bool
+	}{
+		"enabled":    {qps: 5, burst: 10, enabled: true},
+		"zero qps":   {qps: 0, burst: 10, enabled: false},
+		"zero burst": {qps: 5, burst: 0, enabled: false},
+		"negative":   {qps: -1, burst: -1, enabled: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			LimitKubernetesAPIClientPerAPIGroup(&rest.Config{}, tc.qps, tc.burst, reg)
+
+			mf := findMetricFamily(t, reg, metricName)
+			if !tc.enabled {
+				require.Nil(t, mf, "the gauge must not be published while rate limiting is disabled, to avoid a divide-by-zero in alerts/dashboards comparing throughput against it")
+				return
+			}
+
+			require.NotNil(t, mf, "the gauge must be published while rate limiting is enabled")
+			require.Len(t, mf.GetMetric(), 1)
+			require.Equal(t, float64(tc.qps), mf.GetMetric()[0].GetGauge().GetValue())
+		})
+	}
 }
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)

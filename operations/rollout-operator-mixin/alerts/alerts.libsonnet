@@ -55,6 +55,25 @@ local utils = import 'mixin-utils/utils.libsonnet';
             message: 'The rollout-operator is dropping Kubernetes API requests against the {{ $labels.api_group }} API group because its client-side rate limiter is exhausted.',
           },
         },
+        {
+          // Compares each pod's own throughput against its own configured limit, since the token bucket is
+          // per-process. rollout_operator_kubernetes_api_client_rate_limit_qps is only published while rate
+          // limiting is enabled, so this alert is naturally absent - not a divide-by-zero - where it isn't.
+          alert: $.alertName('KubernetesAPIClientApproachingRateLimit'),
+          expr: |||
+            sum by (%(instance_labels)s, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count[5m]))
+            / on (%(instance_labels)s) group_left()
+            max by (%(instance_labels)s) (rollout_operator_kubernetes_api_client_rate_limit_qps)
+            > 0.8
+          ||| % { instance_labels: 'namespace, pod' },
+          'for': '10m',
+          labels: {
+            severity: 'warning',
+          },
+          annotations: {
+            message: 'The rollout-operator pod {{ $labels.pod }} is sustaining over 80% of its configured client-side rate limit for the {{ $labels.api_group }} Kubernetes API group. It is not yet dropping requests, but is at risk of doing so.',
+          },
+        },
       ],
     },
   ],
