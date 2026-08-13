@@ -191,7 +191,12 @@ local filename = 'rollout-operator.json';
           local selector = $.rolloutOperator_jobMatcher();
           local rejected = 'sum by (api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{%s}[$__rate_interval]))' % [selector];
           local attempted = 'sum by (api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval]))' % [selector];
-          '%s / (%s + %s)' % [rejected, rejected, attempted],
+          // A fully saturated group makes zero successful requests, so `attempted` has no series for it at
+          // all - PromQL `+` is an inner join, so a plain `rejected + attempted` would silently drop that
+          // api_group from the denominator and the panel would go blank for exactly the outage it exists to
+          // show. `attempted or (rejected * 0)` coalesces the missing side to zero on rejected's own label
+          // set, so the denominator is always defined wherever rejected is.
+          '%s / (%s + (%s or (%s * 0)))' % [rejected, rejected, attempted, rejected],
           '{{api_group}}',
         ) +
         $.units('percentunit') +

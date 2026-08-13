@@ -1146,7 +1146,7 @@
                   "span": 4,
                   "targets": [
                      {
-                        "expr": "sum by (api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) / (sum by (api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) + sum by (api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])))",
+                        "expr": "sum by (api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) / (sum by (api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) + (sum by (api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) or (sum by (api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) * 0)))",
                         "format": "time_series",
                         "legendFormat": "{{api_group}}",
                         "legendLink": null
