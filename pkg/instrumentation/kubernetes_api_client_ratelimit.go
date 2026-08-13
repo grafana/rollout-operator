@@ -12,6 +12,37 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 )
 
+// KubernetesAPIClientRateLimitMetrics holds the metrics shared by every dedicated Kubernetes API client's
+// rate limiter. Several independently rate-limited clients (see LimitKubernetesAPIClientPerAPIGroup) share
+// these, distinguished by a component label, so create this once per registerer and reuse it - constructing
+// it again would panic on duplicate metric registration.
+type KubernetesAPIClientRateLimitMetrics struct {
+	throttled *prometheus.CounterVec
+	limitQPS  *prometheus.GaugeVec
+}
+
+// NewKubernetesAPIClientRateLimitMetrics creates the metrics for LimitKubernetesAPIClientPerAPIGroup. Call
+// it once and pass the result to LimitKubernetesAPIClientPerAPIGroup for each client/component.
+func NewKubernetesAPIClientRateLimitMetrics(reg prometheus.Registerer) *KubernetesAPIClientRateLimitMetrics {
+	return &KubernetesAPIClientRateLimitMetrics{
+		// Counts requests that could not acquire a token, so client-side throttling is visible in dashboards
+		// rather than only surfacing as opaque context errors.
+		throttled: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "rollout_operator_kubernetes_api_client_rate_limited_requests_total",
+			Help: "Total number of Kubernetes API client requests that failed to acquire a client-side per-API-group rate limiter token and were not sent (includes requests whose context was cancelled while waiting for a token).",
+		}, []string{"api_group", "component"}),
+		// Set per component only while rate limiting is actually enabled for that component (the same
+		// condition limiterFor uses to decide whether to install a real token bucket at all), so it can be
+		// compared against that component's observed throughput to warn before it starts rejecting requests.
+		// Setting it unconditionally would make that comparison divide by zero wherever rate limiting is
+		// disabled.
+		limitQPS: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
+			Name: "rollout_operator_kubernetes_api_client_rate_limit_qps",
+			Help: "The configured -kubernetes.client-qps value, i.e. the per-API-group token bucket rate. Only exposed for a component while client-side rate limiting is enabled for it.",
+		}, []string{"component"}),
+	}
+}
+
 // LimitKubernetesAPIClientPerAPIGroup installs a client-side rate limiter on the Kubernetes client
 // transport that enforces an independent token bucket (qps/burst) per Kubernetes API group.
 //
@@ -30,35 +61,25 @@ import (
 // no-op RateLimiter on the config) and do the throttling here, where the request URL is available and we
 // can route each request to the bucket for its API group.
 //
+// component identifies which dedicated Kubernetes client this is (e.g. "core-controller", "pod-eviction"):
+// each such client gets this called on its own rest.Config, so each has fully independent buckets, but they
+// report through the shared metrics in KubernetesAPIClientRateLimitMetrics, labelled by component.
+//
 // A non-positive qps or burst disables rate limiting (requests are never throttled by this limiter).
 //
 // IMPORTANT: callers must issue requests under a context that carries a deadline, otherwise the token
 // bucket's reservation timeline can run away and stall under concurrency (admission.Serve imposes one for
 // webhook handlers).
-func LimitKubernetesAPIClientPerAPIGroup(cfg *rest.Config, qps float32, burst int, reg prometheus.Registerer) {
+func LimitKubernetesAPIClientPerAPIGroup(cfg *rest.Config, qps float32, burst int, metrics *KubernetesAPIClientRateLimitMetrics, component string) {
 	// Disable client-go's built-in (global) rate limiter so this per-API-group limiter is the only throttle.
 	cfg.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
 
-	// Counts requests that could not acquire a token, so client-side throttling is visible in dashboards
-	// rather than only surfacing as opaque context errors. Shared across all clients built from this config.
-	throttled := promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-		Name: "rollout_operator_kubernetes_api_client_rate_limited_requests_total",
-		Help: "Total number of Kubernetes API client requests that failed to acquire a client-side per-API-group rate limiter token and were not sent (includes requests whose context was cancelled while waiting for a token).",
-	}, []string{"api_group"})
-
-	// Published only while rate limiting is actually enabled (the same condition limiterFor uses to decide
-	// whether to install a real token bucket at all), so it can be compared against observed throughput to
-	// warn before the limiter starts rejecting requests. Publishing it unconditionally would make that
-	// comparison divide by zero whenever rate limiting is disabled (qps or burst non-positive).
 	if qps > 0 && burst > 0 {
-		promauto.With(reg).NewGauge(prometheus.GaugeOpts{
-			Name: "rollout_operator_kubernetes_api_client_rate_limit_qps",
-			Help: "The configured -kubernetes.client-qps value, i.e. the per-API-group token bucket rate. Only exposed while client-side rate limiting is enabled.",
-		}).Set(float64(qps))
+		metrics.limitQPS.WithLabelValues(component).Set(float64(qps))
 	}
 
 	cfg.Wrap(func(rt http.RoundTripper) http.RoundTripper {
-		return newPerAPIGroupRateLimiter(rt, qps, burst, throttled)
+		return newPerAPIGroupRateLimiter(rt, qps, burst, metrics.throttled, component)
 	})
 }
 
@@ -69,17 +90,19 @@ type perAPIGroupRateLimiter struct {
 	qps       float32
 	burst     int
 	throttled *prometheus.CounterVec
+	component string
 
 	limitersMx sync.RWMutex
 	limiters   map[string]flowcontrol.RateLimiter
 }
 
-func newPerAPIGroupRateLimiter(next http.RoundTripper, qps float32, burst int, throttled *prometheus.CounterVec) *perAPIGroupRateLimiter {
+func newPerAPIGroupRateLimiter(next http.RoundTripper, qps float32, burst int, throttled *prometheus.CounterVec, component string) *perAPIGroupRateLimiter {
 	return &perAPIGroupRateLimiter{
 		next:      next,
 		qps:       qps,
 		burst:     burst,
 		throttled: throttled,
+		component: component,
 		limiters:  map[string]flowcontrol.RateLimiter{},
 	}
 }
@@ -88,7 +111,7 @@ func (r *perAPIGroupRateLimiter) RoundTrip(req *http.Request) (*http.Response, e
 	group := pathToAPIGroup(req.URL.Path)
 
 	if err := r.limiterFor(group).Wait(req.Context()); err != nil {
-		r.throttled.WithLabelValues(group).Inc()
+		r.throttled.WithLabelValues(group, r.component).Inc()
 
 		// Wrap so the failure is clearly attributable to the rollout-operator's own client-side rate
 		// limiter (and to which API group), instead of surfacing as a bare "context deadline exceeded" or

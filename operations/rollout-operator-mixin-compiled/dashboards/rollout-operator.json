@@ -1058,7 +1058,7 @@
             "panels": [
                {
                   "datasource": "$datasource",
-                  "description": "### Rate limited requests by API group\nShows requests which failed to acquire a token from the client-side rate limiter and were never sent, by Kubernetes API group. There is no healthy non-zero level for this: any sustained rate means the rate limiter, rather than the Kubernetes API, is the bottleneck. See the KubernetesAPIClientRateLimited alert runbook.\n",
+                  "description": "### Rate limited requests by API group\nShows requests which failed to acquire a token from the client-side rate limiter and were never sent, by Kubernetes API group and by component (core-controller, pod-eviction, no-downscale, prepare-downscale), since each component has its own independent bucket. There is no healthy non-zero level for this: any sustained rate means the rate limiter, rather than the Kubernetes API, is the bottleneck. See the KubernetesAPIClientRateLimited alert runbook.\n",
                   "fieldConfig": {
                      "defaults": {
                         "custom": {
@@ -1096,9 +1096,9 @@
                   "span": 4,
                   "targets": [
                      {
-                        "expr": "sum by (api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval]))",
+                        "expr": "sum by (component, api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval]))",
                         "format": "time_series",
-                        "legendFormat": "{{api_group}}",
+                        "legendFormat": "{{component}}/{{api_group}}",
                         "legendLink": null
                      }
                   ],
@@ -1107,7 +1107,7 @@
                },
                {
                   "datasource": "$datasource",
-                  "description": "### Percent of requests rejected by rate limiter\nShare of Kubernetes API requests per API group which never left the client because the client-side rate limiter had no token available. There is no healthy non-zero level for this.\n",
+                  "description": "### Percent of requests rejected by rate limiter\nShare of Kubernetes API requests which never left the client because the client-side rate limiter had no token available, by API group and by component (core-controller, pod-eviction, no-downscale, prepare-downscale). Kept per component since each has its own independent rate limiter bucket: combining them could dilute one saturated component behind several healthy ones. There is no healthy non-zero level for this.\n",
                   "fieldConfig": {
                      "defaults": {
                         "custom": {
@@ -1146,9 +1146,9 @@
                   "span": 4,
                   "targets": [
                      {
-                        "expr": "sum by (api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) / (sum by (api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) + (sum by (api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) or (sum by (api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) * 0)))",
+                        "expr": "sum by (component, api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) / (sum by (component, api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) + (sum by (component, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) or (sum by (component, api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])) * 0)))",
                         "format": "time_series",
-                        "legendFormat": "{{api_group}}",
+                        "legendFormat": "{{component}}/{{api_group}}",
                         "legendLink": null
                      }
                   ],
@@ -1157,7 +1157,7 @@
                },
                {
                   "datasource": "$datasource",
-                  "description": "### Throughput vs recent peak by API group\nCompares observed throughput per API group against the highest sustained rate observed in the trailing 30 minutes for that group. The peak line is a lower bound on the -kubernetes.client-qps needed to avoid self-throttling this traffic pattern. It says nothing about -kubernetes.client-burst: burst absorbs sub-second spikes that a rate() computed over minutes cannot see, so no line for it is derivable from this data.\n",
+                  "description": "### Throughput vs recent peak by API group\nCompares observed throughput against the highest sustained rate observed in the trailing 30 minutes, by API group and by component (core-controller, pod-eviction, no-downscale, prepare-downscale). Kept per component since each has its own independent rate limiter bucket at the same nominal QPS: a peak summed across components is not a valid ceiling for any one of their buckets. The peak line is a lower bound on the -kubernetes.client-qps needed for that component to avoid self-throttling this traffic pattern. It says nothing about -kubernetes.client-burst: burst absorbs sub-second spikes that a rate() computed over minutes cannot see, so no line for it is derivable from this data.\n",
                   "fieldConfig": {
                      "defaults": {
                         "custom": {
@@ -1218,15 +1218,15 @@
                   "span": 4,
                   "targets": [
                      {
-                        "expr": "sum by (api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval]))",
+                        "expr": "sum by (component, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval]))",
                         "format": "time_series",
-                        "legendFormat": "{{api_group}}",
+                        "legendFormat": "{{component}}/{{api_group}}",
                         "legendLink": null
                      },
                      {
-                        "expr": "max_over_time((sum by (api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])))[30m:])",
+                        "expr": "max_over_time((sum by (component, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{cluster=~\"$cluster\", job=~\"($namespace)/(rollout-operator)\"}[$__rate_interval])))[30m:])",
                         "format": "time_series",
-                        "legendFormat": "{{api_group}} peak (30m)",
+                        "legendFormat": "{{component}}/{{api_group}} peak (30m)",
                         "legendLink": null
                      }
                   ],

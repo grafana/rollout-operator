@@ -15,11 +15,14 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// testComponent is the component label used by tests that don't care about its value.
+const testComponent = "test-component"
+
 // newTestThrottledCounter returns an unregistered counter for the per-API-group rate limiter. In
 // production this counter is always non-nil (created via promauto), so RoundTrip increments it without a
 // nil check; tests must provide one too.
 func newTestThrottledCounter() *prometheus.CounterVec {
-	return prometheus.NewCounterVec(prometheus.CounterOpts{Name: "test_rate_limited_total", Help: "test"}, []string{"api_group"})
+	return prometheus.NewCounterVec(prometheus.CounterOpts{Name: "test_rate_limited_total", Help: "test"}, []string{"api_group", "component"})
 }
 
 func TestPathToAPIGroup(t *testing.T) {
@@ -94,7 +97,7 @@ func TestPerAPIGroupRateLimiter_BucketsAreIndependentPerGroup(t *testing.T) {
 	// qps=1/burst=1: each group starts with a single token and refills only once per second, so within
 	// the test no bucket refills. This lets us assert that exhausting one group's bucket does not affect
 	// another group's bucket.
-	limiter := newPerAPIGroupRateLimiter(next, 1, 1, newTestThrottledCounter())
+	limiter := newPerAPIGroupRateLimiter(next, 1, 1, newTestThrottledCounter(), testComponent)
 
 	// First request to the apps group consumes its only token.
 	resp, err := doRequest(context.Background(), limiter, "/apis/apps/v1/namespaces/ns/statefulsets")
@@ -118,7 +121,7 @@ func TestPerAPIGroupRateLimiter_BucketsAreIndependentPerGroup(t *testing.T) {
 }
 
 func TestPerAPIGroupRateLimiter_ReusesBucketPerGroup(t *testing.T) {
-	limiter := newPerAPIGroupRateLimiter(&recordingRoundTripper{}, 1, 1, newTestThrottledCounter())
+	limiter := newPerAPIGroupRateLimiter(&recordingRoundTripper{}, 1, 1, newTestThrottledCounter(), testComponent)
 
 	first := limiter.limiterFor("apps")
 	second := limiter.limiterFor("apps")
@@ -132,7 +135,7 @@ func TestPerAPIGroupRateLimiter_ConcurrentLimiterForCreatesOneBucketPerGroup(t *
 	// Exercises the double-checked locking in limiterFor under concurrency (run with -race): many
 	// goroutines racing to create buckets for the same groups must end up with exactly one bucket per
 	// distinct group, never duplicates. qps=0 yields no-op limiters; we are testing creation, not throttling.
-	limiter := newPerAPIGroupRateLimiter(&recordingRoundTripper{}, 0, 0, newTestThrottledCounter())
+	limiter := newPerAPIGroupRateLimiter(&recordingRoundTripper{}, 0, 0, newTestThrottledCounter(), testComponent)
 
 	groups := []string{"core", "apps", "policy", "rollout-operator.grafana.com"}
 	var wg sync.WaitGroup
@@ -159,7 +162,7 @@ func TestPerAPIGroupRateLimiter_DisabledWhenNonPositive(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			next := &recordingRoundTripper{}
-			limiter := newPerAPIGroupRateLimiter(next, tc.qps, tc.burst, newTestThrottledCounter())
+			limiter := newPerAPIGroupRateLimiter(next, tc.qps, tc.burst, newTestThrottledCounter(), testComponent)
 
 			// Many rapid requests to the same group must all pass through without being throttled, even
 			// with an already-cancelled context (the no-op limiter ignores it).
@@ -178,7 +181,7 @@ func TestPerAPIGroupRateLimiter_DisabledWhenNonPositive(t *testing.T) {
 func TestPerAPIGroupRateLimiter_PropagatesTransportError(t *testing.T) {
 	wantErr := errors.New("boom")
 	next := roundTripperFunc(func(*http.Request) (*http.Response, error) { return nil, wantErr })
-	limiter := newPerAPIGroupRateLimiter(next, 5, 10, newTestThrottledCounter())
+	limiter := newPerAPIGroupRateLimiter(next, 5, 10, newTestThrottledCounter(), testComponent)
 
 	_, err := doRequest(context.Background(), limiter, "/api/v1/namespaces/ns/pods")
 	require.ErrorIs(t, err, wantErr)
@@ -186,7 +189,7 @@ func TestPerAPIGroupRateLimiter_PropagatesTransportError(t *testing.T) {
 
 func TestPerAPIGroupRateLimiter_ThrottleErrorIsAttributed(t *testing.T) {
 	next := &recordingRoundTripper{}
-	limiter := newPerAPIGroupRateLimiter(next, 1, 1, newTestThrottledCounter())
+	limiter := newPerAPIGroupRateLimiter(next, 1, 1, newTestThrottledCounter(), testComponent)
 
 	// An already-cancelled context makes the limiter's Wait fail immediately. The returned error must be
 	// wrapped so it is attributable to our client-side limiter and the API group, while preserving the
@@ -203,7 +206,7 @@ func TestPerAPIGroupRateLimiter_ThrottleErrorIsAttributed(t *testing.T) {
 
 func TestLimitKubernetesAPIClientPerAPIGroup_WiresConfig(t *testing.T) {
 	cfg := &rest.Config{}
-	LimitKubernetesAPIClientPerAPIGroup(cfg, 5, 10, nil)
+	LimitKubernetesAPIClientPerAPIGroup(cfg, 5, 10, NewKubernetesAPIClientRateLimitMetrics(nil), testComponent)
 
 	// client-go's own limiter is replaced with a no-op so it doesn't double-throttle or override us.
 	require.NotNil(t, cfg.RateLimiter)
@@ -217,7 +220,7 @@ func TestLimitKubernetesAPIClientPerAPIGroup_WiresConfig(t *testing.T) {
 
 func TestLimitKubernetesAPIClientPerAPIGroup_IndependentBucketsPerTransport(t *testing.T) {
 	cfg := &rest.Config{}
-	LimitKubernetesAPIClientPerAPIGroup(cfg, 5, 10, nil)
+	LimitKubernetesAPIClientPerAPIGroup(cfg, 5, 10, NewKubernetesAPIClientRateLimitMetrics(nil), testComponent)
 
 	// Each time the transport wrapper is applied (i.e. for each dedicated HTTP client / component) it must
 	// produce a fresh rate limiter with its own buckets, so that components built from the same config do
@@ -259,7 +262,7 @@ func TestLimitKubernetesAPIClientPerAPIGroup_PublishesConfiguredQPSOnlyWhenEnabl
 	} {
 		t.Run(name, func(t *testing.T) {
 			reg := prometheus.NewRegistry()
-			LimitKubernetesAPIClientPerAPIGroup(&rest.Config{}, tc.qps, tc.burst, reg)
+			LimitKubernetesAPIClientPerAPIGroup(&rest.Config{}, tc.qps, tc.burst, NewKubernetesAPIClientRateLimitMetrics(reg), testComponent)
 
 			mf := findMetricFamily(t, reg, metricName)
 			if !tc.enabled {
@@ -269,6 +272,7 @@ func TestLimitKubernetesAPIClientPerAPIGroup_PublishesConfiguredQPSOnlyWhenEnabl
 
 			require.NotNil(t, mf, "the gauge must be published while rate limiting is enabled")
 			require.Len(t, mf.GetMetric(), 1)
+			require.Equal(t, testComponent, mf.GetMetric()[0].GetLabel()[0].GetValue())
 			require.Equal(t, float64(tc.qps), mf.GetMetric()[0].GetGauge().GetValue())
 		})
 	}

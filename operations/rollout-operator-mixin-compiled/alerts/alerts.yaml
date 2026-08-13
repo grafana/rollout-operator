@@ -36,12 +36,12 @@ groups:
             severity: warning
         - alert: rollout-operatorKubernetesAPIClientApproachingRateLimit
           annotations:
-            message: The rollout-operator pod {{ $labels.pod }} is sustaining over 80% of its configured client-side rate limit for the {{ $labels.api_group }} Kubernetes API group. It is not yet dropping requests, but is at risk of doing so.
+            message: The rollout-operator pod {{ $labels.pod }}'s {{ $labels.component }} client is sustaining over 80% of its configured client-side rate limit for the {{ $labels.api_group }} Kubernetes API group. It is not yet dropping requests, but is at risk of doing so.
             runbook_url: https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#rollout-operatorkubernetesapiclientapproachingratelimit
           expr: |
-            sum by (namespace, pod, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count[5m]))
-            / on (namespace, pod) group_left()
-            max by (namespace, pod) (rollout_operator_kubernetes_api_client_rate_limit_qps)
+            sum by (namespace, pod, component, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count[5m]))
+            / on (namespace, pod, component) group_left()
+            max by (namespace, pod, component) (rollout_operator_kubernetes_api_client_rate_limit_qps)
             > 0.8
           for: 10m
           labels:

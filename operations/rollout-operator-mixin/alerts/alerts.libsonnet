@@ -57,13 +57,17 @@ local utils = import 'mixin-utils/utils.libsonnet';
         },
         {
           // Compares each pod's own throughput against its own configured limit, since the token bucket is
-          // per-process. rollout_operator_kubernetes_api_client_rate_limit_qps is only published while rate
-          // limiting is enabled, so this alert is naturally absent - not a divide-by-zero - where it isn't.
+          // per-process. component is also kept in the grouping: each admission webhook and the core
+          // controller get their own dedicated client with independent buckets at the same nominal QPS, so
+          // summing across them would let a genuinely idle client hide one running hot, or several
+          // individually-fine clients look saturated together. rollout_operator_kubernetes_api_client_rate_limit_qps
+          // is only published while rate limiting is enabled, so this alert is naturally absent - not a
+          // divide-by-zero - where it isn't.
           alert: $.alertName('KubernetesAPIClientApproachingRateLimit'),
           expr: |||
-            sum by (%(instance_labels)s, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count[5m]))
-            / on (%(instance_labels)s) group_left()
-            max by (%(instance_labels)s) (rollout_operator_kubernetes_api_client_rate_limit_qps)
+            sum by (%(instance_labels)s, component, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count[5m]))
+            / on (%(instance_labels)s, component) group_left()
+            max by (%(instance_labels)s, component) (rollout_operator_kubernetes_api_client_rate_limit_qps)
             > 0.8
           ||| % { instance_labels: 'namespace, pod' },
           'for': '10m',
@@ -71,7 +75,7 @@ local utils = import 'mixin-utils/utils.libsonnet';
             severity: 'warning',
           },
           annotations: {
-            message: 'The rollout-operator pod {{ $labels.pod }} is sustaining over 80% of its configured client-side rate limit for the {{ $labels.api_group }} Kubernetes API group. It is not yet dropping requests, but is at risk of doing so.',
+            message: 'The rollout-operator pod {{ $labels.pod }}' + "'" + 's {{ $labels.component }} client is sustaining over 80% of its configured client-side rate limit for the {{ $labels.api_group }} Kubernetes API group. It is not yet dropping requests, but is at risk of doing so.',
           },
         },
       ],
