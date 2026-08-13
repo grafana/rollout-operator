@@ -22,12 +22,11 @@ type podObserver struct {
 	podEvictCache       *podEvictionCache
 	podReadinessTracker *podReadinessTracker
 	configObserver      *configObserver
-	metrics             *Metrics
 	logger              log.Logger
 	stopCh              chan struct{}
 }
 
-func newPodObserver(kubeClient kubernetes.Interface, namespace string, readyAnnotationPatchTimeout time.Duration, configObserver *configObserver, metrics *Metrics, logger log.Logger) *podObserver {
+func newPodObserver(kubeClient kubernetes.Interface, namespace string, readyAnnotationPatchTimeout time.Duration, configObserver *configObserver, logger log.Logger) *podObserver {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// initialize the ZoneAwarePodDisruptionBudget custom resource watching
@@ -41,7 +40,6 @@ func newPodObserver(kubeClient kubernetes.Interface, namespace string, readyAnno
 		podEvictCache:       newPodEvictionCache(),
 		podReadinessTracker: newPodReadinessTracker(kubeClient, namespace, readyAnnotationPatchTimeout, logger),
 		configObserver:      configObserver,
-		metrics:             metrics,
 		logger:              logger,
 		stopCh:              make(chan struct{}),
 	}
@@ -68,31 +66,7 @@ func (c *podObserver) start() error {
 	}
 	level.Info(c.logger).Log("msg", "zpdb pod informer caches have synced")
 
-	// Publish the metric from the moment the cache is usable, so it does not stay absent in a namespace
-	// which happens to be quiet.
-	c.recordInformerEvent()
-
 	return nil
-}
-
-// recordInformerEvent stamps the time the informer's watch last told us something we did not already know.
-// The eviction webhook reads pod state from the informer cache, so a watch which has silently stopped
-// delivering updates means those decisions are being made on stale data with nothing else to reveal it.
-func (c *podObserver) recordInformerEvent() {
-	c.metrics.PodInformerLastEventTime.SetToCurrentTime()
-}
-
-// isResync reports whether an informer update is a periodic resync rather than an observed change. Resyncs
-// are replayed from the cache with an unchanged resource version (the same test client-go itself uses in
-// sharedIndexInformer.OnUpdate) and keep arriving even when the watch is dead, so they say nothing about
-// whether the watch is still healthy.
-func isResync(old, new interface{}) bool {
-	oldPod, oldIsPod := old.(*corev1.Pod)
-	newPod, newIsPod := new.(*corev1.Pod)
-	if !oldIsPod || !newIsPod {
-		return false
-	}
-	return oldPod.ResourceVersion == newPod.ResourceVersion
 }
 
 func (c *podObserver) invalidatePodEvictionCache(pod *corev1.Pod, action string) {
@@ -156,12 +130,7 @@ func (c *podObserver) accept(obj interface{}) (*corev1.Pod, bool) {
 	return pod, true
 }
 
-// The informer event handlers record the event before filtering on zpdb scope: the metric tracks the health
-// of the watch, which is independent of whether any given pod is covered by a zpdb.
-
 func (c *podObserver) onPodAdded(obj interface{}) {
-	c.recordInformerEvent()
-
 	pod, ok := c.accept(obj)
 	if !ok {
 		return
@@ -171,11 +140,7 @@ func (c *podObserver) onPodAdded(obj interface{}) {
 	c.invalidatePodEvictionCache(pod, "added")
 }
 
-func (c *podObserver) onPodUpdated(old, new interface{}) {
-	if !isResync(old, new) {
-		c.recordInformerEvent()
-	}
-
+func (c *podObserver) onPodUpdated(_, new interface{}) {
 	pod, ok := c.accept(new)
 	if !ok {
 		return
@@ -186,8 +151,6 @@ func (c *podObserver) onPodUpdated(old, new interface{}) {
 }
 
 func (c *podObserver) onPodDeleted(obj interface{}) {
-	c.recordInformerEvent()
-
 	pod, ok := c.accept(obj)
 	if !ok {
 		return

@@ -52,13 +52,6 @@
     ignore_rollout_operator_prepare_downscale_webhook_failures: false,
     ignore_rollout_operator_zpdb_eviction_webhook_failures: false,
     ignore_rollout_operator_zpdb_validation_webhook_failures: false,
-
-    // The pod eviction webhook lists pods from the Kubernetes API on every eviction request, once per zone,
-    // to tally pod readiness. Set to true to serve those tallies from the rollout-operator's pod informer
-    // cache instead: on a large namespace those listings are the dominant consumer of the client-side rate
-    // limiter, and the cache removes them entirely, at the cost of a read which is eventually consistent
-    // rather than live. See the runbooks for when to enable this.
-    zpdb_eviction_pods_from_informer_cache: false,
   },
 
   assert !$._config.rollout_operator_replica_template_access_enabled || $._config.rollout_operator_webhooks_enabled : 'rollout_operator_replica_template_access_enabled requires rollout_operator_webhooks_enabled=true',
@@ -83,7 +76,6 @@
     'use-zone-tracker': true,
     'zone-tracker.config-map-name': 'rollout-operator-zone-tracker',
     'zpdb.pod-ready-annotation-patch-timeout': '5s',
-    'zpdb.eviction-pods-from-informer-cache': $._config.zpdb_eviction_pods_from_informer_cache,
   } + if enableWebhooks then {
     'server-tls.enabled': 'true',
   } else {},

@@ -121,31 +121,8 @@ func TestRolloutRecoversFromFailedUpdate(t *testing.T) {
 	requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectReady(), expectVersion("3"))
 }
 
-// forEachEvictionPodSource runs the given test body against both settings of
-// -zpdb.eviction-pods-from-informer-cache, so every eviction decision is covered whichever source the
-// webhook's pod readiness tallies come from. The two must reach identical verdicts: the flag only changes
-// where the pod listing is read, not how it is evaluated.
-//
-// The flag is a process-level argument, so each case needs its own rollout-operator deployment and
-// therefore its own cluster. That doubles the cost of the eviction tests, which is the price of being able
-// to fall back to the live listing in production and trust that it still behaves.
-func forEachEvictionPodSource(t *testing.T, body func(t *testing.T, operatorArgs []string)) {
-	for name, args := range map[string][]string{
-		"pods from informer cache": {"-zpdb.eviction-pods-from-informer-cache=true"},
-		"pods from kubernetes api": {"-zpdb.eviction-pods-from-informer-cache=false"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			body(t, args)
-		})
-	}
-}
-
 // TestRolloutHappyCaseWithZpdb performs pod updates via the rolling update controller and uses the zpdb to determine if the pod delete is safe or not
 func TestRolloutHappyCaseWithZpdb(t *testing.T) {
-	forEachEvictionPodSource(t, testRolloutHappyCaseWithZpdb)
-}
-
-func testRolloutHappyCaseWithZpdb(t *testing.T, operatorArgs []string) {
 	ctx := context.Background()
 
 	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
@@ -155,7 +132,7 @@ func testRolloutHappyCaseWithZpdb(t *testing.T, operatorArgs []string) {
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperatorWithArgs(t, ctx, api, cluster.ExtAPI(), path, true, operatorArgs)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 
 		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
 		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
@@ -323,10 +300,6 @@ func TestWebHookInformer(t *testing.T) {
 }
 
 func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
-	forEachEvictionPodSource(t, testZoneAwarePodDisruptionBudgetMaxUnavailableEq1)
-}
-
-func testZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T, operatorArgs []string) {
 	ctx := context.Background()
 
 	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
@@ -336,7 +309,7 @@ func testZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T, operatorArg
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperatorWithArgs(t, ctx, api, cluster.ExtAPI(), path, true, operatorArgs)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 
 		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
 		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
@@ -411,10 +384,6 @@ func testZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T, operatorArg
 }
 
 func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T) {
-	forEachEvictionPodSource(t, testZoneAwarePodDisruptionBudgetMaxUnavailableEq2)
-}
-
-func testZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T, operatorArgs []string) {
 	ctx := context.Background()
 
 	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
@@ -424,7 +393,7 @@ func testZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T, operatorArg
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperatorWithArgs(t, ctx, api, cluster.ExtAPI(), path, true, operatorArgs)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 
 		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
 		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
@@ -476,10 +445,6 @@ func testZoneAwarePodDisruptionBudgetMaxUnavailableEq2(t *testing.T, operatorArg
 }
 
 func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
-	forEachEvictionPodSource(t, testZoneAwarePodDisruptionBudgetPartitionMode)
-}
-
-func testZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T, operatorArgs []string) {
 	ctx := context.Background()
 
 	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
@@ -489,7 +454,7 @@ func testZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T, operatorArgs []
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperatorWithArgs(t, ctx, api, cluster.ExtAPI(), path, true, operatorArgs)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 
 		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
 		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
@@ -566,10 +531,6 @@ func testZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T, operatorArgs []
 // TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay validates that a cross-zone eviction for the same partition
 // is denied while the crossZoneEvictionDelay has not expired, and then allowed after the delay has elapsed and the evicted pod has recovered.
 func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *testing.T) {
-	forEachEvictionPodSource(t, testZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay)
-}
-
-func testZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *testing.T, operatorArgs []string) {
 	ctx := context.Background()
 
 	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
@@ -579,7 +540,7 @@ func testZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 
 	{
 		t.Log("Create rollout operator and check it's running and ready.")
-		createRolloutOperatorWithArgs(t, ctx, api, cluster.ExtAPI(), path, true, operatorArgs)
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
 
 		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
 		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)

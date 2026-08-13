@@ -73,7 +73,4 @@ func TestConfigDefaults(t *testing.T) {
 	// these back to 0 would silently turn off client-side throttling, so assert them explicitly.
 	require.Equal(t, float64(5), cfg.kubeClientQPS)
 	require.Equal(t, 10, cfg.kubeClientBurst)
-	// The pod eviction webhook lists pods from the Kubernetes API by default. Reading them from the informer
-	// cache is opt-in, since it trades a strictly fresher read for the reduction in API calls.
-	require.False(t, cfg.zpdbEvictionPodsFromInformerCache)
 }

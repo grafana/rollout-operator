@@ -24,7 +24,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	rolloutconfig "github.com/grafana/rollout-operator/pkg/config"
-	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 const (
@@ -49,7 +48,6 @@ type testContext struct {
 	logs       *dummyLogger
 	request    admissionv1.AdmissionReview
 	controller *EvictionController
-	kubeClient *fake.Clientset
 }
 
 // A dummyLogger accumulates log lines into a slice so we can assert that certain logs were recorded
@@ -96,16 +94,7 @@ func (d *dummyLogger) assertHasLog(t *testing.T, elements []string) {
 	require.Fail(t, "Expected log not found", strings.Join(elements, ", "))
 }
 
-// newTestContext builds a test context with the eviction webhook's pod listing served from the Kubernetes
-// API, matching the default of -zpdb.eviction-pods-from-informer-cache. Use newTestContextWithPodSource to
-// exercise the informer cache instead.
 func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawConfig *unstructured.Unstructured, objects ...runtime.Object) *testContext {
-	return newTestContextWithPodSource(t, request, pdbRawConfig, false, objects...)
-}
-
-// newTestContextWithPodSource builds a test context with the eviction webhook's pod listing served either
-// from the informer cache or from the Kubernetes API, matching -zpdb.eviction-pods-from-informer-cache.
-func newTestContextWithPodSource(t *testing.T, request admissionv1.AdmissionReview, pdbRawConfig *unstructured.Unstructured, podsFromInformerCache bool, objects ...runtime.Object) *testContext {
 	testCtx := &testContext{
 		ctx:     context.Background(),
 		logs:    newDummyLogger(),
@@ -114,8 +103,7 @@ func newTestContextWithPodSource(t *testing.T, request admissionv1.AdmissionRevi
 
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
-	testCtx.kubeClient = fake.NewClientset(objects...)
-	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, 5*time.Second, podsFromInformerCache, testCtx.logs, zpdbMetrics)
+	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, 5*time.Second, testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {
@@ -132,8 +120,7 @@ func newTestContextWithoutAdmissionReview(t *testing.T, pdbRawConfig *unstructur
 
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
-	testCtx.kubeClient = fake.NewClientset(objects...)
-	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, 5*time.Second, false, testCtx.logs, zpdbMetrics)
+	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, 5*time.Second, testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {
@@ -567,163 +554,6 @@ func TestPodEviction_MultiZoneClassicOverrideHasNoEffectWhenNotZero(t *testing.T
 	require.Equal(t, int32(429), response.Result.Code)
 
 	testCtx.controller.Stop()
-}
-
-// TestPodEviction_PodsAreReadFromTheInformerCacheWhenEnabled asserts that with
-// -zpdb.eviction-pods-from-informer-cache=true, handling an eviction request does not list pods from the
-// Kubernetes API at all. Listing every pod of a zone once per zone per eviction is what made a burst of
-// concurrent evictions exhaust the client-side rate limiter for the core API group, so this is the property
-// worth pinning: the tallies must come from the informer cache.
-func TestPodEviction_PodsAreReadFromTheInformerCacheWhenEnabled(t *testing.T) {
-	objs := make([]runtime.Object, 0, 8)
-	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
-	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
-
-	for _, p := range []string{testPodZoneA0, testPodZoneA1, testPodZoneA2} {
-		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
-	}
-	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
-		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
-	}
-
-	testCtx := newTestContextWithPodSource(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), true, objs...)
-	defer testCtx.controller.Stop()
-
-	// Discard the informer's own initial list/watch so only the eviction request's calls are recorded.
-	testCtx.kubeClient.ClearActions()
-
-	response := testCtx.controller.HandlePodEvictionRequest(testCtx.ctx, testCtx.request, NewMaxUnavailableZeroOverrideNone())
-	require.True(t, response.Allowed)
-
-	for _, action := range testCtx.kubeClient.Actions() {
-		require.False(t, action.Matches("list", "pods"), "the eviction path must not list pods from the Kubernetes API")
-	}
-}
-
-// TestPodEviction_PodsAreListedFromTheAPIByDefault is the counterpart to the test above: with
-// -zpdb.eviction-pods-from-informer-cache left at its default of false, the webhook lists pods per zone from
-// the Kubernetes API and reaches the same decision.
-func TestPodEviction_PodsAreListedFromTheAPIByDefault(t *testing.T) {
-	objs := make([]runtime.Object, 0, 8)
-	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
-	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
-
-	for _, p := range []string{testPodZoneA0, testPodZoneA1, testPodZoneA2} {
-		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
-	}
-	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
-		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
-	}
-
-	testCtx := newTestContextWithPodSource(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), false, objs...)
-	defer testCtx.controller.Stop()
-
-	// Discard the informer's own initial list/watch so only the eviction request's calls are recorded.
-	testCtx.kubeClient.ClearActions()
-
-	response := testCtx.controller.HandlePodEvictionRequest(testCtx.ctx, testCtx.request, NewMaxUnavailableZeroOverrideNone())
-	require.True(t, response.Allowed)
-
-	listed := 0
-	for _, action := range testCtx.kubeClient.Actions() {
-		if action.Matches("list", "pods") {
-			listed++
-		}
-	}
-	require.Equal(t, 2, listed, "one pod listing per zone in the rollout group")
-}
-
-// newStaleCacheObjects returns two 3-replica zones with all pods ready, for the tests below which then make
-// one of them not ready.
-func newStaleCacheObjects() []runtime.Object {
-	objs := make([]runtime.Object, 0, 8)
-	objs = append(objs, newEvictionControllerSts(statefulSetZoneA))
-	objs = append(objs, newEvictionControllerSts(statefulSetZoneB))
-
-	for _, p := range []string{testPodZoneA0, testPodZoneA1, testPodZoneA2} {
-		objs = append(objs, newPod(p, objs[0].(*appsv1.StatefulSet)))
-	}
-	for _, p := range []string{testPodZoneB0, testPodZoneB1, testPodZoneB2} {
-		objs = append(objs, newPod(p, objs[1].(*appsv1.StatefulSet)))
-	}
-
-	return objs
-}
-
-// TestPodEviction_StaleInformerCacheFailsOpen records what the two pod sources do when they disagree, which
-// is the one thing -zpdb.eviction-pods-from-informer-cache can change and the only case the tests above
-// cannot cover: they seed the informer from the same fake clientset the eviction path reads, so the two
-// sources agree by construction and the verdict carries no information about the flag.
-//
-// The pod being evicted is always fetched live (podByName), so only the *other* pods of the zone are read
-// from the flag's chosen source. Here one of them becomes not ready without the informer observing it.
-//
-// The asymmetry this pins down:
-//
-//   - from the Kubernetes API, the not-ready pod is counted and the zpdb denies the eviction
-//   - from a stale informer cache, it is counted as ready and the eviction is ALLOWED
-//
-// The second case is a fail-open: the zone ends up with two pods unavailable against maxUnavailable=1. It is
-// not a designed behaviour, it falls out of `unknown` (pod_eviction_k8s_clients.go) only catching a pod
-// missing from the listing, never a pod whose Status is stale in place. A frozen cache is complete, just
-// old, so len(pods) == replicas and nothing flags it.
-//
-// This test asserts the current behaviour so that a change to it is visible. If a cache freshness guard is
-// added, the cache expectation below becomes `false` and the reason it changed is recorded here.
-func TestPodEviction_StaleInformerCacheFailsOpen(t *testing.T) {
-	for _, tc := range []struct {
-		name                  string
-		podsFromInformerCache bool
-		expectAllowed         bool
-		expectMessage         string
-	}{
-		{
-			name:                  "the Kubernetes API sees the not ready pod and denies",
-			podsFromInformerCache: false,
-			expectAllowed:         false,
-			expectMessage:         "1 pod not ready in " + statefulSetZoneA,
-		},
-		{
-			name:                  "a stale informer cache does not and allows",
-			podsFromInformerCache: true,
-			expectAllowed:         true,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			objs := newStaleCacheObjects()
-
-			testCtx := newTestContextWithPodSource(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), tc.podsFromInformerCache, objs...)
-
-			// Stop the pod informer's watch, leaving its cache populated with the pods as they were listed at
-			// startup. This is the state a watch which has silently stopped delivering leaves behind, and it
-			// is what lets the two sources diverge at all: a healthy watch would deliver the update below and
-			// bring them straight back together.
-			testCtx.controller.podObserver.stop()
-			defer testCtx.controller.cfgObserver.stop()
-
-			// ingester-zone-a-1 becomes not ready. It is not the pod being evicted, so it counts towards the
-			// zone's tally.
-			notReady := objs[3].(*corev1.Pod).DeepCopy()
-			require.Equal(t, testPodZoneA1, notReady.Name)
-			notReady.Status.Phase = corev1.PodFailed
-			_, err := testCtx.kubeClient.CoreV1().Pods(testNamespace).Update(testCtx.ctx, notReady, metav1.UpdateOptions{})
-			require.NoError(t, err)
-
-			// Re-assert the pre-failure copy in the cache. Stopping the watch above races with the update
-			// having already been in flight, so pin it rather than depend on the ordering.
-			stale := objs[3].(*corev1.Pod).DeepCopy()
-			require.True(t, util.IsPodRunningAndReady(stale), "the cached copy must still look ready")
-			require.NoError(t, testCtx.controller.podObserver.podsInformer.GetIndexer().Update(stale))
-
-			response := testCtx.controller.HandlePodEvictionRequest(testCtx.ctx, testCtx.request, NewMaxUnavailableZeroOverrideNone())
-
-			require.Equal(t, tc.expectAllowed, response.Allowed)
-			if !tc.expectAllowed {
-				require.Equal(t, tc.expectMessage, response.Result.Message)
-				require.Equal(t, int32(429), response.Result.Code)
-			}
-		})
-	}
 }
 
 func TestPodEviction_PartitionZones(t *testing.T) {

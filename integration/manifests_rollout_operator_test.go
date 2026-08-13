@@ -60,19 +60,12 @@ func initManifestFiles(t *testing.T, test string) string {
 }
 
 func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook bool, extraEnv ...corev1.EnvVar) {
-	createRolloutOperatorWithArgs(t, ctx, api, extApi, directory, webhook, nil, extraEnv...)
-}
-
-// createRolloutOperatorWithArgs deploys the rollout operator with extraArgs appended to the command line
-// arguments from the generated manifest, for tests which need to exercise a specific flag.
-func createRolloutOperatorWithArgs(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook bool, extraArgs []string, extraEnv ...corev1.EnvVar) {
 	createRolloutOperatorDependencies(t, ctx, api, extApi, directory, webhook)
 
 	deployment := loadFromDisk[appsv1.Deployment](t, directory+yamlDeployment, &appsv1.Deployment{})
 	deployment.Spec.Template.Spec.Containers[0].Image = "rollout-operator:latest"
 	deployment.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullNever
 	deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, extraEnv...)
-	deployment.Spec.Template.Spec.Containers[0].Args = append(deployment.Spec.Template.Spec.Containers[0].Args, extraArgs...)
 
 	_, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Create(ctx, deployment, metav1.CreateOptions{})
 	require.NoError(t, err)

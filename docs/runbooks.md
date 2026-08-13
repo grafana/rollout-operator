@@ -92,7 +92,6 @@ How to **investigate**:
 - Check `rollout_operator_zpdb_inflight_eviction_requests`. It settles near `QPS × webhook deadline`, so a value stuck around 45 with the default limits indicates a fully saturated bucket
 - Establish what is driving the eviction volume: a rolling update with a high `rollout-max-unavailable`, a node drain, or a cluster autoscaler consolidating
 - To mitigate, either reduce the eviction concurrency at its source, or raise the limits. See [Kubernetes API client rate limiting](#kubernetes-api-client-rate-limiting)
-- If the eviction path is the source and pod listings are still being served from the Kubernetes API, moving them to the informer cache removes most of the load. See [Pod eviction readiness source](#pod-eviction-readiness-source)
 
 ## Metrics
 
@@ -139,24 +138,6 @@ Note that the number of in-flight requests via the pod eviction webhook can be t
 Use this metric to monitor for abnormal high volumes of in-flight requests. Since these eviction requests should return quickly, even a small number of sustained in-flight requests is likely indicative of an issue.
 
 Check that the rollout-operator error logs to gain insight into why the eviction is being delayed.
-
-### rollout_operator_zpdb_pod_informer_last_event_timestamp_seconds
-
-This is a gauge metric which records when the pod informer's watch last delivered a pod add, update or delete.
-
-Query the age of that observation rather than the metric itself:
-
-```promql
-max by (cluster, namespace) (time() - rollout_operator_zpdb_pod_informer_last_event_timestamp_seconds)
-```
-
-This matters when the pod eviction webhook is configured to tally pod readiness from the informer cache (see [Pod eviction readiness source](#pod-eviction-readiness-source), off by default). In that mode a watch which has silently stopped delivering updates means eviction decisions are being made on stale pod state with nothing else to reveal it. This metric is that signal.
-
-Periodic informer resyncs are deliberately excluded. They are replayed from the cache and keep arriving even when the watch is dead, so counting them would make a dead watch look healthy.
-
-What this therefore measures is the time since the informer last observed a pod _change_. In a namespace of any size that is a close proxy for the watch being alive, but a namespace which is genuinely idle for long enough will look stale without being stale. Treat a rising value as a prompt to investigate rather than a fault in itself: check the rollout-operator logs for watch errors, and confirm whether pods in the namespace really have been static.
-
-If the watch is confirmed unhealthy while `zpdb_eviction_pods_from_informer_cache` is enabled, set it back to `false` so eviction decisions are made from a live listing against the Kubernetes API while the watch problem is diagnosed.
 
 ### kube_customresource_zpdb_spec_max_unavailable
 
@@ -253,29 +234,6 @@ Confirm with the metrics rather than the logs alone:
 
 The effect is self-sustaining: evictions that time out are retried, which deepens the queue. It does not
 recover on its own until the eviction rate drops.
-
-### Pod eviction readiness source
-
-The pod eviction webhook decides whether an eviction would breach the `ZPDB` by tallying how many pods in each
-zone of the rollout group are ready and running. By default those tallies are read from the Kubernetes API, one
-listing of every pod in the zone, per zone, per eviction request.
-
-On a large namespace those listings are the dominant consumer of the client-side rate limiter, and the usual
-cause of [rollout-operatorKubernetesAPIClientRateLimited](#rollout-operatorkubernetesapiclientratelimited).
-Setting this flag to `true` serves the tallies from the rollout-operator's pod informer cache instead, which
-removes them entirely.
-
-The trade-off is that the cache is eventually consistent. Evictions the rollout-operator facilitated itself are
-already covered by its own pod eviction cache; the residual risk is a pod becoming not-ready for a reason
-outside the rollout-operator's control, such as a node crash, which the informer has not observed yet. When
-enabled, monitor `rollout_operator_zpdb_pod_informer_last_event_timestamp_seconds` and revert to `false` if the
-informer's watch looks unhealthy.
-
-```jsonnet
-_config+:: {
-    zpdb_eviction_pods_from_informer_cache: true|false,
-}
-```
 
 ### Disable voluntary pod evictions
 

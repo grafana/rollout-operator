@@ -57,31 +57,26 @@ type EvictionController struct {
 	podObserver *podObserver
 	metrics     *Metrics
 
-	// Whether the eviction webhook tallies pod readiness from the pod informer cache or from a live listing
-	// against the Kubernetes API. The informer runs either way, since it also drives the pod eviction cache.
-	podsFromInformerCache bool
-
 	resolver spanlogger.TenantResolver
 }
 
-func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, readyAnnotationPatchTimeout time.Duration, podsFromInformerCache bool, logger log.Logger, metrics *Metrics) *EvictionController {
+func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, readyAnnotationPatchTimeout time.Duration, logger log.Logger, metrics *Metrics) *EvictionController {
 
 	// watches for ZoneAwarePodDisruptionBudget configurations being applied and maintains a zpdb configuration configCache
 	cfgObserver := newConfigObserver(dynamicClient, namespace, logger, metrics)
 
 	// watches for Pod changes which are reflected into the pod eviction configCache
-	podObserver := newPodObserver(kubeClient, namespace, readyAnnotationPatchTimeout, cfgObserver, metrics, logger)
+	podObserver := newPodObserver(kubeClient, namespace, readyAnnotationPatchTimeout, cfgObserver, logger)
 
 	return &EvictionController{
-		locks:                 make(map[string]*sync.Mutex, 5),
-		lock:                  sync.RWMutex{},
-		cfgObserver:           cfgObserver,
-		podObserver:           podObserver,
-		kubeClient:            kubeClient,
-		metrics:               metrics,
-		podsFromInformerCache: podsFromInformerCache,
-		logger:                logger,
-		resolver:              util.NoTenantResolver{},
+		locks:       make(map[string]*sync.Mutex, 5),
+		lock:        sync.RWMutex{},
+		cfgObserver: cfgObserver,
+		podObserver: podObserver,
+		kubeClient:  kubeClient,
+		metrics:     metrics,
+		logger:      logger,
+		resolver:    util.NoTenantResolver{},
 	}
 }
 
@@ -181,12 +176,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	c.metrics.InFlightRequests.WithLabelValues().Inc()
 	defer c.metrics.InFlightRequests.WithLabelValues().Dec()
 
-	request := admissionReviewRequest{req: ar, log: logger, client: k8sClient{
-		ctx:                   ctx,
-		kubeClient:            c.kubeClient,
-		podLister:             c.podObserver.podLister,
-		podsFromInformerCache: c.podsFromInformerCache,
-	}}
+	request := admissionReviewRequest{req: ar, log: logger, client: k8sClient{ctx: ctx, kubeClient: c.kubeClient}}
 
 	// set up key=value pairs we include on all logs within this context
 	request.initLogger()
