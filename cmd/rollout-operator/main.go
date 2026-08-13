@@ -408,6 +408,7 @@ func maybeStartTLSServer(cfg config, kubeConfig *rest.Config, podHTTPClient *ins
 	// client-side rate limiter's wait so a burst of concurrent webhook requests can't stall it (see
 	// instrumentation.LimitKubernetesAPIClientPerAPIGroup). We use 90% of the configured request timeout.
 	webhookHandlerTimeout := cfg.serverTLSRequestTimeout * 9 / 10
+	metrics.AdmissionWebhookHandlerTimeout.Set(webhookHandlerTimeout.Seconds())
 
 	tlsSrv.Handle(admission.NoDownscaleWebhookPath, admission.Serve(admission.NoDownscale, logger, noDownscaleKubeClient, webhookHandlerTimeout))
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, prepareDownscaleKubeClient, webhookHandlerTimeout))

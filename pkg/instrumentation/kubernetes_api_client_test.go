@@ -59,7 +59,7 @@ func TestNilResponse(t *testing.T) {
 			Help:    "Time",
 			Buckets: []float64{1},
 		},
-		[]string{"path", "method", "status_code"},
+		[]string{"path", "method", "status_code", "api_group"},
 	)
 
 	noResponseRT := &noResponseRoundTripper{}

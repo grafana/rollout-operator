@@ -184,6 +184,14 @@ rollout_operator_args+:: {
 
 Increasing these values will place additional load onto the Kubernetes API server.
 
+The rate limits can be disabled with;
+
+```jsonnet
+rollout_operator_args+:: {
+    'kubernetes.client-qps': 0,
+}
+```
+
 #### Recognising exhaustion
 
 When a bucket is exhausted, requests queue for a token until they would exceed their context deadline, at

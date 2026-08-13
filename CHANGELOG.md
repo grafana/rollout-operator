@@ -3,6 +3,8 @@
 ## main / unreleased
 
 * [ENHANCEMENT] Added the `KubernetesAPIClientRateLimited` alert, firing when the rollout-operator has been unable to send Kubernetes API requests because its client-side rate limiter is exhausted. #479
+* [ENHANCEMENT] Added `rollout_operator_admission_webhook_handler_timeout_seconds`, the deadline imposed on each admission webhook handler's context (90% of `-server-tls.request-timeout`), and an `api_group` label to `rollout_operator_kubernetes_api_client_request_duration_seconds` matching the one already on `rollout_operator_kubernetes_api_client_rate_limited_requests_total`. #479
+* [ENHANCEMENT] Updated the rollout-operator dashboard mixin with a "Kubernetes API client rate limiting" row (rate limited requests, percent of requests rejected, and throughput vs. recent observed peak, all by API group) and a deadline threshold line on the p99 webhook latency panel. #479
 * [CHANGE] Prefer `grafana.com/min-time-between-zones-downscale` as a StatefulSet annotation instead of a label. The label remains supported as a fallback and logs a deprecation warning when used. #463
 * [BUGFIX] Allow a StatefulSet rollout to recover when pods from a previous failed update are stuck in an unrecoverable state (e.g. `CrashLoopBackOff` or `ImagePullBackOff`): outdated stuck pods are deleted even when the `rollout-max-unavailable` budget is exhausted, since deleting an already-unavailable pod doesn't reduce availability. A subsequent Spec update can then replace them without a manual delete. #466
 * [ENHANCEMENT] Updated dependencies, including: #470

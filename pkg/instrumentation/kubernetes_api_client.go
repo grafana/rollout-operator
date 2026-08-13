@@ -29,7 +29,7 @@ func InstrumentKubernetesAPIClient(cfg *rest.Config, reg prometheus.Registerer) 
 			Help:    "Time (in seconds) spent waiting for requests to the Kubernetes API",
 			Buckets: instrument.DefBuckets,
 		},
-		[]string{"path", "method", "status_code"},
+		[]string{"path", "method", "status_code", "api_group"},
 	)
 
 	cfg.Wrap(func(rt http.RoundTripper) http.RoundTripper {
@@ -55,7 +55,10 @@ func (k *kubernetesAPIClientInstrumentation) RoundTrip(req *http.Request) (*http
 	if resp != nil {
 		statusCode = strconv.Itoa(resp.StatusCode)
 	}
-	instrument.ObserveWithExemplar(req.Context(), k.hist.WithLabelValues(urlToResourceDescription(req.URL.EscapedPath()), req.Method, statusCode), duration.Seconds())
+	// pathToAPIGroup is the same classifier the per-API-group rate limiter buckets requests by (see
+	// kubernetes_api_client_ratelimit.go), so this metric's api_group label lines up exactly with the one on
+	// rollout_operator_kubernetes_api_client_rate_limited_requests_total.
+	instrument.ObserveWithExemplar(req.Context(), k.hist.WithLabelValues(urlToResourceDescription(req.URL.EscapedPath()), req.Method, statusCode, pathToAPIGroup(req.URL.Path)), duration.Seconds())
 
 	return resp, err
 }

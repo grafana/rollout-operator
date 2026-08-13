@@ -48,6 +48,7 @@ type testContext struct {
 	logs       *dummyLogger
 	request    admissionv1.AdmissionReview
 	controller *EvictionController
+	kubeClient *fake.Clientset
 }
 
 // A dummyLogger accumulates log lines into a slice so we can assert that certain logs were recorded
@@ -103,7 +104,8 @@ func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawCon
 
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
-	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, 5*time.Second, testCtx.logs, zpdbMetrics)
+	testCtx.kubeClient = fake.NewClientset(objects...)
+	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, 5*time.Second, testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {
@@ -207,9 +209,12 @@ func TestPodEviction_PodNotFound(t *testing.T) {
 }
 
 func TestPodEviction_PodNotReady(t *testing.T) {
+	// A pdb config is given so this pod is in zpdb scope: the behaviour under test is bypassing PDB
+	// enforcement for a terminal pod, which only has anything to bypass when the pod is governed by a zpdb in
+	// the first place. An out-of-scope pod is allowed regardless of readiness, so it wouldn't exercise this.
 	pod := newPodNoOwner(testPodZoneA0)
 	pod.Status.Phase = corev1.PodFailed
-	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil, pod)
+	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), pod)
 	defer testCtx.controller.Stop()
 	testCtx.assertAllowResponseWithWarning(t, "pod is not ready")
 	testCtx.logs.assertHasLog(t, []string{`reason="pod is not ready"`})
@@ -232,6 +237,25 @@ func TestPodEviction_PodNotInScope(t *testing.T) {
 	defer testCtx.controller.Stop()
 	testCtx.assertAllowResponse(t)
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", "200")))
+}
+
+// TestPodEviction_PodNotInScope_SkipsLiveAPICall pins the point of checking scope from the pod informer
+// cache first: for a pod which isn't covered by any zpdb, the eviction is allowed without ever calling the
+// Kubernetes API, since scope is decided from labels alone and the cache already has them.
+func TestPodEviction_PodNotInScope_SkipsLiveAPICall(t *testing.T) {
+	sts := newEvictionControllerSts(statefulSetZoneA)
+	pod := newPod(testPodZoneA0, sts)
+	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil, pod, sts)
+	defer testCtx.controller.Stop()
+
+	// Discard the informer's own initial list/watch so only the eviction request's own calls are recorded.
+	testCtx.kubeClient.ClearActions()
+
+	testCtx.assertAllowResponse(t)
+
+	for _, action := range testCtx.kubeClient.Actions() {
+		require.False(t, action.Matches("get", "pods"), "an out-of-scope pod must be resolved from the informer cache, not the Kubernetes API")
+	}
 }
 
 func TestPodEviction_MaxUnavailableEq0(t *testing.T) {
