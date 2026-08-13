@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Use informer pod cache for eviction request ZPDB scope determination. Removes Kubernetes API call for pods not within the ZPDB. #479
 * [ENHANCEMENT] Added the `KubernetesAPIClientRateLimited` alert, firing when the rollout-operator has been unable to send Kubernetes API requests because its client-side rate limiter is exhausted, and the `KubernetesAPIClientApproachingRateLimit` alert, an earlier warning firing when a pod sustains over 80% of its configured limit for an API group before anything is actually dropped. #479
 * [ENHANCEMENT] Added `rollout_operator_kubernetes_api_client_rate_limit_qps`, the configured `-kubernetes.client-qps` value, published only while client-side rate limiting is enabled. #479
 * [ENHANCEMENT] Added `rollout_operator_admission_webhook_handler_timeout_seconds`, the deadline imposed on each admission webhook handler's context (90% of `-server-tls.request-timeout`), and an `api_group` label to `rollout_operator_kubernetes_api_client_request_duration_seconds` matching the one already on `rollout_operator_kubernetes_api_client_rate_limited_requests_total`. #479
