@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/grafana/rollout-operator/pkg/util"
@@ -60,13 +61,13 @@ type EvictionController struct {
 	resolver spanlogger.TenantResolver
 }
 
-func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, readyAnnotationPatchTimeout time.Duration, logger log.Logger, metrics *Metrics) *EvictionController {
+func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, podsFactory informers.SharedInformerFactory, readyAnnotationPatchTimeout time.Duration, logger log.Logger, metrics *Metrics) *EvictionController {
 
 	// watches for ZoneAwarePodDisruptionBudget configurations being applied and maintains a zpdb configuration configCache
 	cfgObserver := newConfigObserver(dynamicClient, namespace, logger, metrics)
 
 	// watches for Pod changes which are reflected into the pod eviction configCache
-	podObserver := newPodObserver(kubeClient, namespace, readyAnnotationPatchTimeout, cfgObserver, logger)
+	podObserver := newPodObserver(kubeClient, namespace, podsFactory, readyAnnotationPatchTimeout, cfgObserver, logger)
 
 	return &EvictionController{
 		locks:       make(map[string]*sync.Mutex, 5),

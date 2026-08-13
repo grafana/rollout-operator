@@ -857,7 +857,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			// Pass in a slice of errors. Each eviction request takes and removes from the head and uses this as the eviction response. Once exhausted no evictions will return an error.
 			evictionController := &mockEvictionController{nextErrorsIfAny: testData.zpdbErrors, hasPartitionAwarePdb: testData.zpdbPartitionMode}
 
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), evictionController)
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, NewPodInformerFactory(kubeClient, testNamespace), nil, 5*time.Second, reg, log.NewNopLogger(), evictionController)
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -1363,7 +1363,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 			// Create the controller and start informers.
 			reg := prometheus.NewPedanticRegistry()
-			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, podClientRoundTripper.client(), 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
+			c := NewRolloutController(kubeClient, restMapper, scaleClient, dynamicClient, testClusterDomain, testNamespace, NewPodInformerFactory(kubeClient, testNamespace), podClientRoundTripper.client(), 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
@@ -1465,7 +1465,7 @@ func TestRolloutController_ReconcileShouldDeleteMetricsForDecommissionedRolloutG
 
 	// Create the controller and start informers.
 	reg := prometheus.NewPedanticRegistry()
-	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
+	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, NewPodInformerFactory(kubeClient, testNamespace), nil, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
 	require.NoError(t, c.Init())
 	defer c.Stop()
 
@@ -1774,4 +1774,18 @@ func (m *mockEvictionController) MarkPodAsDeleted(_ context.Context, _ string, _
 
 func (m *mockEvictionController) HasPartitionAwarePdb(pod *corev1.Pod) (bool, error) {
 	return m.hasPartitionAwarePdb, nil
+}
+
+// TestRolloutController_UsesTheSuppliedPodInformerFactory asserts that the controller attaches to the pod
+// informer factory it is given rather than building its own. The ZPDB eviction controller is handed the same
+// factory, so this is what keeps the namespace's pods watched once and cached once.
+func TestRolloutController_UsesTheSuppliedPodInformerFactory(t *testing.T) {
+	kubeClient := fake.NewClientset()
+	podsFactory := NewPodInformerFactory(kubeClient, testNamespace)
+
+	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, podsFactory, nil, 5*time.Second, prometheus.NewPedanticRegistry(), log.NewNopLogger(), &mockEvictionController{})
+	require.NoError(t, c.Init())
+	defer c.Stop()
+
+	require.Same(t, podsFactory.Core().V1().Pods().Informer(), c.podsInformer)
 }

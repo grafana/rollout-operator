@@ -21,10 +21,18 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 
 	rolloutconfig "github.com/grafana/rollout-operator/pkg/config"
 )
+
+// newTestPodsFactory builds the shared pod informer factory the eviction controller attaches to. In
+// production this is created once by controller.NewPodInformerFactory and passed to both controllers.
+func newTestPodsFactory(kubeClient kubernetes.Interface) informers.SharedInformerFactory {
+	return informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, informers.WithNamespace(testNamespace))
+}
 
 const (
 	statefulSetZoneA  = "ingester-zone-a"
@@ -105,7 +113,7 @@ func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawCon
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
 	testCtx.kubeClient = fake.NewClientset(objects...)
-	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, 5*time.Second, testCtx.logs, zpdbMetrics)
+	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, newTestPodsFactory(testCtx.kubeClient), 5*time.Second, testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {
@@ -122,7 +130,8 @@ func newTestContextWithoutAdmissionReview(t *testing.T, pdbRawConfig *unstructur
 
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
-	testCtx.controller = NewEvictionController(fake.NewClientset(objects...), newFakeDynamicClient(), testNamespace, 5*time.Second, testCtx.logs, zpdbMetrics)
+	kubeClient := fake.NewClientset(objects...)
+	testCtx.controller = NewEvictionController(kubeClient, newFakeDynamicClient(), testNamespace, newTestPodsFactory(kubeClient), 5*time.Second, testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {

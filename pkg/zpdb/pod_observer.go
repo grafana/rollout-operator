@@ -26,11 +26,10 @@ type podObserver struct {
 	stopCh              chan struct{}
 }
 
-func newPodObserver(kubeClient kubernetes.Interface, namespace string, readyAnnotationPatchTimeout time.Duration, configObserver *configObserver, logger log.Logger) *podObserver {
-	namespaceOpt := informers.WithNamespace(namespace)
-
-	// initialize the ZoneAwarePodDisruptionBudget custom resource watching
-	podsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt)
+// newPodObserver builds a pod observer on top of the given shared pod informer factory. The factory is
+// shared with the rollout controller: both need a full view of the pods in the namespace, and a factory
+// each would mean two watches and two in-memory copies of every pod.
+func newPodObserver(kubeClient kubernetes.Interface, namespace string, podsFactory informers.SharedInformerFactory, readyAnnotationPatchTimeout time.Duration, configObserver *configObserver, logger log.Logger) *podObserver {
 	podsInformer := podsFactory.Core().V1().Pods()
 
 	c := &podObserver{
@@ -57,6 +56,8 @@ func (c *podObserver) start() error {
 		return err
 	}
 
+	// Start only starts informers the shared factory has not started yet, so whichever of the two owners
+	// gets here first binds the pod informer's lifetime to its stop channel and the other call is a no-op.
 	go c.podsFactory.Start(c.stopCh)
 
 	// Wait until all informer caches have been synced.

@@ -84,7 +84,15 @@ type RolloutController struct {
 	discoveredGroups map[string]struct{}
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, podHTTPClient *instrumentation.PodHTTPClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController ZPDBEvictionController) *RolloutController {
+// NewPodInformerFactory returns the shared pod informer factory. Both the rollout controller and the ZPDB
+// eviction controller need a full view of the pods in the namespace, so they are given the same factory:
+// one each would mean two watches and two in-memory copies of every pod, which on a large cell is thousands
+// of objects held twice.
+func NewPodInformerFactory(kubeClient kubernetes.Interface, namespace string) informers.SharedInformerFactory {
+	return informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, informers.WithNamespace(namespace))
+}
+
+func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, podsFactory informers.SharedInformerFactory, podHTTPClient *instrumentation.PodHTTPClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController ZPDBEvictionController) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -96,7 +104,6 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 
 	statefulSetsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt, statefulSetsSelOpt)
 	statefulSetsInformer := statefulSetsFactory.Apps().V1().StatefulSets()
-	podsFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, namespaceOpt)
 	podsInformer := podsFactory.Core().V1().Pods()
 
 	c := &RolloutController{
@@ -164,7 +171,9 @@ func (c *RolloutController) Init() error {
 		return err
 	}
 
-	// Start informers.
+	// Start informers. Start only starts informers the shared factory has not started yet, so whichever of
+	// the pod factory's two owners gets here first binds the pod informer's lifetime to its stop channel
+	// and the other call is a no-op.
 	go c.statefulSetsFactory.Start(c.stopCh)
 	go c.podsFactory.Start(c.stopCh)
 
