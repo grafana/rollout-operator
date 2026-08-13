@@ -93,15 +93,6 @@ How to **investigate**:
 - Establish what is driving the eviction volume: a rolling update with a high `rollout-max-unavailable`, a node drain, or a cluster autoscaler consolidating
 - To mitigate, either reduce the eviction concurrency at its source, or raise the limits. See [Kubernetes API client rate limiting](#kubernetes-api-client-rate-limiting)
 
-Example Jsonnet to update the limits;
-
-```jsonnet
-rollout_operator_args+:: {
-    'kubernetes.client-qps': 20,
-    'kubernetes.client-burst': 40,
-  },
-```
-
 ## Metrics
 
 A Prometheus metrics endpoint is available at `/metrics` of the rollout-operator deployment.
