@@ -190,14 +190,21 @@ local filename = 'rollout-operator.json';
         $.queryPanel(
           local selector = $.rolloutOperator_jobMatcher();
           local rejected = 'sum by (component, api_group) (rate(rollout_operator_kubernetes_api_client_rate_limited_requests_total{%s}[$__rate_interval]))' % [selector];
-          local attempted = 'sum by (component, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval]))' % [selector];
+          local attempted = utils.ncHistogramSumBy(
+            query=utils.ncHistogramCountRate(metrics.k8s_api_client_request_duration_seconds, selector),
+            sum_by=['component', 'api_group'],
+          );
           // A fully saturated group makes zero successful requests, so `attempted` has no series for it at
           // all - PromQL `+` is an inner join, so a plain `rejected + attempted` would silently drop that
           // series from the denominator and the panel would go blank for exactly the outage it exists to
           // show. `attempted or (rejected * 0)` coalesces the missing side to zero on rejected's own label
           // set, so the denominator is always defined wherever rejected is.
-          '%s / (%s + (%s or (%s * 0)))' % [rejected, rejected, attempted, rejected],
-          '{{component}}/{{api_group}}',
+          local query = {
+            classic: '%s / (%s + (%s or (%s * 0)))' % [rejected, rejected, attempted.classic, rejected],
+            native: '%s / (%s + (%s or (%s * 0)))' % [rejected, rejected, attempted.native, rejected],
+          };
+          [utils.showClassicHistogramQuery(query), utils.showNativeHistogramQuery(query)],
+          ['{{component}}/{{api_group}}', '{{component}}/{{api_group}}'],
         ) +
         $.units('percentunit') +
         $.min(0) +
@@ -211,12 +218,26 @@ local filename = 'rollout-operator.json';
         $.panelDescription(title, 'Compares observed throughput against the highest sustained rate observed in the trailing 30 minutes, by API group and by component (core-controller, pod-eviction, no-downscale, prepare-downscale). Kept per component since each has its own independent rate limiter bucket at the same nominal QPS: a peak summed across components is not a valid ceiling for any one of their buckets. The peak line is a lower bound on the -kubernetes.client-qps needed for that component to avoid self-throttling this traffic pattern. It says nothing about -kubernetes.client-burst: burst absorbs sub-second spikes that a rate() computed over minutes cannot see, so no line for it is derivable from this data.') +
         $.queryPanel(
           local selector = $.rolloutOperator_jobMatcher();
-          local throughput = 'sum by (component, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count{%s}[$__rate_interval]))' % [selector];
+          local throughput = utils.ncHistogramSumBy(
+            query=utils.ncHistogramCountRate(metrics.k8s_api_client_request_duration_seconds, selector),
+            sum_by=['component', 'api_group'],
+          );
+          local peak = {
+            classic: 'max_over_time((%s)[30m:])' % [throughput.classic],
+            native: 'max_over_time((%s)[30m:])' % [throughput.native],
+          };
           [
-            throughput,
-            'max_over_time((%s)[30m:])' % [throughput],
+            utils.showClassicHistogramQuery(throughput),
+            utils.showNativeHistogramQuery(throughput),
+            utils.showClassicHistogramQuery(peak),
+            utils.showNativeHistogramQuery(peak),
           ],
-          ['{{component}}/{{api_group}}', '{{component}}/{{api_group}} peak (30m)'],
+          [
+            '{{component}}/{{api_group}}',
+            '{{component}}/{{api_group}}',
+            '{{component}}/{{api_group}} peak (30m)',
+            '{{component}}/{{api_group}} peak (30m)',
+          ],
         ) +
         {
           fieldConfig+: {
