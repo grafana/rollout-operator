@@ -140,7 +140,7 @@ This counter metric reports on the total number of pod eviction requests.
 
 This includes both pod eviction requests which come in via the pod eviction webhook, and pod deletion requests which come from the rollout controller (StatefulSet pod updates).
 
-Note that the number of requests arriving via the pod eviction webhook can be tracked with the `rollout_operator_kubernetes_api_client_request_duration_seconds_count` metric.
+Note that the number of requests arriving via the pod eviction webhook can be tracked with the `rollout_operator_kubernetes_api_client_request_duration_seconds` histogram's count: `rollout_operator_kubernetes_api_client_request_duration_seconds_count` if scraped as a classic histogram, or `histogram_count(rollout_operator_kubernetes_api_client_request_duration_seconds)` if scraped as a native histogram. Whether this cell exposes the classic `_count`/`_sum`/`_bucket` series or only the native form depends on its Prometheus/Mimir scrape config.
 
 Use this metric to monitor for abnormal request volume and/or frequency.
 

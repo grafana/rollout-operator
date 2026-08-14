@@ -62,10 +62,16 @@ local utils = import 'mixin-utils/utils.libsonnet';
           // summing across them would let a genuinely idle client hide one running hot, or several
           // individually-fine clients look saturated together. rollout_operator_kubernetes_api_client_rate_limit_qps
           // is only published while rate limiting is enabled, so this alert is naturally absent - not a
-          // divide-by-zero - where it isn't.
+          // divide-by-zero - where it isn't. Whether the request duration histogram is scraped as classic
+          // or native depends on the cell's Prometheus/Mimir config, so both forms of the count rate are
+          // tried; only one is ever populated in a given cell, and `or` picks whichever that is.
           alert: $.alertName('KubernetesAPIClientApproachingRateLimit'),
           expr: |||
-            sum by (%(instance_labels)s, component, api_group) (rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count[5m]))
+            sum by (%(instance_labels)s, component, api_group) (
+              rate(rollout_operator_kubernetes_api_client_request_duration_seconds_count[5m])
+              or
+              histogram_count(rate(rollout_operator_kubernetes_api_client_request_duration_seconds[5m]))
+            )
             / on (%(instance_labels)s, component) group_left()
             max by (%(instance_labels)s, component) (rollout_operator_kubernetes_api_client_rate_limit_qps)
             > 0.8
