@@ -2,6 +2,7 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ['*']
   pull_request:
 
 permissions:
@@ -11,40 +12,43 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: '1.26'
           check-latest: true
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - run: make rollout-operator
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: '1.26'
           check-latest: true
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - run: make test
       - run: make test-boringcrypto
 
   integration:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: '1.26'
           check-latest: true
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - name: Install kind
-        uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
         with:
           install_only: true
       - run: make build-image
@@ -53,15 +57,16 @@ jobs:
   integration-boringcrypto:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: '1.26'
           check-latest: true
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - name: Install kind
-        uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
         with:
           install_only: true
       - run: make build-image-boringcrypto
@@ -70,14 +75,76 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: '1.26'
           check-latest: true
-      - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9 
+          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
+      - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9
         with:
           version: v2.9.0
           args: --timeout=5m
+
+  push-image:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - test
+      - integration
+      - integration-boringcrypto
+      - lint
+    if: github.ref_type == 'tag' # This is a release branch, so we only publish images for tags.
+    permissions:
+      contents: write # Needed to be able to create releases.
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: false
+      # The shared Docker Hub write token has been disabled. We now push to a
+      # repo-scoped GAR mirror repo via OIDC; the gar-image-mirror ops service
+      # copies the images to docker.io/grafana. See
+      # https://github.com/grafana/deployment_tools/blob/master/docs/platform/gar-image-mirror.md
+      - name: Log in to GAR
+        uses: grafana/shared-workflows/actions/login-to-gar@1f541877ceb22c7be7667d8a8df04984aeac9f9d # login-to-gar/v1.0.3
+        with:
+          registry: us-docker.pkg.dev
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Build and push images
+        run: make publish-images
+        env:
+          IMAGE_TAG: ${{ github.ref_name }}
+          # Push to the GAR mirror repo; gar-image-mirror copies these to
+          # docker.io/grafana. The Publish release step below intentionally does
+          # not set IMAGE_PREFIX, so the release notes keep the public grafana/ name.
+          IMAGE_PREFIX: us-docker.pkg.dev/grafanalabs-global/dockerhub-rollout-operator-prod-mirror
+      # Publishing to Docker Hub via the mirror is asynchronous, so wait for the
+      # images to appear before creating the release (whose notes reference them).
+      - name: Wait for images on Docker Hub
+        timeout-minutes: 15
+        run: |
+          for img in rollout-operator rollout-operator-boringcrypto; do
+            until docker buildx imagetools inspect "docker.io/grafana/$img:$IMAGE_TAG" >/dev/null 2>&1; do
+              echo "waiting for docker.io/grafana/$img:$IMAGE_TAG to be mirrored"
+              sleep 15
+            done
+            echo "docker.io/grafana/$img:$IMAGE_TAG is available"
+          done
+        env:
+          IMAGE_TAG: ${{ github.ref_name }}
+      - name: Publish release
+        run: make release-notes | gh release create "$IMAGE_TAG" --latest=false --notes-file -
+        env:
+          IMAGE_TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
