@@ -2,14 +2,13 @@
 
 ## main / unreleased
 
+* [CHANGE] Prefer `grafana.com/min-time-between-zones-downscale` as a StatefulSet annotation instead of a label. The label remains supported as a fallback and logs a deprecation warning when used. #463
 * [ENHANCEMENT] Use informer pod cache for eviction request ZPDB scope determination. Removes Kubernetes API call for pods not within the ZPDB. #479
 * [ENHANCEMENT] Added the `KubernetesAPIClientRateLimited` alert, firing when the rollout-operator has been unable to send Kubernetes API requests because its client-side rate limiter is exhausted, and the `KubernetesAPIClientApproachingRateLimit` alert, an earlier warning firing when a component sustains over 80% of its own configured limit for an API group. #479 #481
 * [ENHANCEMENT] Added `rollout_operator_kubernetes_api_client_rate_limit_qps`, the configured `-kubernetes.client-qps` value, published per component only while client-side rate limiting is enabled for it. #479
 * [ENHANCEMENT] Added `rollout_operator_admission_webhook_handler_timeout_seconds`, the deadline imposed on each admission webhook handler's context (90% of `-server-tls.request-timeout`), and `api_group` and `component` labels to `rollout_operator_kubernetes_api_client_request_duration_seconds` and `component` to `rollout_operator_kubernetes_api_client_rate_limited_requests_total`, identifying which of the core controller, pod-eviction, no-downscale or prepare-downscale webhook clients a request belongs to. #479
 * [ENHANCEMENT] Updated the rollout-operator dashboard mixin with a "Kubernetes API client rate limiting" row (rate limited requests, percent of requests rejected, and throughput vs. recent observed peak, all by API group and component) and a deadline threshold line on the p99 webhook latency panel. #479 #481
 * [ENHANCEMENT] The rollout controller and the ZPDB eviction controller now share a single pod informer for the namespace, replacing two independent watches and two in-memory copies of every pod. #480
-* [CHANGE] Prefer `grafana.com/min-time-between-zones-downscale` as a StatefulSet annotation instead of a label. The label remains supported as a fallback and logs a deprecation warning when used. #463
-* [BUGFIX] Allow a StatefulSet rollout to recover when pods from a previous failed update are stuck in an unrecoverable state (e.g. `CrashLoopBackOff` or `ImagePullBackOff`): outdated stuck pods are deleted even when the `rollout-max-unavailable` budget is exhausted, since deleting an already-unavailable pod doesn't reduce availability. A subsequent Spec update can then replace them without a manual delete. #466
 * [ENHANCEMENT] Updated dependencies, including: #470 #484
   * `github.com/grafana/dskit` from `v0.0.0-20260703122047-de1ec7541c44` to `v0.0.0-20260814134254-4a836a70f745`
   * `github.com/prometheus/client_golang` from `v1.23.2` to `v1.24.1`
@@ -25,6 +24,7 @@
   * `k8s.io/apimachinery` from `v0.36.2` to `v0.36.3`
   * `k8s.io/client-go` from `v0.36.2` to `v0.36.3`
 * [BUGFIX] Avoid doubling a leading `/` when building prepare-downscale pod URLs from `grafana.com/prepare-downscale-http-path`. #468
+* [BUGFIX] Allow a StatefulSet rollout to recover when pods from a previous failed update are stuck in an unrecoverable state (e.g. `CrashLoopBackOff` or `ImagePullBackOff`): outdated stuck pods are deleted even when the `rollout-max-unavailable` budget is exhausted, since deleting an already-unavailable pod doesn't reduce availability. A subsequent Spec update can then replace them without a manual delete. #466
 
 ## v0.38.1
 
