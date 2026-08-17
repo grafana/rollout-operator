@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies to resolve CVEs. #486
+
 ## v0.28.8
 
 * [ENHANCEMENT] No code changes, building a new image with Go `1.26.5`.
