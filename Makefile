@@ -15,9 +15,6 @@ GOARCH ?= $(shell go env GOARCH)
 DONT_FIND := -name vendor -prune -o -name .git -prune -o -name .cache -prune -o -name .pkg -prune
 GO_FILES := $(shell find . $(DONT_FIND) -o -type f -name '*.go' -print)
 
-# Boringcrypto has a different base image for glibc
-BORINGCRYPTO_BASE_IMAGE=gcr.io/distroless/base-nossl-debian13:nonroot
-
 .DEFAULT_GOAL := rollout-operator
 
 # Adapted from https://www.thapaliya.com/en/writings/well-documented-makefiles/
@@ -39,7 +36,7 @@ build-image: clean ## Build the rollout-operator image
 .PHONY: build-image-boringcrypto
 build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto
 	# Tags with the regular image repo for integration testing
-	docker buildx build --load --platform linux/$(GOARCH) --build-arg revision=$(GIT_REVISION) --build-arg BASEIMAGE=$(BORINGCRYPTO_BASE_IMAGE) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
+	docker buildx build --load --platform linux/$(GOARCH) --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) -f Dockerfile.boringcrypto .
 
 .PHONY: build-test-images
 build-test-images: build-image integration/mock-service/.uptodate ## Build both rollout-operator and mock-service images for testing
@@ -53,7 +50,7 @@ publish-standard-image: clean ## Build and publish only the standard rollout-ope
 
 .PHONY: publish-boringcrypto-image
 publish-boringcrypto-image: clean ## Build and publish only the boring-crypto rollout-operator image
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) --build-arg BASEIMAGE=$(BORINGCRYPTO_BASE_IMAGE) --build-arg BUILDTARGET=rollout-operator-boringcrypto -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) .
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) -f Dockerfile.boringcrypto .
 
 .PHONY: release-notes 
 release-notes: ## Generate the release notes for a GitHub release
