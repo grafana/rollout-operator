@@ -10,9 +10,16 @@
 * [ENHANCEMENT] The rollout controller and the ZPDB eviction controller now share a single pod informer for the namespace, replacing two independent watches and two in-memory copies of every pod. #480
 * [CHANGE] Prefer `grafana.com/min-time-between-zones-downscale` as a StatefulSet annotation instead of a label. The label remains supported as a fallback and logs a deprecation warning when used. #463
 * [BUGFIX] Allow a StatefulSet rollout to recover when pods from a previous failed update are stuck in an unrecoverable state (e.g. `CrashLoopBackOff` or `ImagePullBackOff`): outdated stuck pods are deleted even when the `rollout-max-unavailable` budget is exhausted, since deleting an already-unavailable pod doesn't reduce availability. A subsequent Spec update can then replace them without a manual delete. #466
-* [ENHANCEMENT] Updated dependencies, including: #470
+* [ENHANCEMENT] Updated dependencies, including: #470 #484
+  * `github.com/grafana/dskit` from `v0.0.0-20260703122047-de1ec7541c44` to `v0.0.0-20260814134254-4a836a70f745`
   * `github.com/prometheus/client_golang` from `v1.23.2` to `v1.24.1`
   * `github.com/prometheus/common` from `v0.70.0` to `v0.70.1`
+  * `github.com/stretchr/testify` from `v1.11.1` to `v1.12.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.69.0` to `v0.70.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.69.0` to `v0.70.0`
+  * `go.opentelemetry.io/otel/trace` from `v1.44.0` to `v1.45.0`
+  * `go.opentelemetry.io/otel` from `v1.44.0` to `v1.45.0`
+  * `golang.org/x/mod` from `v0.38.0` to `v0.40.0`
   * `k8s.io/api` from `v0.36.2` to `v0.36.3`
   * `k8s.io/apiextensions-apiserver` from `v0.36.2` to `v0.36.3`
   * `k8s.io/apimachinery` from `v0.36.2` to `v0.36.3`
