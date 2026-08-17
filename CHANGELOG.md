@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.28.9
+
 * [ENHANCEMENT] Updated dependencies to resolve CVEs. #486
 
 ## v0.28.8
