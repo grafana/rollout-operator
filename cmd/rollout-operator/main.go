@@ -35,7 +35,9 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/admission"
 	"github.com/grafana/rollout-operator/pkg/controller"
+	"github.com/grafana/rollout-operator/pkg/frontend"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
+	"github.com/grafana/rollout-operator/pkg/status"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
 	"github.com/grafana/rollout-operator/pkg/webhooks"
 	"github.com/grafana/rollout-operator/pkg/zpdb"
@@ -44,7 +46,7 @@ import (
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
 
 var (
-	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale"}
+	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale", "ui"}
 )
 
 type config struct {
@@ -86,7 +88,7 @@ type config struct {
 func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.logFormat, "log.format", "logfmt", "The log format. Supported values: logfmt, json. Defaults to logfmt.")
 	fs.StringVar(&cfg.logLevel, "log.level", "debug", "The log level. Supported values: debug, info, warn, error.")
-	fs.IntVar(&cfg.serverPort, "server.port", 8001, "Port to use for exposing instrumentation and readiness probe endpoints.")
+	fs.IntVar(&cfg.serverPort, "server.port", 8001, "Port to use for exposing instrumentation, readiness probe, and status UI endpoints.")
 	fs.StringVar(&cfg.kubeAPIURL, "kubernetes.api-url", "", "The Kubernetes server API URL. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.StringVar(&cfg.kubeConfigFile, "kubernetes.config-file", "", "The Kubernetes config file path. If not specified, it will be auto-detected when running within a Kubernetes cluster.")
 	fs.DurationVar(&cfg.kubeClientTimeout, "kubernetes.client-timeout", 5*time.Minute, "HTTP client timeout. This applies to requests issued to both the Kubernetes API and Kubernetes resource endpoints. It does not apply to HTTP requests issued directly to pod endpoints (e.g. prepare-downscale): those are governed by -pods.client-timeout.")
@@ -187,10 +189,15 @@ func main() {
 	defer trace.Close()
 
 	// Expose HTTP endpoints.
+	statusReader := &status.Holder{}
+	statusUI, err := frontend.New(statusReader)
+	check(err)
+
 	srv := newServer(cfg, logger, metrics)
 	srv.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	srv.Handle("/ready", readyHandler(ready))
 	srv.PathPrefix("/debug/pprof").Handler(http.DefaultServeMux)
+	statusUI.Register(srv.Router())
 	check(srv.Start())
 
 	// Build the Kubernetes client config.
@@ -311,6 +318,7 @@ func main() {
 	if err := c.Init(); err != nil {
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
+	statusReader.Set(c)
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).
 	go func() {

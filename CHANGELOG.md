@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [FEATURE] Add a read-only `/ui/status` HTML page for StatefulSet rollout group progress (phase, ready replicas, revisions, updated pods). #473
 * [CHANGE] Prefer `grafana.com/min-time-between-zones-downscale` as a StatefulSet annotation instead of a label. The label remains supported as a fallback and logs a deprecation warning when used. #463
 * [ENHANCEMENT] Use informer pod cache for eviction request ZPDB scope determination. Removes Kubernetes API call for pods not within the ZPDB. #479
 * [ENHANCEMENT] Added the `KubernetesAPIClientRateLimited` alert, firing when the rollout-operator has been unable to send Kubernetes API requests because its client-side rate limiter is exhausted, and the `KubernetesAPIClientApproachingRateLimit` alert, an earlier warning firing when a component sustains over 80% of its own configured limit for an API group. #479 #481
