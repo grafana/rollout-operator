@@ -1,5 +1,5 @@
 {
   _images+:: {
-    rollout_operator: 'grafana/rollout-operator:v0.38.1',
+    rollout_operator: 'grafana/rollout-operator:v0.39.0',
   },
 }
