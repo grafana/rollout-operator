@@ -2,6 +2,13 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #491
+  * `github.com/stretchr/testify` from `v1.12.0` to `v1.12.1`
+  * `k8s.io/api` from `v0.36.3` to `v0.36.4`
+  * `k8s.io/apiextensions-apiserver` from `v0.36.3` to `v0.36.4`
+  * `k8s.io/apimachinery` from `v0.36.3` to `v0.36.4`
+  * `k8s.io/client-go` from `v0.36.3` to `v0.36.4`
+
 ## v0.39.0
 
 * [CHANGE] Prefer `grafana.com/min-time-between-zones-downscale` as a StatefulSet annotation instead of a label. The label remains supported as a fallback and logs a deprecation warning when used. #463
