@@ -2,12 +2,14 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Update Go to `1.27` #494
 * [ENHANCEMENT] Updated dependencies, including: #491
   * `github.com/stretchr/testify` from `v1.12.0` to `v1.12.1`
   * `k8s.io/api` from `v0.36.3` to `v0.36.4`
   * `k8s.io/apiextensions-apiserver` from `v0.36.3` to `v0.36.4`
   * `k8s.io/apimachinery` from `v0.36.3` to `v0.36.4`
   * `k8s.io/client-go` from `v0.36.3` to `v0.36.4`
+
 
 ## v0.39.0
 
