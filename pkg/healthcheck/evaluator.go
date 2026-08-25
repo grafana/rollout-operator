@@ -276,13 +276,12 @@ func formatDuration(d time.Duration) string {
 	return d.String()
 }
 
-// buildTargetMatchers returns PromQL label matchers for namespace, zone (name), and pods.
+// buildTargetMatchers returns matchers common to application and kube-state-metrics
+// series. Pod names already identify the candidate/stable workloads; adding the
+// application-specific "name" label would make kube-state-metrics checks return no data.
 func buildTargetMatchers(namespace string, targets TargetPods) string {
 	quotedNS := strconv.Quote(namespace)
 	parts := []string{fmt.Sprintf("namespace=%s", quotedNS)}
-	if len(targets.Zones) > 0 {
-		parts = append(parts, fmt.Sprintf(`name=~"%s"`, joinRegex(targets.Zones)))
-	}
 	if len(targets.Names) == 0 {
 		parts = append(parts, `pod=~"^$"`)
 	} else {
