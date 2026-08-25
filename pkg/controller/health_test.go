@@ -209,7 +209,7 @@ func newControllerWithHealthGate(t *testing.T, objects []runtime.Object, gate He
 	t.Helper()
 	kubeClient := fake.NewClientset(objects...)
 	reg := prometheus.NewPedanticRegistry()
-	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, nil, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
+	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, NewPodInformerFactory(kubeClient, testNamespace), nil, 5*time.Second, reg, log.NewNopLogger(), &mockEvictionController{})
 	c.SetHealthCheck(gate, nil)
 	require.NoError(t, c.Init())
 	t.Cleanup(c.Stop)
