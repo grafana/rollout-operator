@@ -93,7 +93,7 @@ func TestEvaluator_PassFailNoDataError(t *testing.T) {
 		require.Equal(t, ResultPass, resp.Results["errors"])
 		require.Len(t, q.calls, 3)
 		require.True(t, strings.Contains(q.calls[0], `pod=~"ingester-zone-a-0"`))
-		require.True(t, strings.Contains(q.calls[0], `name=~"ingester-zone-a"`))
+		require.NotContains(t, q.calls[0], `name=~`)
 		require.True(t, strings.Contains(q.calls[0], `[1m]`))
 		require.True(t, strings.Contains(q.calls[1], `pod=~"ingester-zone-b-0"`))
 		require.True(t, strings.Contains(q.calls[1], `[2m]`))
@@ -144,7 +144,7 @@ func TestEvaluator_PassFailNoDataError(t *testing.T) {
 
 func TestBuildTargetMatchers(t *testing.T) {
 	require.Equal(t, `namespace="ns",pod=~"^$"`, buildTargetMatchers("ns", TargetPods{}))
-	require.Equal(t, `namespace="ns",name=~"a|b",pod=~"a-0|b-1"`, buildTargetMatchers("ns", TargetPods{
+	require.Equal(t, `namespace="ns",pod=~"a-0|b-1"`, buildTargetMatchers("ns", TargetPods{
 		Names: []string{"a-0", "b-1"},
 		Zones: []string{"a", "b"},
 	}))
