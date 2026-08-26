@@ -76,7 +76,57 @@ func (c *RolloutController) maybeEvaluateHealthGate(ctx context.Context, groupNa
 		StablePods:        stablePods,
 		BaselineTime:      baseline,
 	})
+	if decision.ShouldPause && decision.RequeueAfter > 0 {
+		c.scheduleHealthRequeue(decision.RequeueAfter, groupName, next.Name)
+	}
 	return decision.ShouldPause, nil
+}
+
+func (c *RolloutController) scheduleHealthRequeue(after time.Duration, groupName, statefulSet string) {
+	if after <= 0 {
+		return
+	}
+
+	due := time.Now().Add(after)
+	c.healthTimerMu.Lock()
+	defer c.healthTimerMu.Unlock()
+	if c.healthTimer != nil && !due.Before(c.healthTimerAt) {
+		return
+	}
+	if c.healthTimer != nil {
+		c.healthTimer.Stop()
+	}
+
+	var timer *time.Timer
+	timer = time.AfterFunc(after, func() {
+		c.healthTimerMu.Lock()
+		if c.healthTimer != timer {
+			c.healthTimerMu.Unlock()
+			return
+		}
+		c.healthTimer = nil
+		c.healthTimerAt = time.Time{}
+		c.healthTimerMu.Unlock()
+
+		select {
+		case <-c.stopCh:
+			return
+		default:
+			c.enqueueReconcile()
+			select {
+			case c.healthWakeCh <- struct{}{}:
+			default:
+			}
+		}
+	})
+	c.healthTimer = timer
+	c.healthTimerAt = due
+	level.Debug(c.logger).Log(
+		"msg", "scheduled health check reevaluation",
+		"group", groupName,
+		"statefulset", statefulSet,
+		"requeue_after", after,
+	)
 }
 
 func groupHasHealthCheckAnnotation(sets []*v1.StatefulSet) bool {

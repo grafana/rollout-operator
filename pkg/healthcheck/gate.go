@@ -74,6 +74,8 @@ type Decision struct {
 	ShouldPause bool
 	// Reason is a human-readable explanation when ShouldPause or a warning/misconfiguration occurred.
 	Reason string
+	// RequeueAfter is the delay until a paused decision should be evaluated again.
+	RequeueAfter time.Duration
 }
 
 // Request is the input for a between-zone gate evaluation.
@@ -141,35 +143,73 @@ func (g *Gate) Evaluate(ctx context.Context, req Request) Decision {
 
 	if resp.ClientError != "" {
 		// Client construction failure is not per-check; pause safely.
-		return g.finalize(req, Decision{ShouldPause: true, Reason: resp.ClientError}, true)
+		return g.finalize(req, Decision{
+			ShouldPause:  true,
+			Reason:       resp.ClientError,
+			RequeueAfter: minimumErrorRetryInterval(cfg),
+		}, true)
 	}
 
-	decision := g.applyPolicies(stateKey, cfg, resp, now)
+	policyNow := now
+	if req.Now.IsZero() {
+		policyNow = time.Now()
+	}
+	decision := g.applyPolicies(stateKey, req.RolloutGroup, cfg, resp, policyNow)
 	return g.finalize(req, decision, true)
 }
 
 func (g *Gate) finalize(req Request, decision Decision, emitEvent bool) Decision {
+	if !emitEvent {
+		g.setBlocked(req.RolloutGroup, decision.ShouldPause)
+		return decision
+	}
+
+	action := "proceed"
 	if decision.ShouldPause {
-		level.Warn(g.logger).Log("msg", "rollout blocked by health check", "rollout_group", req.RolloutGroup, "workload_kind", req.TargetKind, "workload", req.TargetName, "detail", decision.Reason)
-		if emitEvent {
-			g.event(req.EventTarget, corev1.EventTypeWarning, eventBlocked, decision.Reason)
-		}
+		action = "pause"
+		level.Warn(g.logger).Log(
+			"msg", "health check evaluation completed",
+			"rollout_group", req.RolloutGroup,
+			"policy", strings.TrimSpace(req.TargetAnnotations[config.RolloutHealthCheckAnnotationKey]),
+			"workload_kind", req.TargetKind,
+			"workload", req.TargetName,
+			"action", action,
+			"requeue_after", decision.RequeueAfter,
+			"detail", decision.Reason,
+		)
+		g.event(req.EventTarget, corev1.EventTypeWarning, eventBlocked, decision.Reason)
 		g.clearMisconfigured(requestStateKey(req), req.RolloutGroup)
 		g.setBlocked(req.RolloutGroup, true)
 		return decision
 	}
 	if decision.Reason != "" {
-		level.Warn(g.logger).Log("msg", "health check warning", "rollout_group", req.RolloutGroup, "workload_kind", req.TargetKind, "workload", req.TargetName, "detail", decision.Reason)
-		if emitEvent {
-			g.event(req.EventTarget, corev1.EventTypeWarning, eventWarn, decision.Reason)
-		}
+		action = "warn"
+		level.Warn(g.logger).Log(
+			"msg", "health check evaluation completed",
+			"rollout_group", req.RolloutGroup,
+			"policy", strings.TrimSpace(req.TargetAnnotations[config.RolloutHealthCheckAnnotationKey]),
+			"workload_kind", req.TargetKind,
+			"workload", req.TargetName,
+			"action", action,
+			"detail", decision.Reason,
+		)
+		g.event(req.EventTarget, corev1.EventTypeWarning, eventWarn, decision.Reason)
+	} else {
+		level.Info(g.logger).Log(
+			"msg", "health check evaluation completed",
+			"rollout_group", req.RolloutGroup,
+			"policy", strings.TrimSpace(req.TargetAnnotations[config.RolloutHealthCheckAnnotationKey]),
+			"workload_kind", req.TargetKind,
+			"workload", req.TargetName,
+			"action", action,
+		)
 	}
 	g.clearMisconfigured(requestStateKey(req), req.RolloutGroup)
 	g.setBlocked(req.RolloutGroup, false)
 	return decision
 }
 
-func (g *Gate) applyPolicies(rolloutGroup string, cfg *Config, resp EvaluateResponse, now time.Time) Decision {
+func (g *Gate) applyPolicies(stateKey, rolloutGroup string, cfg *Config, resp EvaluateResponse, now time.Time) Decision {
 	checkByName := map[string]Check{}
 	for _, c := range cfg.Checks {
 		checkByName[c.Name] = c
@@ -186,7 +226,8 @@ func (g *Gate) applyPolicies(rolloutGroup string, cfg *Config, resp EvaluateResp
 		if !ok {
 			continue
 		}
-		outcome, msg := g.applyCheckPolicy(rolloutGroup, cfg.Name, check, ev, now)
+		outcome, msg := g.applyCheckPolicy(stateKey, cfg.Name, check, ev, now)
+		g.logPolicyOutcome(stateKey, rolloutGroup, cfg.Name, check, ev, outcome)
 		switch outcome {
 		case OutcomePause:
 			shouldPause = true
@@ -201,7 +242,11 @@ func (g *Gate) applyPolicies(rolloutGroup string, cfg *Config, resp EvaluateResp
 	}
 
 	if shouldPause {
-		return Decision{ShouldPause: true, Reason: pauseReason}
+		return Decision{
+			ShouldPause:  true,
+			Reason:       pauseReason,
+			RequeueAfter: g.nextEvaluationDelay(stateKey, cfg, now),
+		}
 	}
 	if warnReason != "" {
 		return Decision{Reason: warnReason}
@@ -348,12 +393,100 @@ func (g *Gate) cachedDecision(rolloutGroup string, cfg *Config, now time.Time) (
 		return Decision{}, false
 	}
 	if shouldPause {
-		return Decision{ShouldPause: true, Reason: pauseReason}, true
+		return Decision{
+			ShouldPause:  true,
+			Reason:       pauseReason,
+			RequeueAfter: g.nextEvaluationDelayLocked(rolloutGroup, cfg, now),
+		}, true
 	}
 	if warnReason != "" {
 		return Decision{Reason: warnReason}, true
 	}
 	return Decision{}, true
+}
+
+func (g *Gate) nextEvaluationDelay(rolloutGroup string, cfg *Config, now time.Time) time.Duration {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.nextEvaluationDelayLocked(rolloutGroup, cfg, now)
+}
+
+func (g *Gate) nextEvaluationDelayLocked(rolloutGroup string, cfg *Config, now time.Time) time.Duration {
+	var earliest time.Time
+	for _, check := range cfg.Checks {
+		if check.Disabled {
+			continue
+		}
+		prog := g.progress[progressKey(rolloutGroup, cfg.Name, check.Name)]
+		if prog == nil || prog.lastEvalAt.IsZero() {
+			continue
+		}
+		due := prog.lastEvalAt.Add(holdInterval(check, prog.lastResult))
+		if earliest.IsZero() || due.Before(earliest) {
+			earliest = due
+		}
+	}
+	if earliest.IsZero() || !earliest.After(now) {
+		return 0
+	}
+	return earliest.Sub(now)
+}
+
+func minimumErrorRetryInterval(cfg *Config) time.Duration {
+	var interval time.Duration
+	for _, check := range cfg.Checks {
+		if check.Disabled {
+			continue
+		}
+		if interval == 0 || check.ErrorPolicy.RetryInterval < interval {
+			interval = check.ErrorPolicy.RetryInterval
+		}
+	}
+	return interval
+}
+
+func (g *Gate) logPolicyOutcome(stateKey, rolloutGroup, policy string, check Check, ev CheckEvaluation, outcome CheckOutcome) {
+	key := progressKey(stateKey, policy, check.Name)
+	g.mu.Lock()
+	prog := g.progress[key]
+	var snapshot checkProgress
+	if prog != nil {
+		snapshot = *prog
+	}
+	g.mu.Unlock()
+
+	logFn := level.Info
+	if outcome == OutcomeSkipped {
+		logFn = level.Debug
+	}
+	keyvals := []interface{}{
+		"msg", "health check policy applied",
+		"rollout_group", rolloutGroup,
+		"policy", policy,
+		"check", check.Name,
+		"result", ev.Result,
+		"action", outcome,
+		"consecutive_successes", snapshot.consecutiveSuccesses,
+		"required_successes", check.FailurePolicy.ConsecutiveSuccesses,
+		"consecutive_failures", snapshot.consecutiveFailures,
+		"allowed_failures", check.FailurePolicy.ConsecutiveFailures,
+	}
+	if ev.CurrentValue != nil {
+		keyvals = append(keyvals, "current_value", *ev.CurrentValue)
+	}
+	if ev.BaselineValue != nil {
+		keyvals = append(keyvals, "baseline_value", *ev.BaselineValue)
+	}
+	if ev.QueryType != "" {
+		keyvals = append(keyvals, "query_type", ev.QueryType)
+	}
+	switch ev.Result {
+	case ResultError:
+		keyvals = append(keyvals, "attempt", snapshot.errorAttempts, "max_attempts", check.ErrorPolicy.MaxAttempts)
+	case ResultNoData:
+		keyvals = append(keyvals, "attempt", snapshot.noDataAttempts, "max_attempts", check.NoDataPolicy.MaxAttempts)
+	}
+	logFn(g.logger).Log(keyvals...)
 }
 
 func holdInterval(check Check, last EvaluationResult) time.Duration {

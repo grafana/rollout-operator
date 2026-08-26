@@ -1,8 +1,10 @@
 package healthcheck
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +131,96 @@ func TestGate_ConsecutiveFailures(t *testing.T) {
 			require.Contains(t, decision.Reason, "consecutive failures")
 		}
 	}
+}
+
+func TestGate_PausedDecisionReturnsNextEvaluationDelay(t *testing.T) {
+	check := testCheck()
+	check.FailurePolicy.ReevaluationInterval = time.Minute
+	cfg := &Config{
+		Name:          "hc",
+		PrometheusURL: "http://prometheus",
+		Selector:      labels.SelectorFromSet(labels.Set{"rollout-group": "ingester"}),
+		Checks:        []Check{check},
+	}
+	failSequence := func() []func() (model.Value, error) {
+		return []func() (model.Value, error){
+			func() (model.Value, error) { return scalar(5), nil },
+			func() (model.Value, error) { return scalar(0.1), nil },
+			func() (model.Value, error) { return scalar(0), nil },
+		}
+	}
+	q := &fakeQuerier{sequence: failSequence()}
+	gate := NewGate(staticProvider{cfg: cfg}, NewEvaluator(func(string) (Querier, error) { return q, nil }, nil, log.NewNopLogger()), nil, nil, log.NewNopLogger())
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "ingester-zone-b",
+			Annotations: map[string]string{config.RolloutHealthCheckAnnotationKey: "hc"},
+			Labels:      map[string]string{"rollout-group": "ingester"},
+		},
+	}
+	now := time.Now()
+	req := requestForStatefulSet(sts)
+	req.Now = now
+
+	decision := gate.Evaluate(context.Background(), req)
+	require.True(t, decision.ShouldPause)
+	require.Equal(t, time.Minute, decision.RequeueAfter)
+	require.Len(t, q.calls, 3)
+
+	req.Now = now.Add(20 * time.Second)
+	decision = gate.Evaluate(context.Background(), req)
+	require.True(t, decision.ShouldPause)
+	require.Equal(t, 40*time.Second, decision.RequeueAfter)
+	require.Len(t, q.calls, 3, "cached decision must not query before the deadline")
+
+	q.sequence = failSequence()
+	q.seqIdx = 0
+	req.Now = now.Add(time.Minute)
+	decision = gate.Evaluate(context.Background(), req)
+	require.True(t, decision.ShouldPause)
+	require.Equal(t, time.Minute, decision.RequeueAfter)
+	require.Len(t, q.calls, 6)
+}
+
+func TestGate_LogsPolicyOutcomeWithoutQueries(t *testing.T) {
+	check := testCheck()
+	cfg := &Config{
+		Name:          "hc",
+		PrometheusURL: "http://prometheus",
+		Selector:      labels.SelectorFromSet(labels.Set{"rollout-group": "ingester"}),
+		Checks:        []Check{check},
+	}
+	q := &fakeQuerier{sequence: []func() (model.Value, error){
+		func() (model.Value, error) { return scalar(5), nil },
+		func() (model.Value, error) { return scalar(0.1), nil },
+		func() (model.Value, error) { return scalar(0), nil },
+	}}
+	var logs bytes.Buffer
+	logger := log.NewLogfmtLogger(&logs)
+	gate := NewGate(staticProvider{cfg: cfg}, NewEvaluator(func(string) (Querier, error) { return q, nil }, nil, logger), nil, nil, logger)
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "ingester-zone-b",
+			Annotations: map[string]string{config.RolloutHealthCheckAnnotationKey: "hc"},
+			Labels:      map[string]string{"rollout-group": "ingester"},
+		},
+	}
+
+	req := requestForStatefulSet(sts)
+	req.Now = time.Now()
+	decision := gate.Evaluate(context.Background(), req)
+
+	require.True(t, decision.ShouldPause)
+	output := logs.String()
+	require.Contains(t, output, "msg=\"health check policy applied\"")
+	require.Contains(t, output, "policy=hc")
+	require.Contains(t, output, "check=errors")
+	require.Contains(t, output, "action=pause")
+	require.Contains(t, output, "current_value=5")
+	require.Contains(t, output, "baseline_value=0.1")
+	require.Contains(t, output, "consecutive_failures=1")
+	require.False(t, strings.Contains(output, check.Query))
+	require.False(t, strings.Contains(output, check.SuccessQuery))
 }
 
 func TestGate_WarnOnFailureExceeded(t *testing.T) {

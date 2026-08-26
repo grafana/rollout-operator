@@ -44,6 +44,7 @@ rules:
       - events
     verbs:
       - create
+      - patch
   - apiGroups:
       - rollout-operator.grafana.com
     resources:

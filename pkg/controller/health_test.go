@@ -20,10 +20,11 @@ import (
 )
 
 type mockHealthGate struct {
-	mu          sync.Mutex
-	calls       int
-	shouldPause bool
-	lastReq     healthcheck.Request
+	mu           sync.Mutex
+	calls        int
+	shouldPause  bool
+	requeueAfter time.Duration
+	lastReq      healthcheck.Request
 }
 
 func (m *mockHealthGate) Evaluate(_ context.Context, req healthcheck.Request) healthcheck.Decision {
@@ -31,7 +32,7 @@ func (m *mockHealthGate) Evaluate(_ context.Context, req healthcheck.Request) he
 	defer m.mu.Unlock()
 	m.calls++
 	m.lastReq = req
-	return healthcheck.Decision{ShouldPause: m.shouldPause, Reason: "mock"}
+	return healthcheck.Decision{ShouldPause: m.shouldPause, Reason: "mock", RequeueAfter: m.requeueAfter}
 }
 
 func (m *mockHealthGate) callCount() int {
@@ -84,7 +85,7 @@ func TestRolloutController_HealthCheckGating(t *testing.T) {
 	})
 
 	t.Run("gate blocks next zone", func(t *testing.T) {
-		gate := &mockHealthGate{shouldPause: true}
+		gate := &mockHealthGate{shouldPause: true, requeueAfter: time.Minute}
 		objects := []runtime.Object{
 			mockStatefulSet("ingester-zone-a", withHealthCheck),
 			mockStatefulSet("ingester-zone-b", withPrevRevision(), withHealthCheck),
@@ -99,6 +100,12 @@ func TestRolloutController_HealthCheckGating(t *testing.T) {
 		require.NoError(t, c.reconcile(context.Background()))
 		require.Equal(t, 1, gate.callCount())
 		require.Equal(t, "ingester-zone-b", gate.lastReq.TargetName)
+		c.healthTimerMu.Lock()
+		timerScheduled := c.healthTimer != nil
+		timerDelay := time.Until(c.healthTimerAt)
+		c.healthTimerMu.Unlock()
+		require.True(t, timerScheduled)
+		require.InDelta(t, time.Minute, timerDelay, float64(time.Second))
 
 		for _, name := range []string{"ingester-zone-b-0", "ingester-zone-b-1", "ingester-zone-b-2"} {
 			_, err := c.kubeClient.CoreV1().Pods(testNamespace).Get(context.Background(), name, metav1.GetOptions{})
@@ -203,6 +210,28 @@ func TestRolloutController_HealthCheckGating(t *testing.T) {
 			require.NoError(t, err, name)
 		}
 	})
+}
+
+func TestRolloutController_HealthRequeueTimerEnqueuesReconcile(t *testing.T) {
+	c := &RolloutController{
+		logger:       log.NewNopLogger(),
+		stopCh:       make(chan struct{}),
+		healthWakeCh: make(chan struct{}, 1),
+	}
+	t.Cleanup(c.Stop)
+
+	c.scheduleHealthRequeue(10*time.Millisecond, "ingester", "ingester-zone-b")
+
+	select {
+	case <-c.healthWakeCh:
+	case <-time.After(time.Second):
+		t.Fatal("health requeue timer did not wake the controller")
+	}
+	require.True(t, c.shouldReconcile.Load())
+	c.healthTimerMu.Lock()
+	defer c.healthTimerMu.Unlock()
+	require.Nil(t, c.healthTimer)
+	require.True(t, c.healthTimerAt.IsZero())
 }
 
 func newControllerWithHealthGate(t *testing.T, objects []runtime.Object, gate HealthGate) *RolloutController {

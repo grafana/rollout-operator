@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -70,6 +71,10 @@ type RolloutController struct {
 
 	healthGate    HealthGate
 	healthMetrics *healthcheck.Metrics
+	healthTimerMu sync.Mutex
+	healthTimer   *time.Timer
+	healthTimerAt time.Time
+	healthWakeCh  chan struct{}
 
 	// This bool is true if we should trigger a reconcile.
 	shouldReconcile atomic.Bool
@@ -128,6 +133,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 		zpdbController:       zpdbController,
 		logger:               logger,
 		stopCh:               make(chan struct{}),
+		healthWakeCh:         make(chan struct{}, 1),
 		discoveredGroups:     map[string]struct{}{},
 		groupReconcileTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_group_reconciles_total",
@@ -255,6 +261,8 @@ func (c *RolloutController) Run() {
 		select {
 		case <-c.stopCh:
 			return
+		case <-c.healthWakeCh:
+			// Health deadlines must not wait for unrelated informer events or the regular throttle.
 		case <-time.After(c.reconcileInterval):
 			// Throttle before checking again if we should reconcile.
 		}
@@ -263,6 +271,13 @@ func (c *RolloutController) Run() {
 
 // Stop the controller.
 func (c *RolloutController) Stop() {
+	c.healthTimerMu.Lock()
+	if c.healthTimer != nil {
+		c.healthTimer.Stop()
+		c.healthTimer = nil
+		c.healthTimerAt = time.Time{}
+	}
+	c.healthTimerMu.Unlock()
 	close(c.stopCh)
 }
 
