@@ -88,6 +88,7 @@ func TestPhasedDeploymentController_CompletesWhenCanaryReady(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, config.RolloutDependencyPhaseComplete, phased.Phase(main))
 	require.False(t, main.Spec.Paused)
+	require.Equal(t, "r1", phased.CanariesReadyRevision(main))
 	require.Contains(t, logs.String(), `msg="phased deployment canaries ready"`)
 	require.Contains(t, logs.String(), `msg="completing phased deployment gate"`)
 	require.Contains(t, logs.String(), "action=unpause-and-proceed")
@@ -237,6 +238,36 @@ func TestPhasedDeploymentController_ClearsHealthStateWhenCanaryRemoved(t *testin
 	require.Equal(t, 1, gate.callCount())
 	require.Empty(t, gate.lastReq.TargetAnnotations)
 	require.Equal(t, "zone-b/Deployment/zone-b", gate.lastReq.StateKey)
+}
+
+func TestPhasedDeploymentController_LatchedCanaryReadinessKeepsHealthEvaluationRunning(t *testing.T) {
+	replicas := int32(2)
+	canary := mockPhasedDeployment("zone-a", "", "r1", false, replicas, false)
+	canary.Status.UpdatedReplicas = replicas
+	main := mockPhasedDeployment("zone-b", "zone-a", "r1", true, replicas, false)
+	main.Annotations[config.RolloutDependencyPhaseAnnotationKey] = config.RolloutDependencyPhaseWaiting
+	main.Annotations[config.RolloutDependencyRevisionAnnotationKey] = "r1"
+	main.Annotations[config.RolloutHadPausedAnnotationKey] = phased.HadPausedAnnotationFalse
+	main.Annotations[config.RolloutCanariesReadyRevisionAnnotationKey] = "r1"
+	main.Annotations[config.RolloutHealthCheckAnnotationKey] = "deployment-health"
+
+	candidatePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "zone-a-0", Namespace: testNamespace, Labels: map[string]string{"name": "zone-a"}}}
+	stablePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "zone-b-0", Namespace: testNamespace, Labels: map[string]string{"name": "zone-b"}}}
+	api := fake.NewSimpleClientset(canary, main, candidatePod, stablePod)
+	var logs bytes.Buffer
+	c := newTestPhasedControllerWithLogger(t, api, log.NewLogfmtLogger(&logs))
+	gate := &mockHealthGate{shouldPause: true, requeueAfter: time.Minute}
+	c.SetHealthCheck(gate, nil)
+	require.NoError(t, c.reconcile(context.Background()))
+
+	main, err := api.AppsV1().Deployments(testNamespace).Get(context.Background(), "zone-b", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.Equal(t, config.RolloutDependencyPhaseWaiting, phased.Phase(main))
+	require.True(t, main.Spec.Paused)
+	require.Equal(t, 1, gate.callCount())
+	require.Contains(t, logs.String(), "ready=false")
+	require.Contains(t, logs.String(), "ready_latched=true")
+	require.Contains(t, logs.String(), `msg="scheduled phased deployment health check reevaluation"`)
 }
 
 func TestPhasedDeploymentController_WaitsForAllCanaries(t *testing.T) {

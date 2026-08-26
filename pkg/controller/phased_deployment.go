@@ -345,6 +345,7 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 
 	canaryDeployments := make([]*appsv1.Deployment, 0, len(canaries))
 	var healthBaseline time.Time
+	canariesReady := phased.CanariesReadyRevision(dep) == revision
 	for _, canaryName := range canaries {
 		canary, err := c.getCanary(ctx, canaryName, byName)
 		if err != nil {
@@ -361,6 +362,7 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 			"current_revision", canaryRevision,
 			"target_revision", revision,
 			"ready", canaryReady,
+			"ready_latched", canariesReady,
 			"paused", canary.Spec.Paused,
 			"generation", canary.Generation,
 			"observed_generation", canary.Status.ObservedGeneration,
@@ -384,10 +386,28 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 				healthBaseline = startedAt
 			}
 		}
-		if !canaryReady {
+		if !canariesReady && !canaryReady {
 			c.setPhaseMetric(dep.Name, config.RolloutDependencyPhaseWaiting)
 			c.blocked.DeleteLabelValues(dep.Name, "config")
 			return c.ensurePhase(ctx, dep, config.RolloutDependencyPhaseWaiting, fmt.Sprintf("waiting for canary %q to become fully rolled out", canaryName))
+		}
+	}
+
+	if !canariesReady {
+		level.Info(c.logger).Log(
+			"msg", "latching phased deployment canaries ready",
+			"deployment", dep.Name,
+			"canaries", strings.Join(canaries, ","),
+			"revision", revision,
+		)
+		if err := c.patchDeployment(ctx, dep.Name, map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"annotations": map[string]interface{}{
+					config.RolloutCanariesReadyRevisionAnnotationKey: revision,
+				},
+			},
+		}); err != nil {
+			return err
 		}
 	}
 
