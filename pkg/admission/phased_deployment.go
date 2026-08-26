@@ -73,10 +73,16 @@ func PhasedDeployment(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
-	if _, ok, err := phased.BypassUntil(dep); err != nil {
+	if until, ok, err := phased.BypassUntil(dep); err != nil {
 		level.Warn(logger).Log("msg", "invalid rollout-bypass-until, ignoring", "err", err)
 	} else if ok && phased.BypassActive(dep, time.Now()) {
-		level.Info(logger).Log("msg", "phased rollout bypass active, allowing without gate")
+		level.Info(logger).Log(
+			"msg", "phased rollout bypass active, allowing without gate",
+			"revision", phased.Revision(dep),
+			"bypass_until", until.Format(time.RFC3339),
+			"gate_phase", phased.Phase(dep),
+			"paused", dep.Spec.Paused,
+		)
 		if patch := bypassReleasePatch(dep); patch != nil {
 			return mutate(patch)
 		}
@@ -91,7 +97,11 @@ func PhasedDeployment(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 
 	// Gate already completed for this revision: allow (including unpause).
 	if phased.Phase(dep) == config.RolloutDependencyPhaseComplete && phased.DependencyRevision(dep) == revision {
-		level.Debug(logger).Log("msg", "phased gate complete for revision, allowing", "revision", revision)
+		level.Debug(logger).Log(
+			"msg", "phased gate complete for revision, allowing",
+			"revision", revision,
+			"paused", dep.Spec.Paused,
+		)
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
@@ -103,6 +113,20 @@ func PhasedDeployment(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		}
 	}
 
+	needsNewGate := phased.NeedsNewGate(dep)
+	if needsNewGate {
+		previousRevision := phased.DependencyRevision(dep)
+		if oldDep != nil && previousRevision == "" {
+			previousRevision = phased.Revision(oldDep)
+		}
+		level.Info(logger).Log(
+			"msg", "phased deployment revision change detected",
+			"previous_revision", previousRevision,
+			"target_revision", revision,
+			"canaries", strings.Join(canaries, ","),
+		)
+	}
+
 	patch, err := buildGatePatch(dep, oldDep, revision)
 	if err != nil {
 		level.Error(logger).Log("msg", "failed to build phased gate patch", "err", err)
@@ -112,15 +136,31 @@ func PhasedDeployment(ctx context.Context, l log.Logger, ar v1.AdmissionReview, 
 		}
 	}
 	if patch == nil {
+		level.Debug(logger).Log(
+			"msg", "phased deployment gate already enforced",
+			"revision", revision,
+			"phase", phased.Phase(dep),
+			"paused", dep.Spec.Paused,
+		)
 		return &v1.AdmissionResponse{Allowed: true}
 	}
 
-	level.Info(logger).Log(
-		"msg", "pausing deployment for phased rollout gate",
-		"canaries", fmt.Sprintf("%v", canaries),
-		"revision", revision,
-		"phase", phased.Phase(dep),
-	)
+	if !needsNewGate && !dep.Spec.Paused {
+		level.Warn(logger).Log(
+			"msg", "re-pausing deployment while phased rollout gate is active",
+			"canaries", strings.Join(canaries, ","),
+			"revision", revision,
+			"phase", phased.Phase(dep),
+		)
+	} else {
+		level.Info(logger).Log(
+			"msg", "pausing deployment for phased rollout gate",
+			"canaries", strings.Join(canaries, ","),
+			"revision", revision,
+			"phase", phased.Phase(dep),
+			"had_paused", resolveHadPaused(dep, oldDep, needsNewGate),
+		)
+	}
 	return mutate(patch)
 }
 
