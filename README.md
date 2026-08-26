@@ -158,7 +158,7 @@ To resume normal rollout behavior, remove the annotation or set it to any value 
 
 ## Phased Deployment rollouts
 
-Opt-in sequencing for Kubernetes Deployments (proposal 4c). A main Deployment stays paused until its canary Deployment(s) finish rolling and become ready. Batches are explicit Deployments in Git; the operator only toggles `spec.paused` and never manages ReplicaSets. Prometheus health gating is a separate feature (proposal 4b) and is not part of this gate.
+Opt-in sequencing for Kubernetes Deployments (proposal 4c). A main Deployment stays paused until its canary Deployment(s) finish rolling and become ready. Readiness is latched for the current shared revision once every canary is fully rolled, so routine pod evictions or autoscaling do not return an active gate to its initial readiness check. A canary must continue to report the target revision. Batches are explicit Deployments in Git; the operator only toggles `spec.paused` and never manages ReplicaSets. Prometheus health gating is a separate feature (proposal 4b) and is not part of this gate.
 
 ### Enablement
 

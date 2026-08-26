@@ -197,12 +197,18 @@ func buildGatePatch(dep, oldDep *appsv1.Deployment, revision string) ([]byte, er
 		}
 		ops = append(ops, jsonPatchOp{Op: "add", Path: phased.AnnotationJSONPointer(key), Value: value})
 	}
+	removeAnn := func(key string) {
+		if dep.Annotations != nil && dep.Annotations[key] != "" {
+			ops = append(ops, jsonPatchOp{Op: "remove", Path: phased.AnnotationJSONPointer(key)})
+		}
+	}
 
 	if needsNewGate {
 		setAnn(config.RolloutDependencyPhaseAnnotationKey, config.RolloutDependencyPhaseWaiting)
 		setAnn(config.RolloutDependencyRevisionAnnotationKey, revision)
 		setAnn(config.RolloutDependencyReasonAnnotationKey, "waiting for canary deployment(s)")
 		setAnn(config.RolloutHadPausedAnnotationKey, hadPaused)
+		removeAnn(config.RolloutCanariesReadyRevisionAnnotationKey)
 	} else {
 		setAnn(config.RolloutHadPausedAnnotationKey, hadPaused)
 		if phased.Phase(dep) == "" {
@@ -261,6 +267,7 @@ func clearGateStatePatch(dep *appsv1.Deployment) []byte {
 		config.RolloutDependencyRevisionAnnotationKey,
 		config.RolloutDependencyReasonAnnotationKey,
 		config.RolloutHadPausedAnnotationKey,
+		config.RolloutCanariesReadyRevisionAnnotationKey,
 	}
 	hasGateState := false
 	for _, key := range keys {

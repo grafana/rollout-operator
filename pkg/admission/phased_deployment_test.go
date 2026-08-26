@@ -16,11 +16,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/phased"
 )
 
 func TestPhasedDeployment_PausesOnRevisionChange(t *testing.T) {
 	newDep := phasedDeployment("query-frontend-zone-b", "query-frontend-zone-a", "r2", false, "", "")
 	oldDep := phasedDeployment("query-frontend-zone-b", "query-frontend-zone-a", "r1", false, config.RolloutDependencyPhaseComplete, "r1")
+	newDep.Annotations[config.RolloutCanariesReadyRevisionAnnotationKey] = "r1"
+	oldDep.Annotations[config.RolloutCanariesReadyRevisionAnnotationKey] = "r1"
 	var logs bytes.Buffer
 
 	resp := PhasedDeployment(context.Background(), log.NewLogfmtLogger(&logs), admissionReview(oldDep, newDep), nil)
@@ -31,6 +34,7 @@ func TestPhasedDeployment_PausesOnRevisionChange(t *testing.T) {
 	var ops []jsonPatchOp
 	require.NoError(t, json.Unmarshal(resp.Patch, &ops))
 	require.Contains(t, ops, jsonPatchOp{Op: "add", Path: "/spec/paused", Value: true})
+	require.Contains(t, ops, jsonPatchOp{Op: "remove", Path: phased.AnnotationJSONPointer(config.RolloutCanariesReadyRevisionAnnotationKey)})
 	require.True(t, strings.Contains(logs.String(), `msg="phased deployment revision change detected"`))
 	require.Contains(t, logs.String(), "previous_revision=r1")
 	require.Contains(t, logs.String(), "target_revision=r2")
