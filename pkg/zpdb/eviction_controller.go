@@ -182,8 +182,6 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	// set up key=value pairs we include on all logs within this context
 	request.initLogger()
 
-	level.Debug(logger).Log("msg", "considering pod eviction")
-
 	// validate that this is a valid pod eviction create request
 	if err := request.validate(); err != nil {
 		level.Warn(request.log).Log("msg", logDenyMesg, "reason", "not a valid create pod eviction request", "err", err)
@@ -203,11 +201,15 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	// path below exactly as before.
 	if cachedPod, cacheErr := c.podObserver.podLister.Pods(request.req.Request.Namespace).Get(request.req.Request.Name); cacheErr == nil {
 		if pdbConfig, findErr := c.cfgObserver.pdbCache.find(cachedPod); findErr == nil && pdbConfig == nil {
-			level.Debug(request.log).Log("msg", logAllowMesg, "reason", "pod is not within a zpdb scope")
+			if !isDeploymentManagedPod(cachedPod) {
+				level.Debug(request.log).Log("msg", logAllowMesg, "reason", "pod is not within a zpdb scope")
+			}
 			c.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", fmt.Sprintf("%d", http.StatusOK)).Inc()
 			return request.allow()
 		}
 	}
+
+	level.Debug(request.log).Log("msg", "considering pod eviction")
 
 	// get the pod which has been requested for eviction
 	var pod *corev1.Pod
@@ -242,7 +244,9 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		c.metrics.EvictionRequests.WithLabelValues("cfg-not-found", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusBadRequest)
 	} else if pdbConfig == nil {
-		level.Debug(request.log).Log("msg", logAllowMesg, "reason", "pod is not within a zpdb scope")
+		if !isDeploymentManagedPod(pod) {
+			level.Debug(request.log).Log("msg", logAllowMesg, "reason", "pod is not within a zpdb scope")
+		}
 		c.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", fmt.Sprintf("%d", http.StatusOK)).Inc()
 		return request.allow()
 	}
