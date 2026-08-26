@@ -74,6 +74,14 @@ func DependencyRevision(d *appsv1.Deployment) string {
 	return d.Annotations[config.RolloutDependencyRevisionAnnotationKey]
 }
 
+// CanariesReadyRevision returns the revision for which every canary reached full readiness.
+func CanariesReadyRevision(d *appsv1.Deployment) string {
+	if d == nil || d.Annotations == nil {
+		return ""
+	}
+	return strings.TrimSpace(d.Annotations[config.RolloutCanariesReadyRevisionAnnotationKey])
+}
+
 // BypassUntil parses grafana.com/rollout-bypass-until. ok is false when unset.
 func BypassUntil(d *appsv1.Deployment) (until time.Time, ok bool, err error) {
 	if d == nil || d.Annotations == nil {

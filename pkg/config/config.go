@@ -79,10 +79,11 @@ const (
 	RolloutBypassUntilAnnotationKey = "grafana.com/rollout-bypass-until"
 
 	// Operator-owned state annotations written by the webhook and phased Deployment controller.
-	RolloutDependencyPhaseAnnotationKey    = "grafana.com/rollout-dependency-phase"
-	RolloutDependencyRevisionAnnotationKey = "grafana.com/rollout-dependency-revision"
-	RolloutDependencyReasonAnnotationKey   = "grafana.com/rollout-dependency-reason"
-	RolloutHadPausedAnnotationKey          = "grafana.com/rollout-had-paused"
+	RolloutDependencyPhaseAnnotationKey       = "grafana.com/rollout-dependency-phase"
+	RolloutDependencyRevisionAnnotationKey    = "grafana.com/rollout-dependency-revision"
+	RolloutDependencyReasonAnnotationKey      = "grafana.com/rollout-dependency-reason"
+	RolloutHadPausedAnnotationKey             = "grafana.com/rollout-had-paused"
+	RolloutCanariesReadyRevisionAnnotationKey = "grafana.com/rollout-canaries-ready-revision"
 
 	// Dependency phase values.
 	RolloutDependencyPhaseWaiting  = "waiting"
