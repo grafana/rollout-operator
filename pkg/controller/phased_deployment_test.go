@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,8 +17,35 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/grafana/rollout-operator/pkg/config"
+	"github.com/grafana/rollout-operator/pkg/healthcheck"
 	"github.com/grafana/rollout-operator/pkg/phased"
 )
+
+type phasedRequeueGate struct {
+	mu        sync.Mutex
+	decisions []healthcheck.Decision
+	calls     int
+	called    chan struct{}
+}
+
+func (g *phasedRequeueGate) Evaluate(_ context.Context, _ healthcheck.Request) healthcheck.Decision {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	index := min(g.calls, len(g.decisions)-1)
+	decision := g.decisions[index]
+	g.calls++
+	select {
+	case g.called <- struct{}{}:
+	default:
+	}
+	return decision
+}
+
+func (g *phasedRequeueGate) callCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.calls
+}
 
 func TestPhasedDeploymentController_WaitsForCanary(t *testing.T) {
 	replicas := int32(2)
@@ -108,6 +136,91 @@ func TestPhasedDeploymentController_HealthCheckGatesReadyCanary(t *testing.T) {
 			require.NotEmpty(t, canary.Annotations[config.RolloutHealthCheckStartedAtAnnotationKey])
 		})
 	}
+}
+
+func TestPhasedDeploymentController_HealthDeadlineTriggersReconcile(t *testing.T) {
+	replicas := int32(1)
+	canary := mockPhasedDeployment("zone-a", "", "r1", false, replicas, true)
+	canary.Annotations[config.RolloutHealthCheckStartedAtAnnotationKey] = healthcheck.FormatStartedAtAnnotation("r1", time.Now().Add(-time.Minute))
+	main := mockPhasedDeployment("zone-b", "zone-a", "r1", true, replicas, false)
+	main.Annotations[config.RolloutDependencyPhaseAnnotationKey] = config.RolloutDependencyPhaseWaiting
+	main.Annotations[config.RolloutDependencyRevisionAnnotationKey] = "r1"
+	main.Annotations[config.RolloutDependencyReasonAnnotationKey] = "blocked by health"
+	main.Annotations[config.RolloutHadPausedAnnotationKey] = phased.HadPausedAnnotationFalse
+	main.Annotations[config.RolloutHealthCheckAnnotationKey] = "deployment-health"
+
+	candidatePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "zone-a-0", Namespace: testNamespace, Labels: map[string]string{"name": "zone-a"}}}
+	stablePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "zone-b-0", Namespace: testNamespace, Labels: map[string]string{"name": "zone-b"}}}
+	api := fake.NewSimpleClientset(canary, main, candidatePod, stablePod)
+	var logs bytes.Buffer
+	c := newTestPhasedControllerWithLogger(t, api, log.NewLogfmtLogger(&logs))
+	c.reconcileInterval = time.Hour
+	gate := &phasedRequeueGate{
+		decisions: []healthcheck.Decision{
+			{ShouldPause: true, Reason: "blocked by health", RequeueAfter: 25 * time.Millisecond},
+			{},
+		},
+		called: make(chan struct{}, 2),
+	}
+	c.SetHealthCheck(gate, nil)
+
+	require.NoError(t, c.reconcile(context.Background()))
+	require.Equal(t, 1, gate.callCount())
+	c.shouldReconcile.Store(false)
+
+	runDone := make(chan struct{})
+	go func() {
+		c.Run()
+		close(runDone)
+	}()
+
+	select {
+	case <-gate.called:
+	case <-time.After(time.Second):
+		t.Fatal("health deadline did not trigger a phased Deployment reconcile")
+	}
+	if gate.callCount() < 2 {
+		select {
+		case <-gate.called:
+		case <-time.After(time.Second):
+			t.Fatal("health deadline did not trigger a second gate evaluation")
+		}
+	}
+	require.GreaterOrEqual(t, gate.callCount(), 2)
+
+	c.Stop()
+	select {
+	case <-runDone:
+	case <-time.After(time.Second):
+		t.Fatal("phased Deployment controller did not stop")
+	}
+	require.Contains(t, logs.String(), `msg="scheduled phased deployment health check reevaluation"`)
+	require.Contains(t, logs.String(), "deployment=zone-b")
+	require.Contains(t, logs.String(), "policy=deployment-health")
+}
+
+func TestPhasedDeploymentController_HealthRequeueKeepsEarliestDeadline(t *testing.T) {
+	var logs bytes.Buffer
+	c := &PhasedDeploymentController{
+		logger:       log.NewLogfmtLogger(&logs),
+		stopCh:       make(chan struct{}),
+		healthWakeCh: make(chan struct{}, 1),
+	}
+	t.Cleanup(c.Stop)
+
+	c.scheduleHealthRequeue(2*time.Second, "zone-b", "slow")
+	c.scheduleHealthRequeue(5*time.Second, "zone-c", "later")
+	c.scheduleHealthRequeue(500*time.Millisecond, "zone-d", "fast")
+
+	c.healthTimerMu.Lock()
+	timerScheduled := c.healthTimer != nil
+	timerDelay := time.Until(c.healthTimerAt)
+	c.healthTimerMu.Unlock()
+	require.True(t, timerScheduled)
+	require.InDelta(t, 500*time.Millisecond, timerDelay, float64(100*time.Millisecond))
+	require.Contains(t, logs.String(), "deployment=zone-d")
+	require.Contains(t, logs.String(), "policy=fast")
+	require.NotContains(t, logs.String(), "policy=later")
 }
 
 func TestPhasedDeploymentController_ClearsHealthStateWhenCanaryRemoved(t *testing.T) {

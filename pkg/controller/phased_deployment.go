@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -51,6 +52,11 @@ type PhasedDeploymentController struct {
 
 	shouldReconcile atomic.Bool
 	stopCh          chan struct{}
+	stopOnce        sync.Once
+	healthTimerMu   sync.Mutex
+	healthTimer     *time.Timer
+	healthTimerAt   time.Time
+	healthWakeCh    chan struct{}
 
 	phase             *prometheus.GaugeVec
 	blocked           *prometheus.GaugeVec
@@ -81,6 +87,7 @@ func NewPhasedDeploymentController(kubeClient kubernetes.Interface, namespace st
 		logger:              logger,
 		now:                 time.Now,
 		stopCh:              make(chan struct{}),
+		healthWakeCh:        make(chan struct{}, 1),
 		phase: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
 			Name: "rollout_operator_phased_deployment_phase",
 			Help: "Current phased Deployment gate phase (1=active for labeled phase).",
@@ -152,13 +159,24 @@ func (c *PhasedDeploymentController) Run() {
 		select {
 		case <-c.stopCh:
 			return
+		case <-c.healthWakeCh:
+			// Health deadlines must not wait for unrelated informer events or the regular throttle.
 		case <-time.After(c.reconcileInterval):
 		}
 	}
 }
 
 func (c *PhasedDeploymentController) Stop() {
-	close(c.stopCh)
+	c.stopOnce.Do(func() {
+		c.healthTimerMu.Lock()
+		if c.healthTimer != nil {
+			c.healthTimer.Stop()
+			c.healthTimer = nil
+			c.healthTimerAt = time.Time{}
+		}
+		c.healthTimerMu.Unlock()
+		close(c.stopCh)
+	})
 }
 
 func (c *PhasedDeploymentController) enqueueReconcile() {
@@ -169,6 +187,7 @@ func (c *PhasedDeploymentController) reconcile(ctx context.Context) error {
 	c.reconcileTotal.Inc()
 	timer := prometheus.NewTimer(c.reconcileDuration)
 	defer timer.ObserveDuration()
+	c.resetHealthRequeue()
 
 	deps, err := c.deploymentLister.Deployments(c.namespace).List(labels.Everything())
 	if err != nil {
@@ -470,7 +489,67 @@ func (c *PhasedDeploymentController) evaluateDeploymentHealthGate(ctx context.Co
 		BaselineTime:      baseline,
 		Now:               c.now(),
 	})
+	if decision.ShouldPause && decision.RequeueAfter > 0 {
+		c.scheduleHealthRequeue(decision.RequeueAfter, dep.Name, annotationOrEmpty(dep, config.RolloutHealthCheckAnnotationKey))
+	}
 	return decision.ShouldPause, decision.Reason, nil
+}
+
+func (c *PhasedDeploymentController) resetHealthRequeue() {
+	c.healthTimerMu.Lock()
+	defer c.healthTimerMu.Unlock()
+	if c.healthTimer != nil {
+		c.healthTimer.Stop()
+		c.healthTimer = nil
+		c.healthTimerAt = time.Time{}
+	}
+}
+
+func (c *PhasedDeploymentController) scheduleHealthRequeue(after time.Duration, deployment, policy string) {
+	if after <= 0 {
+		return
+	}
+
+	due := time.Now().Add(after)
+	c.healthTimerMu.Lock()
+	defer c.healthTimerMu.Unlock()
+	if c.healthTimer != nil && !due.Before(c.healthTimerAt) {
+		return
+	}
+	if c.healthTimer != nil {
+		c.healthTimer.Stop()
+	}
+
+	var timer *time.Timer
+	timer = time.AfterFunc(after, func() {
+		c.healthTimerMu.Lock()
+		if c.healthTimer != timer {
+			c.healthTimerMu.Unlock()
+			return
+		}
+		c.healthTimer = nil
+		c.healthTimerAt = time.Time{}
+		c.healthTimerMu.Unlock()
+
+		select {
+		case <-c.stopCh:
+			return
+		default:
+			c.enqueueReconcile()
+			select {
+			case c.healthWakeCh <- struct{}{}:
+			default:
+			}
+		}
+	})
+	c.healthTimer = timer
+	c.healthTimerAt = due
+	level.Debug(c.logger).Log(
+		"msg", "scheduled phased deployment health check reevaluation",
+		"deployment", deployment,
+		"policy", policy,
+		"requeue_after", after,
+	)
 }
 
 func deploymentHealthGroup(dep *appsv1.Deployment) string {
