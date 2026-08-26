@@ -192,15 +192,26 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 	}
 
 	revision := phased.Revision(dep)
+	level.Debug(c.logger).Log(
+		"msg", "reconciling phased deployment",
+		"deployment", dep.Name,
+		"revision", revision,
+		"gated_revision", phased.DependencyRevision(dep),
+		"phase", phased.Phase(dep),
+		"paused", dep.Spec.Paused,
+		"canaries", strings.Join(canaries, ","),
+	)
 	if revision == "" {
 		c.setPhaseMetric(dep.Name, "missing_revision")
 		c.bypassActive.WithLabelValues(dep.Name).Set(0)
+		level.Debug(c.logger).Log("msg", "phased deployment cannot be gated without rollout revision", "deployment", dep.Name)
 		return nil
 	}
 
 	now := c.now()
-	if _, _, err := phased.BypassUntil(dep); err != nil {
-		level.Warn(c.logger).Log("msg", "invalid rollout-bypass-until, ignoring", "deployment", dep.Name, "err", err)
+	bypassUntil, bypassSet, bypassErr := phased.BypassUntil(dep)
+	if bypassErr != nil {
+		level.Warn(c.logger).Log("msg", "invalid rollout-bypass-until, ignoring", "deployment", dep.Name, "err", bypassErr)
 	}
 	if phased.BypassActive(dep, now) {
 		c.bypassActive.WithLabelValues(dep.Name).Set(1)
@@ -208,7 +219,14 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 			phased.DependencyRevision(dep) != revision ||
 			(dep.Spec.Paused && annotationOrEmpty(dep, config.RolloutHadPausedAnnotationKey) != phased.HadPausedAnnotationTrue)
 		if needsBypassApply {
-			level.Info(c.logger).Log("msg", "applying phased deployment bypass", "deployment", dep.Name, "revision", revision)
+			level.Warn(c.logger).Log(
+				"msg", "applying phased deployment bypass",
+				"deployment", dep.Name,
+				"revision", revision,
+				"bypass_until", bypassUntil.Format(time.RFC3339),
+				"phase", phased.Phase(dep),
+				"paused", dep.Spec.Paused,
+			)
 			if err := c.completeGate(ctx, dep, fmt.Sprintf("bypassed until %s", annotationOrEmpty(dep, config.RolloutBypassUntilAnnotationKey))); err != nil {
 				return err
 			}
@@ -218,13 +236,28 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 		}
 		c.setPhaseMetric(dep.Name, config.RolloutDependencyPhaseComplete)
 		c.blocked.DeleteLabelValues(dep.Name, "config")
+		level.Debug(c.logger).Log(
+			"msg", "phased deployment bypass remains active",
+			"deployment", dep.Name,
+			"revision", revision,
+			"bypass_until", bypassUntil.Format(time.RFC3339),
+		)
 		return nil
 	}
 	c.bypassActive.WithLabelValues(dep.Name).Set(0)
+	if bypassSet && bypassErr == nil {
+		level.Debug(c.logger).Log(
+			"msg", "phased deployment bypass is expired",
+			"deployment", dep.Name,
+			"revision", revision,
+			"bypass_until", bypassUntil.Format(time.RFC3339),
+		)
+	}
 
 	if phased.Phase(dep) == config.RolloutDependencyPhaseComplete && phased.DependencyRevision(dep) == revision {
 		c.setPhaseMetric(dep.Name, config.RolloutDependencyPhaseComplete)
 		c.blocked.DeleteLabelValues(dep.Name, "config")
+		level.Debug(c.logger).Log("msg", "phased deployment may proceed", "deployment", dep.Name, "revision", revision, "paused", dep.Spec.Paused)
 		return nil
 	}
 
@@ -241,6 +274,15 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 		} else if dep.Spec.Paused {
 			hadPaused = phased.HadPausedAnnotationTrue
 		}
+		level.Info(c.logger).Log(
+			"msg", "starting phased deployment gate",
+			"deployment", dep.Name,
+			"previous_revision", phased.DependencyRevision(dep),
+			"target_revision", revision,
+			"previous_phase", prevPhase,
+			"canaries", strings.Join(canaries, ","),
+			"had_paused", hadPaused,
+		)
 		if err := c.patchDeployment(ctx, dep.Name, map[string]interface{}{
 			"metadata": map[string]interface{}{
 				"annotations": map[string]interface{}{
@@ -273,12 +315,29 @@ func (c *PhasedDeploymentController) reconcileDeployment(ctx context.Context, de
 			c.blocked.WithLabelValues(dep.Name, "config").Set(1)
 			return c.ensurePhase(ctx, dep, config.RolloutDependencyPhaseWaiting, err.Error())
 		}
-		if phased.Revision(canary) != revision {
+		canaryRevision := phased.Revision(canary)
+		canaryReady := phased.IsFullyRolledOut(canary)
+		level.Debug(c.logger).Log(
+			"msg", "checking phased deployment canary",
+			"deployment", dep.Name,
+			"canary", canaryName,
+			"current_revision", canaryRevision,
+			"target_revision", revision,
+			"ready", canaryReady,
+			"paused", canary.Spec.Paused,
+			"generation", canary.Generation,
+			"observed_generation", canary.Status.ObservedGeneration,
+			"replicas", valueOrDefault(canary.Spec.Replicas, 1),
+			"updated_replicas", canary.Status.UpdatedReplicas,
+			"ready_replicas", canary.Status.ReadyReplicas,
+			"available_replicas", canary.Status.AvailableReplicas,
+		)
+		if canaryRevision != revision {
 			c.setPhaseMetric(dep.Name, config.RolloutDependencyPhaseWaiting)
 			c.blocked.DeleteLabelValues(dep.Name, "config")
 			return c.ensurePhase(ctx, dep, config.RolloutDependencyPhaseWaiting, fmt.Sprintf("waiting for canary %q to reach revision %s", canaryName, revision))
 		}
-		if !phased.IsFullyRolledOut(canary) {
+		if !canaryReady {
 			c.setPhaseMetric(dep.Name, config.RolloutDependencyPhaseWaiting)
 			c.blocked.DeleteLabelValues(dep.Name, "config")
 			return c.ensurePhase(ctx, dep, config.RolloutDependencyPhaseWaiting, fmt.Sprintf("waiting for canary %q to become fully rolled out", canaryName))
@@ -318,6 +377,17 @@ func (c *PhasedDeploymentController) completeGate(ctx context.Context, dep *apps
 		config.RolloutDependencyRevisionAnnotationKey: phased.Revision(dep),
 		config.RolloutDependencyReasonAnnotationKey:   reason,
 	}
+	action := "unpause-and-proceed"
+	if hadPaused {
+		action = "preserve-pause"
+	}
+	level.Info(c.logger).Log(
+		"msg", "completing phased deployment gate",
+		"deployment", dep.Name,
+		"revision", phased.Revision(dep),
+		"reason", reason,
+		"action", action,
+	)
 	return c.patchDeployment(ctx, dep.Name, map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"annotations": annotations,
@@ -330,8 +400,22 @@ func (c *PhasedDeploymentController) completeGate(ctx context.Context, dep *apps
 
 func (c *PhasedDeploymentController) ensurePhase(ctx context.Context, dep *appsv1.Deployment, phase, reason string) error {
 	if phased.Phase(dep) == phase && annotationOrEmpty(dep, config.RolloutDependencyReasonAnnotationKey) == reason && dep.Spec.Paused {
+		level.Debug(c.logger).Log(
+			"msg", "phased deployment remains on hold",
+			"deployment", dep.Name,
+			"revision", phased.Revision(dep),
+			"phase", phase,
+			"reason", reason,
+		)
 		return nil
 	}
+	level.Info(c.logger).Log(
+		"msg", "holding phased deployment",
+		"deployment", dep.Name,
+		"revision", phased.Revision(dep),
+		"phase", phase,
+		"reason", reason,
+	)
 	return c.patchDeployment(ctx, dep.Name, map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"annotations": map[string]interface{}{
@@ -415,4 +499,11 @@ func annotationOrEmpty(dep *appsv1.Deployment, key string) string {
 		return ""
 	}
 	return dep.Annotations[key]
+}
+
+func valueOrDefault(value *int32, fallback int32) int32 {
+	if value == nil {
+		return fallback
+	}
+	return *value
 }

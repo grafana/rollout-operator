@@ -1,8 +1,10 @@
 package admission
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,8 +21,9 @@ import (
 func TestPhasedDeployment_PausesOnRevisionChange(t *testing.T) {
 	newDep := phasedDeployment("query-frontend-zone-b", "query-frontend-zone-a", "r2", false, "", "")
 	oldDep := phasedDeployment("query-frontend-zone-b", "query-frontend-zone-a", "r1", false, config.RolloutDependencyPhaseComplete, "r1")
+	var logs bytes.Buffer
 
-	resp := PhasedDeployment(context.Background(), log.NewNopLogger(), admissionReview(oldDep, newDep), nil)
+	resp := PhasedDeployment(context.Background(), log.NewLogfmtLogger(&logs), admissionReview(oldDep, newDep), nil)
 	require.True(t, resp.Allowed)
 	require.NotNil(t, resp.PatchType)
 	require.NotEmpty(t, resp.Patch)
@@ -28,6 +31,9 @@ func TestPhasedDeployment_PausesOnRevisionChange(t *testing.T) {
 	var ops []jsonPatchOp
 	require.NoError(t, json.Unmarshal(resp.Patch, &ops))
 	require.Contains(t, ops, jsonPatchOp{Op: "add", Path: "/spec/paused", Value: true})
+	require.True(t, strings.Contains(logs.String(), `msg="phased deployment revision change detected"`))
+	require.Contains(t, logs.String(), "previous_revision=r1")
+	require.Contains(t, logs.String(), "target_revision=r2")
 }
 
 func TestPhasedDeployment_RePausesWhileGateActive(t *testing.T) {
@@ -35,14 +41,17 @@ func TestPhasedDeployment_RePausesWhileGateActive(t *testing.T) {
 	oldDep := phasedDeployment("b", "a", "r1", true, config.RolloutDependencyPhaseWaiting, "r1")
 	oldDep.Annotations[config.RolloutHadPausedAnnotationKey] = "false"
 	newDep.Annotations[config.RolloutHadPausedAnnotationKey] = "false"
+	var logs bytes.Buffer
 
-	resp := PhasedDeployment(context.Background(), log.NewNopLogger(), admissionReview(oldDep, newDep), nil)
+	resp := PhasedDeployment(context.Background(), log.NewLogfmtLogger(&logs), admissionReview(oldDep, newDep), nil)
 	require.True(t, resp.Allowed)
 	require.NotEmpty(t, resp.Patch)
 
 	var ops []jsonPatchOp
 	require.NoError(t, json.Unmarshal(resp.Patch, &ops))
 	require.Contains(t, ops, jsonPatchOp{Op: "add", Path: "/spec/paused", Value: true})
+	require.Contains(t, logs.String(), `msg="re-pausing deployment while phased rollout gate is active"`)
+	require.Contains(t, logs.String(), "revision=r1")
 }
 
 func TestPhasedDeployment_AllowsWhenComplete(t *testing.T) {
