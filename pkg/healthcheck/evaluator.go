@@ -81,9 +81,12 @@ type EvaluateRequest struct {
 
 // CheckEvaluation is the raw result of one check.
 type CheckEvaluation struct {
-	Name    string
-	Result  EvaluationResult
-	Message string
+	Name          string
+	Result        EvaluationResult
+	Message       string
+	CurrentValue  *float64
+	BaselineValue *float64
+	QueryType     string
 }
 
 // EvaluateResponse is the aggregate raw result of all checks.
@@ -121,11 +124,23 @@ func (e *Evaluator) Evaluate(ctx context.Context, req EvaluateRequest) EvaluateR
 	if req.Now.IsZero() {
 		req.Now = time.Now()
 	}
-
+	level.Info(e.logger).Log(
+		"msg", "health check evaluation started",
+		"rollout_group", req.RolloutGroup,
+		"policy", req.Config.Name,
+		"candidate_pods", len(req.CandidatePods.Names),
+		"stable_pods", len(req.StablePods.Names),
+		"checks", len(req.Config.Checks),
+	)
 	querier, err := e.factory(req.Config.PrometheusURL)
 	if err != nil {
-		msg := fmt.Sprintf("failed to create Prometheus client for %q: %v", req.Config.PrometheusURL, err)
-		level.Error(e.logger).Log("msg", msg, "rollout_group", req.RolloutGroup)
+		msg := fmt.Sprintf("failed to create Prometheus client: %v", err)
+		level.Error(e.logger).Log(
+			"msg", "prometheus client unavailable",
+			"rollout_group", req.RolloutGroup,
+			"policy", req.Config.Name,
+			"err", err,
+		)
 		resp.ClientError = msg
 		return resp
 	}
@@ -142,24 +157,28 @@ func (e *Evaluator) Evaluate(ctx context.Context, req EvaluateRequest) EvaluateR
 			continue
 		}
 
-		result, msg := e.evaluateCheck(ctx, querier, check, candidateMatchers, stableMatchers, req)
-		ev := CheckEvaluation{Name: check.Name, Result: result, Message: msg}
+		ev := e.evaluateCheck(ctx, querier, check, candidateMatchers, stableMatchers, req)
 		resp.Checks = append(resp.Checks, ev)
-		resp.Results[check.Name] = result
-		e.observeEvaluation(req.RolloutGroup, check.Name, string(result))
+		resp.Results[check.Name] = ev.Result
+		e.observeEvaluation(req.RolloutGroup, check.Name, string(ev.Result))
 	}
 
 	return resp
 }
 
-func (e *Evaluator) evaluateCheck(ctx context.Context, querier Querier, check Check, candidateMatchers, stableMatchers string, req EvaluateRequest) (EvaluationResult, string) {
+func (e *Evaluator) evaluateCheck(ctx context.Context, querier Querier, check Check, candidateMatchers, stableMatchers string, req EvaluateRequest) CheckEvaluation {
+	ev := CheckEvaluation{Name: check.Name}
 	currentQuery := substituteQuery(check.Query, candidateMatchers, formatDuration(check.CurrentRange))
 	baselineQuery := substituteQuery(check.Query, stableMatchers, formatDuration(check.BaselineRange))
 
 	currentVal, result, errMsg := e.queryScalarOnce(ctx, querier, currentQuery, req.Now, req.RolloutGroup, check, "current")
 	if result != ResultPass {
-		return result, fmt.Sprintf("check %q current query: %s", check.Name, errMsg)
+		ev.Result = result
+		ev.Message = fmt.Sprintf("check %q current query: %s", check.Name, errMsg)
+		ev.QueryType = "current"
+		return ev
 	}
+	ev.CurrentValue = currentVal
 
 	baselineTS := req.BaselineTime
 	if baselineTS.IsZero() {
@@ -167,21 +186,33 @@ func (e *Evaluator) evaluateCheck(ctx context.Context, querier Querier, check Ch
 	}
 	baselineVal, result, errMsg := e.queryScalarOnce(ctx, querier, baselineQuery, baselineTS, req.RolloutGroup, check, "baseline")
 	if result != ResultPass {
-		return result, fmt.Sprintf("check %q baseline query: %s", check.Name, errMsg)
+		ev.Result = result
+		ev.Message = fmt.Sprintf("check %q baseline query: %s", check.Name, errMsg)
+		ev.QueryType = "baseline"
+		return ev
 	}
+	ev.BaselineValue = baselineVal
 
 	successQuery := substituteSuccessQuery(check.SuccessQuery, *currentVal, *baselineVal)
 	successVal, result, errMsg := e.queryScalarOnce(ctx, querier, successQuery, req.Now, req.RolloutGroup, check, "success")
 	if result != ResultPass {
-		return result, fmt.Sprintf("check %q success query: %s", check.Name, errMsg)
+		ev.Result = result
+		ev.Message = fmt.Sprintf("check %q success query: %s", check.Name, errMsg)
+		ev.QueryType = "success"
+		return ev
 	}
 	if *successVal == 1 {
-		return ResultPass, ""
+		ev.Result = ResultPass
+		return ev
 	}
 	if *successVal == 0 {
-		return ResultFail, fmt.Sprintf("check %q failed (current=%v baseline=%v)", check.Name, *currentVal, *baselineVal)
+		ev.Result = ResultFail
+		ev.Message = fmt.Sprintf("check %q failed (current=%v baseline=%v)", check.Name, *currentVal, *baselineVal)
+		return ev
 	}
-	return ResultFail, fmt.Sprintf("check %q success query returned unexpected scalar %v (want 0 or 1)", check.Name, *successVal)
+	ev.Result = ResultFail
+	ev.Message = fmt.Sprintf("check %q success query returned unexpected scalar %v (want 0 or 1)", check.Name, *successVal)
+	return ev
 }
 
 // queryScalarOnce performs a single Prometheus query. Retries are applied by Gate across reconciles
@@ -201,6 +232,13 @@ func (e *Evaluator) queryScalarOnce(ctx context.Context, querier Querier, query 
 		if ctx.Err() != nil {
 			return nil, ResultError, fmt.Sprintf("interrupted: %v", err)
 		}
+		level.Warn(e.logger).Log(
+			"msg", "prometheus query failed",
+			"rollout_group", rolloutGroup,
+			"check", check.Name,
+			"query_type", queryType,
+			"err", err,
+		)
 		return nil, ResultError, err.Error()
 	}
 

@@ -1,6 +1,7 @@
 package healthcheck
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -125,9 +126,14 @@ func TestEvaluator_PassFailNoDataError(t *testing.T) {
 		q := &fakeQuerier{sequence: []func() (model.Value, error){
 			func() (model.Value, error) { return nil, errors.New("boom") },
 		}}
-		e := NewEvaluator(func(string) (Querier, error) { return q, nil }, nil, log.NewNopLogger())
+		var logs bytes.Buffer
+		e := NewEvaluator(func(string) (Querier, error) { return q, nil }, nil, log.NewLogfmtLogger(&logs))
 		resp := e.Evaluate(context.Background(), EvaluateRequest{Config: baseCfg, Namespace: "ns", RolloutGroup: "ingester", Now: time.Now()})
 		require.Equal(t, ResultError, resp.Results["errors"])
+		require.Contains(t, logs.String(), "msg=\"prometheus query failed\"")
+		require.Contains(t, logs.String(), "query_type=current")
+		require.Contains(t, logs.String(), "err=boom")
+		require.NotContains(t, logs.String(), baseCfg.Checks[0].Query)
 	})
 
 	t.Run("disabled check skipped", func(t *testing.T) {
