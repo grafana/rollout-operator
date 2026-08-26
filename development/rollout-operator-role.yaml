@@ -30,12 +30,6 @@ rules:
     verbs:
       - update
   - apiGroups:
-      - ""
-    resources:
-      - events
-    verbs:
-      - create
-  - apiGroups:
       - apps
     resources:
       - deployments
@@ -45,7 +39,7 @@ rules:
       - watch
       - patch
   - apiGroups:
-      -
+      - ""
     resources:
       - events
     verbs:

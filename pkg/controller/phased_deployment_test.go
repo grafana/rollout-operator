@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +27,8 @@ func TestPhasedDeploymentController_WaitsForCanary(t *testing.T) {
 	main.Annotations[config.RolloutDependencyRevisionAnnotationKey] = "r1"
 
 	api := fake.NewSimpleClientset(canary, main)
-	c := newTestPhasedController(t, api)
+	var logs bytes.Buffer
+	c := newTestPhasedControllerWithLogger(t, api, log.NewLogfmtLogger(&logs))
 	require.NoError(t, c.reconcile(context.Background()))
 
 	main, err := api.AppsV1().Deployments(testNamespace).Get(context.Background(), "zone-b", metav1.GetOptions{})
@@ -33,6 +36,11 @@ func TestPhasedDeploymentController_WaitsForCanary(t *testing.T) {
 	require.Equal(t, config.RolloutDependencyPhaseWaiting, phased.Phase(main))
 	require.True(t, main.Spec.Paused)
 	require.Contains(t, main.Annotations[config.RolloutDependencyReasonAnnotationKey], "fully rolled out")
+	require.Contains(t, logs.String(), `msg="checking phased deployment canary"`)
+	require.Contains(t, logs.String(), "current_revision=r1")
+	require.Contains(t, logs.String(), "target_revision=r1")
+	require.Contains(t, logs.String(), "ready=false")
+	require.True(t, strings.Contains(logs.String(), `msg="holding phased deployment"`))
 }
 
 func TestPhasedDeploymentController_CompletesWhenCanaryReady(t *testing.T) {
@@ -44,13 +52,17 @@ func TestPhasedDeploymentController_CompletesWhenCanaryReady(t *testing.T) {
 	main.Annotations[config.RolloutHadPausedAnnotationKey] = phased.HadPausedAnnotationFalse
 
 	api := fake.NewSimpleClientset(canary, main)
-	c := newTestPhasedController(t, api)
+	var logs bytes.Buffer
+	c := newTestPhasedControllerWithLogger(t, api, log.NewLogfmtLogger(&logs))
 	require.NoError(t, c.reconcile(context.Background()))
 
 	main, err := api.AppsV1().Deployments(testNamespace).Get(context.Background(), "zone-b", metav1.GetOptions{})
 	require.NoError(t, err)
 	require.Equal(t, config.RolloutDependencyPhaseComplete, phased.Phase(main))
 	require.False(t, main.Spec.Paused)
+	require.Contains(t, logs.String(), `msg="phased deployment canaries ready"`)
+	require.Contains(t, logs.String(), `msg="completing phased deployment gate"`)
+	require.Contains(t, logs.String(), "action=unpause-and-proceed")
 }
 
 func TestPhasedDeploymentController_HealthCheckGatesReadyCanary(t *testing.T) {
@@ -208,8 +220,12 @@ func TestPhasedDeploymentController_BypassHonorsPreExistingPause(t *testing.T) {
 }
 
 func newTestPhasedController(t *testing.T, api *fake.Clientset) *PhasedDeploymentController {
+	return newTestPhasedControllerWithLogger(t, api, log.NewNopLogger())
+}
+
+func newTestPhasedControllerWithLogger(t *testing.T, api *fake.Clientset, logger log.Logger) *PhasedDeploymentController {
 	t.Helper()
-	c := NewPhasedDeploymentController(api, testNamespace, time.Second, prometheus.NewRegistry(), log.NewNopLogger())
+	c := NewPhasedDeploymentController(api, testNamespace, time.Second, prometheus.NewRegistry(), logger)
 	require.NoError(t, c.Init())
 	t.Cleanup(c.Stop)
 	return c
