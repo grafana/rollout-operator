@@ -21,11 +21,10 @@ type validatorPartitionAware struct {
 	zones         int
 	pdbConfig     *config
 	evictionCache *podEvictionCache
-	readyTracker  *podReadinessTracker
 	log           *spanlogger.SpanLogger
 }
 
-func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config, evictionCache *podEvictionCache, readyTracker *podReadinessTracker, log *spanlogger.SpanLogger) *validatorPartitionAware {
+func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config, evictionCache *podEvictionCache, log *spanlogger.SpanLogger) *validatorPartitionAware {
 	partitionMatcher := func(pd *corev1.Pod) bool {
 		thisPartition, err := pdbConfig.podPartition(pd)
 		if err != nil {
@@ -43,7 +42,6 @@ func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones
 		zones:         zones,
 		pdbConfig:     pdbConfig,
 		evictionCache: evictionCache,
-		readyTracker:  readyTracker,
 		log:           log,
 		result:        &zoneStatusResult{},
 		matcher:       partitionMatcher,
@@ -97,22 +95,26 @@ func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
 		return true
 	}
 
-	// Delay configured: the pod is only ready once enough time has elapsed since it last
-	// transitioned to ready+running. The transition time is read from the pod's
-	// `podReadyAnnotationKey` annotation (or time.Now() when the annotation is absent or invalid,
-	// which is the safe default that denies eviction until the delay window has been observed).
 	now := time.Now()
-	found, readyRunning, since := v.readyTracker.get(pod)
-	if readyRunning && now.After(since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
+	since, found := podReadyTransitionTime(pod)
+	if found && !now.Before(since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
 		return true
 	}
 
 	reason := "Not enough time has elapsed since this pod became ready"
-	if !readyRunning {
-		reason = "Pod is not ready and running"
-	} else if !found {
+	if !found {
 		reason = "Unable to determine when pod last became ready"
+		since = now
 	}
 	level.Info(v.log).Log("msg", "Pod not considered ready", "reason", reason, "pod", pod.Name, "time-until-ready", since.Add(v.pdbConfig.crossZoneEvictionDelay).Sub(now))
 	return false
+}
+
+func podReadyTransitionTime(pod *corev1.Pod) (time.Time, bool) {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue && !condition.LastTransitionTime.IsZero() {
+			return condition.LastTransitionTime.Time, true
+		}
+	}
+	return time.Time{}, false
 }

@@ -43,6 +43,8 @@ import (
 
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
 
+const zpdbPodReadyAnnotationPatchTimeoutFlag = "zpdb.pod-ready-annotation-patch-timeout"
+
 var (
 	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale"}
 )
@@ -80,7 +82,7 @@ type config struct {
 	useZoneTracker           bool
 	zoneTrackerConfigMapName string
 
-	zpdbPodReadyAnnotationPatchTimeout time.Duration
+	deprecatedZPDBPodReadyAnnotationPatchTimeout time.Duration
 }
 
 func (cfg *config) register(fs *flag.FlagSet) {
@@ -115,8 +117,15 @@ func (cfg *config) register(fs *flag.FlagSet) {
 
 	fs.BoolVar(&cfg.useZoneTracker, "use-zone-tracker", false, "Use the zone tracker to prevent simultaneous downscales in different zones")
 	fs.StringVar(&cfg.zoneTrackerConfigMapName, "zone-tracker.config-map-name", "rollout-operator-zone-tracker", "The name of the ConfigMap to use for the zone tracker")
+	fs.DurationVar(&cfg.deprecatedZPDBPodReadyAnnotationPatchTimeout, zpdbPodReadyAnnotationPatchTimeoutFlag, 5*time.Second, "Deprecated: accepted for compatibility and has no effect.")
+}
 
-	fs.DurationVar(&cfg.zpdbPodReadyAnnotationPatchTimeout, "zpdb.pod-ready-annotation-patch-timeout", 5*time.Second, "Timeout for the Kubernetes API calls that maintain the grafana.com/ready-time annotation on observed pods (used to enforce ZPDB crossZoneEvictionDelay).")
+func warnDeprecatedFlags(fs *flag.FlagSet, logger log.Logger) {
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == zpdbPodReadyAnnotationPatchTimeoutFlag {
+			level.Warn(logger).Log("msg", "deprecated flag has no effect", "flag", "-"+f.Name)
+		}
+	})
 }
 
 func (cfg config) validate() error {
@@ -139,9 +148,6 @@ func (cfg config) validate() error {
 	if cfg.serverTLSRequestTimeout <= 0 {
 		return errors.New("-server-tls.request-timeout must be positive")
 	}
-	if cfg.zpdbPodReadyAnnotationPatchTimeout <= 0 {
-		return errors.New("-zpdb.pod-ready-annotation-patch-timeout must be positive")
-	}
 	if err := cfg.clusterValidationCfg.Validate("http", cfg.kubeNamespace); err != nil {
 		return err
 	}
@@ -163,6 +169,7 @@ func main() {
 
 	logger, err := initLogger(cfg.logFormat, cfg.logLevel)
 	check(err)
+	warnDeprecatedFlags(fs, logger)
 
 	reg := prometheus.NewRegistry()
 	metrics := newMetrics(reg)
@@ -290,7 +297,7 @@ func main() {
 	if err != nil {
 		fatal(fmt.Errorf("failed to create pod eviction Kubernetes client: %w", err))
 	}
-	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, podsFactory, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
+	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, podsFactory, logger, zpdbMetrics)
 	check(evictionController.Start())
 
 	maybeStartTLSServer(cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
