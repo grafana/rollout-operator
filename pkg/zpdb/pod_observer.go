@@ -111,48 +111,63 @@ func (c *podObserver) invalidatePodEvictionCache(pod *corev1.Pod, action string)
 	c.podEvictCache.delete(pod)
 }
 
-// accept will return a pod and true if the given object is a pod and the is within the scope of our pdb
-func (c *podObserver) accept(obj interface{}) (*corev1.Pod, bool) {
+// accept returns valid pods even when no ZPDB matches so stale operator-owned annotations can be removed.
+func (c *podObserver) accept(obj interface{}) (*corev1.Pod, *config, bool) {
 	pod, isPod := obj.(*corev1.Pod)
 	if !isPod {
 		level.Warn(c.logger).Log("msg", "unexpected object passed through informer", "type", reflect.TypeOf(obj))
-		return nil, false
+		return nil, nil, false
 	}
 	pdbConfig, err := c.configObserver.pdbCache.find(pod)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "observer ignoring pod - unable to look up configuration for pod", "pod", pod.Name, "err", err)
-		return nil, false
+		return nil, nil, false
 	}
 	if pdbConfig == nil {
-		level.Debug(c.logger).Log("msg", "observer ignoring pod - not within zpdb scope", "pod", pod.Name)
-		return nil, false
+		return pod, nil, true
 	}
 
-	return pod, true
+	return pod, pdbConfig, true
 }
 
 func (c *podObserver) onPodAdded(obj interface{}) {
-	pod, ok := c.accept(obj)
+	pod, pdbConfig, ok := c.accept(obj)
 	if !ok {
 		return
 	}
+	if pdbConfig == nil {
+		c.podReadinessTracker.remove(pod)
+		return
+	}
 
-	c.podReadinessTracker.observed(pod)
+	if pdbConfig.crossZoneEvictionDelay > 0 {
+		c.podReadinessTracker.observed(pod)
+	} else {
+		c.podReadinessTracker.remove(pod)
+	}
 	c.invalidatePodEvictionCache(pod, "added")
 }
 
 func (c *podObserver) onPodUpdated(_, new interface{}) {
-	pod, ok := c.accept(new)
+	pod, pdbConfig, ok := c.accept(new)
 	if !ok {
 		return
 	}
+	if pdbConfig == nil {
+		c.podReadinessTracker.remove(pod)
+		return
+	}
 
-	c.podReadinessTracker.observed(pod)
+	if pdbConfig.crossZoneEvictionDelay > 0 {
+		c.podReadinessTracker.observed(pod)
+	} else {
+		c.podReadinessTracker.remove(pod)
+	}
 	c.invalidatePodEvictionCache(pod, "updated")
 }
 
 func (c *podObserver) onPodDeleted(obj interface{}) {
-	pod, ok := c.accept(obj)
+	pod, _, ok := c.accept(obj)
 	if !ok {
 		return
 	}

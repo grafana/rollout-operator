@@ -12,12 +12,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/grafana/rollout-operator/pkg/util"
 )
+
+const podReadyAnnotationKey = "grafana.com/ready-time"
 
 func TestRolloutHappyCase(t *testing.T) {
 	ctx := context.Background()
@@ -479,6 +482,14 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		require.Never(t, func() bool {
+			pod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, "mock-zone-a-0", metav1.GetOptions{})
+			if err != nil {
+				return false
+			}
+			_, ok := pod.Annotations[podReadyAnnotationKey]
+			return ok
+		}, 5*time.Second, 100*time.Millisecond, "Pods should not be annotated when crossZoneEvictionDelay is disabled")
 	}
 
 	{
@@ -559,12 +570,27 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 
 	{
 		t.Log("Create 2 zones each with 2 pods. There are 2 partitions across 2 zones.")
+		podNames := []string{"mock-zone-a-0", "mock-zone-a-1", "mock-zone-b-0", "mock-zone-b-1"}
 		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", 2)
 		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b", 2)
 		requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		for _, podName := range podNames {
+			requireEventuallyPod(t, api, ctx, podName, expectAnnotation(podReadyAnnotationKey))
+		}
+
+		updateCrossZoneEvictionDelay(t, ctx, cluster, "0s")
+		for _, podName := range podNames {
+			awaitReadyAnnotation(t, ctx, api, podName, false, time.Time{})
+		}
+
+		reenabledAt := time.Now().UTC().Truncate(time.Second)
+		updateCrossZoneEvictionDelay(t, ctx, cluster, "15s")
+		for _, podName := range podNames {
+			awaitReadyAnnotation(t, ctx, api, podName, true, reenabledAt)
+		}
 	}
 
 	{
@@ -812,4 +838,39 @@ func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context
 	// note - this retry should not be needed, as the rollout-operator pod should be ready and running
 	// however in the CI environments there have been intermittent errors which this retry is attempting to workaround
 	require.Eventually(t, task, time.Second*30, time.Millisecond*10, "Zpdb configuration create failed")
+}
+
+func updateCrossZoneEvictionDelay(t *testing.T, ctx context.Context, cluster *kindCluster, delay string) {
+	resource := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault)
+	config, err := resource.Get(ctx, "mock-rollout", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NoError(t, unstructured.SetNestedField(config.Object, delay, "spec", "crossZoneEvictionDelay"))
+	_, err = resource.Update(ctx, config, metav1.UpdateOptions{})
+	require.NoError(t, err)
+}
+
+func awaitReadyAnnotation(t *testing.T, ctx context.Context, api *kubernetes.Clientset, podName string, expected bool, notBefore time.Time) {
+	require.Eventually(t, func() bool {
+		patch, err := json.Marshal(map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"annotations": map[string]interface{}{"integration-test-touch": time.Now().UTC().Format(time.RFC3339Nano)},
+			},
+		})
+		if err != nil {
+			return false
+		}
+		if _, err := api.CoreV1().Pods(corev1.NamespaceDefault).Patch(ctx, podName, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+			return false
+		}
+		pod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, podName, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		value, exists := pod.Annotations[podReadyAnnotationKey]
+		if !expected {
+			return !exists
+		}
+		readyTime, err := time.Parse(time.RFC3339, value)
+		return exists && err == nil && !readyTime.Before(notBefore)
+	}, 30*time.Second, 200*time.Millisecond)
 }

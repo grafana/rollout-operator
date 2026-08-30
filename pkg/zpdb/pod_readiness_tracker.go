@@ -69,9 +69,6 @@ func newPodReadinessTracker(kubeClient kubernetes.Interface, namespace string, p
 // observed() touches no in-memory tracker state and is safe to call concurrently; the
 // SharedInformer's single processor goroutine already serialises informer-driven calls.
 func (c *podReadinessTracker) observed(pod *corev1.Pod) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.patchTimeout)
-	defer cancel()
-
 	// A nil value here means "remove the annotation" (strategic merge interprets null on a map
 	// value as a delete). A non-nil value means "set the annotation to *value".
 	var value *string
@@ -92,6 +89,21 @@ func (c *podReadinessTracker) observed(pod *corev1.Pod) {
 			return
 		}
 	}
+
+	c.patch(pod, value)
+}
+
+// remove clears a readiness timestamp that could otherwise be reused if delay tracking is enabled again.
+func (c *podReadinessTracker) remove(pod *corev1.Pod) {
+	if _, ok := pod.Annotations[podReadyAnnotationKey]; !ok {
+		return
+	}
+	c.patch(pod, nil)
+}
+
+func (c *podReadinessTracker) patch(pod *corev1.Pod, value *string) {
+	ctx, cancel := context.WithTimeout(context.Background(), c.patchTimeout)
+	defer cancel()
 
 	patch, err := json.Marshal(podAnnotationsPatch{
 		Metadata: podAnnotationsPatchMetadata{

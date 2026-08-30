@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 
@@ -18,18 +19,105 @@ import (
 )
 
 func newPodObserverTestCase(t *testing.T) (*k8sfake.Clientset, *podObserver) {
+	return newPodObserverTestCaseWithConfig(t, newPDB("test-zpdb"))
+}
+
+func newPodObserverTestCaseWithConfig(t *testing.T, rawConfig *unstructured.Unstructured) (*k8sfake.Clientset, *podObserver) {
 	client := k8sfake.NewClientset()
 
 	dynamicClient := newFakeDynamicClient()
 	cfgObserver := newConfigObserver(dynamicClient, testNamespace, log.NewNopLogger(), NewMetrics(prometheus.NewRegistry()))
 
 	// Seed the config cache with a config that matches the rollout-group used by createTestPod.
-	updated, _, err := cfgObserver.pdbCache.addOrUpdateRaw(newPDB("test-zpdb"))
+	updated, _, err := cfgObserver.pdbCache.addOrUpdateRaw(rawConfig)
 	require.NoError(t, err)
 	require.True(t, updated)
 
 	observer := newPodObserver(client, testNamespace, newTestPodsFactory(client), 5*time.Second, cfgObserver, log.NewNopLogger())
 	return client, observer
+}
+
+func TestObserver_TracksReadinessOnlyForCrossZoneEvictionDelay(t *testing.T) {
+	testCases := map[string]struct {
+		config      *unstructured.Unstructured
+		expectPatch bool
+	}{
+		"delay disabled": {
+			config: newPDB("test-zpdb"),
+		},
+		"delay enabled": {
+			config:      rawConfigWithCrossZoneEvictionDelay("test-zpdb", "test-group", 1, 1, `test-(.*)`, "1m"),
+			expectPatch: true,
+		},
+	}
+
+	for name, testCase := range testCases {
+		t.Run(name, func(t *testing.T) {
+			client, observer := newPodObserverTestCaseWithConfig(t, testCase.config)
+			pod := createTestPod("test-pod", testNamespace)
+			pod.Status = readyRunningPod(pod.Name).Status
+			_, err := client.CoreV1().Pods(testNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
+			require.NoError(t, err)
+			client.ClearActions()
+
+			observer.onPodAdded(pod)
+
+			patches := 0
+			for _, action := range client.Actions() {
+				if action.Matches("patch", "pods") {
+					patches++
+				}
+			}
+			if testCase.expectPatch {
+				require.Equal(t, 1, patches)
+			} else {
+				require.Zero(t, patches)
+			}
+		})
+	}
+}
+
+func TestObserver_ResetsReadinessTimestampBeforeDelayIsReenabled(t *testing.T) {
+	client, observer := newPodObserverTestCase(t)
+	pod := createTestPod("test-pod", testNamespace)
+	pod.Status = readyRunningPod(pod.Name).Status
+	pod.Annotations = map[string]string{podReadyAnnotationKey: "2026-01-01T00:00:00Z"}
+	_, err := client.CoreV1().Pods(testNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	observer.onPodAdded(pod)
+	pod, err = client.CoreV1().Pods(testNamespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotContains(t, pod.Annotations, podReadyAnnotationKey)
+
+	updated, _, err := observer.configObserver.pdbCache.addOrUpdateRaw(
+		rawConfigWithCrossZoneEvictionDelay("test-zpdb", "test-group", 2, 1, `test-(.*)`, "1m"),
+	)
+	require.NoError(t, err)
+	require.True(t, updated)
+
+	before := time.Now().UTC()
+	observer.onPodUpdated(pod, pod)
+	pod, err = client.CoreV1().Pods(testNamespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	readyTime, err := time.Parse(time.RFC3339, pod.Annotations[podReadyAnnotationKey])
+	require.NoError(t, err)
+	require.False(t, readyTime.Before(before.Truncate(time.Second)))
+}
+
+func TestObserver_RemovesReadinessTimestampOutsideZpdbScope(t *testing.T) {
+	client, observer := newPodObserverTestCase(t)
+	pod := createTestPod("test-pod", testNamespace)
+	pod.Labels[rolloutconfig.RolloutGroupLabelKey] = "other-group"
+	pod.Annotations = map[string]string{podReadyAnnotationKey: "2026-01-01T00:00:00Z"}
+	_, err := client.CoreV1().Pods(testNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	observer.onPodAdded(pod)
+
+	pod, err = client.CoreV1().Pods(testNamespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotContains(t, pod.Annotations, podReadyAnnotationKey)
 }
 
 // TestObserver_SharesThePodInformerFromTheFactory asserts that the observer attaches to the pod informer

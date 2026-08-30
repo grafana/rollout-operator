@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Maintain pod readiness annotations only while a ZPDB cross-zone eviction delay is enabled.
 * [ENHANCEMENT] Update Go to `1.27` #494
 * [ENHANCEMENT] Updated dependencies, including: #491
   * `github.com/stretchr/testify` from `v1.12.0` to `v1.12.1`

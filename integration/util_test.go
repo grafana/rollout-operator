@@ -131,6 +131,13 @@ func expectVersion(expectedVersion string) func(t *testing.T, pod *corev1.Pod) b
 	}
 }
 
+func expectAnnotation(key string) func(t *testing.T, pod *corev1.Pod) bool {
+	return func(t *testing.T, pod *corev1.Pod) bool {
+		_, ok := pod.Annotations[key]
+		return ok
+	}
+}
+
 func expectContainerWaitingReason(expectedReason string) func(t *testing.T, pod *corev1.Pod) bool {
 	return func(t *testing.T, pod *corev1.Pod) bool {
 		for _, s := range pod.Status.ContainerStatuses {
