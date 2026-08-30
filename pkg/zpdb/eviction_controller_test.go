@@ -497,8 +497,27 @@ func TestPodEviction_MultiZoneClassic(t *testing.T) {
 	// also check that the evicted pod has been stored in the eviction configCache
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objs...)
 	require.False(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
+	testCtx.kubeClient.ClearActions()
 	testCtx.assertAllowResponse(t)
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("allowed", "200")))
+
+	var podGets, podLists, statefulSetGets, statefulSetLists int
+	for _, action := range testCtx.kubeClient.Actions() {
+		switch {
+		case action.Matches("get", "pods"):
+			podGets++
+		case action.Matches("list", "pods"):
+			podLists++
+		case action.Matches("get", "statefulsets"):
+			statefulSetGets++
+		case action.Matches("list", "statefulsets"):
+			statefulSetLists++
+		}
+	}
+	require.Equal(t, 1, podGets)
+	require.Equal(t, 1, podLists)
+	require.Zero(t, statefulSetGets)
+	require.Equal(t, 1, statefulSetLists)
 
 	require.True(t, testCtx.controller.podObserver.podEvictCache.hasPendingEviction(zoneAPod0))
 	testCtx.controller.Stop()

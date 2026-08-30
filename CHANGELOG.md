@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Reduce ZPDB eviction enforcement API calls by fetching related StatefulSets and pods once per request.
 * [ENHANCEMENT] Update Go to `1.27` #494
 * [ENHANCEMENT] Updated dependencies, including: #491
   * `github.com/stretchr/testify` from `v1.12.0` to `v1.12.1`

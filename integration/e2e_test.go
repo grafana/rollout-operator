@@ -334,13 +334,16 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 	}
 
 	{
-		t.Log("Create 2 zones each with 2 pods.")
+		t.Log("Create 3 zones each with 2 pods.")
 		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", 2)
 		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b", 2)
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-c", 2)
 		requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-c-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-c-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 	}
 
 	{
@@ -363,6 +366,12 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 	{
 		t.Log("Deny a pod eviction in another zone.")
 		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
+	}
+
+	{
+		t.Log("Deny a pod eviction in the third zone.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-c-0", Namespace: corev1.NamespaceDefault}}
 		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request: 1 pod not ready in mock-zone-a", "Eviction denied")
 	}
 

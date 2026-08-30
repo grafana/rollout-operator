@@ -9,10 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
-
-	"github.com/grafana/rollout-operator/pkg/util"
 )
 
 // A k8sClient holds the Kubernetes API client used to query Kubernetes
@@ -33,22 +30,26 @@ func (a *k8sClient) podByName(namespace string, name string) (*corev1.Pod, error
 	}
 }
 
-// owner returns the StatefulSet which manages a pod or an error if the owner can not be found or is not a StatefulSet
-func (a *k8sClient) owner(pod *corev1.Pod) (*appsv1.StatefulSet, error) {
+// statefulSetOwner returns the reference to the StatefulSet which manages a pod.
+func statefulSetOwner(pod *corev1.Pod) (*metav1.OwnerReference, error) {
 	owner := metav1.GetControllerOf(pod)
 	if owner == nil {
 		return nil, errors.New("unable to find a StatefulSet pod owner")
 	} else if owner.Kind != "StatefulSet" {
 		return nil, fmt.Errorf("pod owner is not a StatefulSet - %s has owner %s (%s)", pod.Name, owner.Name, owner.Kind)
 	}
+	return owner, nil
+}
 
-	if sts, err := a.kubeClient.AppsV1().StatefulSets(pod.Namespace).Get(a.ctx, owner.Name, metav1.GetOptions{}); err != nil {
-		return nil, fmt.Errorf("unable to find StatefulSet %s by name: %w", owner.Name, err)
-	} else if sts == nil {
-		return nil, fmt.Errorf("unable to find StatefulSet %s by name", owner.Name)
-	} else {
-		return sts, nil
+// findOwnerStatefulSet resolves an owner from the related StatefulSets already fetched for enforcement.
+func findOwnerStatefulSet(owner *metav1.OwnerReference, statefulSets *appsv1.StatefulSetList) (*appsv1.StatefulSet, error) {
+	for i := range statefulSets.Items {
+		sts := &statefulSets.Items[i]
+		if sts.Name == owner.Name && (owner.UID == "" || sts.UID == owner.UID) {
+			return sts, nil
+		}
 	}
+	return nil, fmt.Errorf("unable to find StatefulSet %s by name", owner.Name)
 }
 
 // findRelatedStatefulSets returns all StatefulSets which match the given Selector.
@@ -56,23 +57,16 @@ func (a *k8sClient) findRelatedStatefulSets(namespace string, selector *labels.S
 	return a.kubeClient.AppsV1().StatefulSets(namespace).List(a.ctx, metav1.ListOptions{LabelSelector: (*selector).String()})
 }
 
+// findRelatedPods returns all pods selected by the ZPDB in one consistent API snapshot.
+func (a *k8sClient) findRelatedPods(namespace string, selector *labels.Selector) (*corev1.PodList, error) {
+	return a.kubeClient.CoreV1().Pods(namespace).List(a.ctx, metav1.ListOptions{LabelSelector: (*selector).String()})
+}
+
 // podsNotRunningAndReady finds the pods managed by a given StatefulSet. Each pod is inspected to see if it is ready and running. A tally of the total number of pods and the number not ready/running is returned.
 // It is possible for pods to be in a state where they are not yet returned by the pod listing. These pods should be considered and are reported as unknown.
 // The number of unknown pods is determined as the difference between the StatefulSets Replica count minus the number of pods listed.
 // The given Pod is excluded from testing, but is included in the total of tested pods
-func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, zpdb validator) (*zoneStatusResult, error) {
-	podsSelector := labels.NewSelector().Add(
-		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
-	)
-
-	list, err := a.kubeClient.CoreV1().Pods(sts.Namespace).List(a.ctx, metav1.ListOptions{
-		LabelSelector: podsSelector.String(),
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
+func podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.Pod, relatedPods *corev1.PodList, zpdb validator) *zoneStatusResult {
 	result := &zoneStatusResult{tested: 0, notReady: 0, unknown: 0}
 
 	// replicas is the number of Pods created by the StatefulSet controller.
@@ -90,7 +84,12 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 
 	matcher := zpdb.considerPod()
 
-	for _, pd := range list.Items {
+	zonePodCount := 0
+	for _, pd := range relatedPods.Items {
+		if pd.Labels["name"] != sts.Spec.Template.Labels["name"] {
+			continue
+		}
+		zonePodCount++
 
 		// we do not consider pods which are in a different partition
 		if !matcher(&pd) {
@@ -108,9 +107,9 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 
 	// we consider the pod as not ready if there should be a given replica count but it is not yet being found in the pods query
 	// note that the effect here is that we do not know which partition these other pods will be in, so we have to attribute them to this partition to be safe
-	if len(list.Items) < replicas {
-		result.unknown = replicas - len(list.Items)
+	if zonePodCount < replicas {
+		result.unknown = replicas - zonePodCount
 	}
 
-	return result, nil
+	return result
 }
