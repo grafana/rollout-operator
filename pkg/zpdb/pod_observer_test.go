@@ -28,7 +28,7 @@ func newPodObserverTestCase(t *testing.T) (*k8sfake.Clientset, *podObserver) {
 	require.NoError(t, err)
 	require.True(t, updated)
 
-	observer := newPodObserver(client, testNamespace, newTestPodsFactory(client), 5*time.Second, cfgObserver, log.NewNopLogger())
+	observer := newPodObserver(newTestPodsFactory(client), cfgObserver, log.NewNopLogger())
 	return client, observer
 }
 
@@ -40,7 +40,7 @@ func TestObserver_SharesThePodInformerFromTheFactory(t *testing.T) {
 	podsFactory := newTestPodsFactory(client)
 
 	cfgObserver := newConfigObserver(newFakeDynamicClient(), testNamespace, log.NewNopLogger(), NewMetrics(prometheus.NewRegistry()))
-	observer := newPodObserver(client, testNamespace, podsFactory, 5*time.Second, cfgObserver, log.NewNopLogger())
+	observer := newPodObserver(podsFactory, cfgObserver, log.NewNopLogger())
 	require.NoError(t, observer.start())
 	defer observer.stop()
 

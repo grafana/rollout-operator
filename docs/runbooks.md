@@ -289,13 +289,8 @@ Note that this duration is calculated from when the `pod-zone-a-0` becomes ready
 
 When `crossZoneEvictionDelay` is unset or `0`, no delay is enforced and evictions follow the standard ZPDB logic.
 
-The time that a pod became ready is recorded by setting a `grafana.com/ready-time` annotation on the pod. This ensures that
-if the `rollout-operator` restarts the last ready time is not lost. The annotation is automatically removed when a pod transitions
-out of a ready+running state, so the delay is correctly re-measured from the next ready transition. The annotation is also lost if a pod is re-created.
-
-When the annotation is missing - e.g. the first time this version of the `rollout-operator` runs, or after a pod is re-created during
-a `rollout-operator` restart - the `rollout-operator` records the current time as the ready time on its first observation of the pod. The
-delay window therefore runs from the `rollout-operator`'s first observation, not from the pod's actual ready time. Pod evictions
-(and rolling updates) within the same partition are denied until that window expires.
+The ready time comes from the Pod `Ready` condition's `lastTransitionTime`, which is stored in Pod status and survives
+`rollout-operator` restarts. If Kubernetes does not provide a usable transition time, pod evictions within the same partition
+are denied while the delay is configured.
 
 This can be monitored in the `rollout-operator` logs via the message `Pod not considered ready - not enough time has elapsed since this pod became ready`.

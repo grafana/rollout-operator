@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"testing"
 	"time"
 
+	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,4 +75,32 @@ func TestConfigDefaults(t *testing.T) {
 	// these back to 0 would silently turn off client-side throttling, so assert them explicitly.
 	require.Equal(t, float64(5), cfg.kubeClientQPS)
 	require.Equal(t, 10, cfg.kubeClientBurst)
+}
+
+func TestDeprecatedZPDBReadyAnnotationPatchTimeoutFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		args        []string
+		wantWarning bool
+	}{
+		{name: "omitted", wantWarning: false},
+		{name: "explicitly set", args: []string{"-" + zpdbPodReadyAnnotationPatchTimeoutFlag + "=10s"}, wantWarning: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg config
+			fs := flag.NewFlagSet("test", flag.ContinueOnError)
+			cfg.register(fs)
+			require.NoError(t, fs.Parse(tc.args))
+
+			var logs bytes.Buffer
+			warnDeprecatedFlags(fs, log.NewLogfmtLogger(&logs))
+			if tc.wantWarning {
+				require.Contains(t, logs.String(), "level=warn")
+				require.Contains(t, logs.String(), "flag=-"+zpdbPodReadyAnnotationPatchTimeoutFlag)
+				require.Contains(t, logs.String(), "msg=\"deprecated flag has no effect\"")
+				return
+			}
+			require.Empty(t, logs.String())
+		})
+	}
 }
