@@ -5,7 +5,7 @@ metadata:
   namespace: rollout-operator-development
 rules:
   - apiGroups:
-      -
+      - ""
     resources:
       - pods
     verbs:
@@ -13,6 +13,7 @@ rules:
       - get
       - watch
       - delete
+      - patch
   - apiGroups:
       - apps
     resources:
@@ -29,11 +30,27 @@ rules:
     verbs:
       - update
   - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - list
+      - get
+      - watch
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
       - rollout-operator.grafana.com
     resources:
       - zoneawarepoddisruptionbudgets
+      - rollouthealthchecks
     verbs:
       - get
       - list
       - watch
-      

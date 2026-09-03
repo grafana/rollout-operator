@@ -55,6 +55,163 @@ spec:
         statusReplicasPath: .status.replicas
       status: {}
 ---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: rollouthealthchecks.rollout-operator.grafana.com
+spec:
+  group: rollout-operator.grafana.com
+  names:
+    kind: RolloutHealthCheck
+    plural: rollouthealthchecks
+    shortNames:
+    - rhc
+    singular: rollouthealthcheck
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              checks:
+                description: Ordered list of PromQL health checks evaluated before
+                  progressing to the next zone.
+                items:
+                  properties:
+                    baselineRange:
+                      description: Range vector duration substituted for ${range}
+                        when evaluating stable pods at the pre-rollout timestamp.
+                        Defaults to 10m.
+                      type: string
+                    currentRange:
+                      description: Range vector duration substituted for ${range}
+                        when evaluating candidate pods. Defaults to 5m.
+                      type: string
+                    disabled:
+                      description: When true, this check is skipped while other checks
+                        remain active.
+                      type: boolean
+                    errorPolicy:
+                      description: Retry and action policy when a Prometheus query
+                        fails or is unreachable. Defaults to retryInterval=10s, maxAttempts=3,
+                        exhaustedAction=Pause.
+                      properties:
+                        exhaustedAction:
+                          description: Behavior when all attempts fail. Defaults to
+                            Pause.
+                          enum:
+                          - Pause
+                          - Warn
+                          - Disabled
+                          type: string
+                        maxAttempts:
+                          description: Maximum query attempts including the first.
+                            Defaults to 3.
+                          minimum: 1
+                          type: integer
+                        retryInterval:
+                          description: Delay between query attempts after an error.
+                            Defaults to 10s.
+                          type: string
+                      type: object
+                    failurePolicy:
+                      description: How failed successQuery results accumulate before
+                        gating. Defaults to reevaluationInterval=2m30s, consecutiveFailures=3,
+                        consecutiveSuccesses=1, exceededAction=Pause.
+                      properties:
+                        consecutiveFailures:
+                          description: Number of consecutive failed evaluations required
+                            before exceededAction. Defaults to 3.
+                          minimum: 1
+                          type: integer
+                        consecutiveSuccesses:
+                          description: Number of consecutive successful evaluations
+                            required to pass. Defaults to 1.
+                          minimum: 1
+                          type: integer
+                        exceededAction:
+                          description: Behavior when consecutiveFailures is reached.
+                            Defaults to Pause.
+                          enum:
+                          - Pause
+                          - Warn
+                          - Disabled
+                          type: string
+                        reevaluationInterval:
+                          description: Minimum time between evaluations that update
+                            consecutive counters. Defaults to 2m30s.
+                          type: string
+                      type: object
+                    name:
+                      description: Unique name of this check within the RolloutHealthCheck.
+                      minLength: 1
+                      type: string
+                    noDataPolicy:
+                      description: Retry and action policy when a query returns no
+                        data. Defaults to retryInterval=30s, maxAttempts=3, exhaustedAction=Pause.
+                      properties:
+                        exhaustedAction:
+                          description: Behavior when all attempts return no data.
+                            Defaults to Pause.
+                          enum:
+                          - Pause
+                          - Warn
+                          - Disabled
+                          type: string
+                        maxAttempts:
+                          description: Maximum query attempts including the first.
+                            Defaults to 3.
+                          minimum: 1
+                          type: integer
+                        retryInterval:
+                          description: Delay between query attempts after no-data.
+                            Defaults to 30s.
+                          type: string
+                      type: object
+                    query:
+                      description: |
+                        PromQL that must return exactly one scalar. Required placeholders: ${targetMatchers} (namespace, zone/name, and pod matchers) and ${range}.
+                      minLength: 1
+                      type: string
+                    successQuery:
+                      description: |
+                        PromQL evaluated after substituting ${current} and ${baseline} scalars. Must return scalar 1 (pass) or 0 (fail).
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  - query
+                  - successQuery
+                  type: object
+                minItems: 1
+                type: array
+              prometheusURL:
+                description: Base URL of the Prometheus HTTP API used to evaluate
+                  checks.
+                minLength: 1
+                type: string
+              selector:
+                description: Selector preventing this policy from being attached to
+                  an unrelated workload.
+                properties:
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    type: object
+                required:
+                - matchLabels
+                type: object
+            required:
+            - selector
+            - prometheusURL
+            - checks
+            type: object
+        type: object
+    served: true
+    storage: true
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -115,6 +272,21 @@ rules:
   verbs:
   - update
 - apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - list
+  - get
+  - watch
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+- apiGroups:
   - ""
   resources:
   - configmaps
@@ -122,6 +294,13 @@ rules:
   - get
   - update
   - create
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
 - apiGroups:
   - rollout-operator.grafana.com
   resources:
@@ -134,6 +313,14 @@ rules:
   - rollout-operator.grafana.com
   resources:
   - zoneawarepoddisruptionbudgets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - rollout-operator.grafana.com
+  resources:
+  - rollouthealthchecks
   verbs:
   - get
   - list
@@ -259,6 +446,45 @@ metadata:
   labels:
     grafana.com/inject-rollout-operator-ca: "true"
     grafana.com/namespace: default
+  name: phased-deployment-default
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: rollout-operator
+      namespace: default
+      path: /admission/phased-deployment
+      port: 443
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: phased-deployment-default.grafana.com
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: default
+  objectSelector:
+    matchLabels:
+      grafana.com/rollout-phased: "true"
+  rules:
+  - apiGroups:
+    - apps
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - deployments
+    scope: Namespaced
+  sideEffects: NoneOnDryRun
+  timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  labels:
+    grafana.com/inject-rollout-operator-ca: "true"
+    grafana.com/namespace: default
   name: prepare-downscale-default
 webhooks:
 - admissionReviewVersions:
@@ -363,6 +589,40 @@ webhooks:
     - CREATE
     resources:
     - pods/eviction
+    scope: Namespaced
+  sideEffects: None
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  labels:
+    grafana.com/inject-rollout-operator-ca: "true"
+    grafana.com/namespace: default
+  name: rollout-health-check-validation-default
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: rollout-operator
+      namespace: default
+      path: /admission/rollout-health-check-validation
+      port: 443
+  failurePolicy: Fail
+  name: rollout-health-check-validation-default.grafana.com
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: default
+  rules:
+  - apiGroups:
+    - rollout-operator.grafana.com
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - rollouthealthchecks
     scope: Namespaced
   sideEffects: None
 ---

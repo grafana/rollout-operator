@@ -103,6 +103,15 @@ func (d *dummyLogger) assertHasLog(t *testing.T, elements []string) {
 	require.Fail(t, "Expected log not found", strings.Join(elements, ", "))
 }
 
+func (d *dummyLogger) assertNoLogContains(t *testing.T, elements ...string) {
+	t.Helper()
+	for _, line := range d.logs {
+		for _, element := range elements {
+			require.NotContains(t, line, element)
+		}
+	}
+}
+
 func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawConfig *unstructured.Unstructured, objects ...runtime.Object) *testContext {
 	testCtx := &testContext{
 		ctx:     context.Background(),
@@ -245,6 +254,22 @@ func TestPodEviction_PodNotInScope(t *testing.T) {
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), nil, pod, sts)
 	defer testCtx.controller.Stop()
 	testCtx.assertAllowResponse(t)
+	testCtx.logs.assertHasLog(t, []string{`msg="pod eviction allowed"`, `reason="pod is not within a zpdb scope"`})
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", "200")))
+}
+
+func TestPodEviction_DeploymentPodNotInScope_DoesNotLogZPDBDecision(t *testing.T) {
+	pod := newDeploymentPod("distributor-zone-b-abc")
+	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(pod.Name, testNamespace), nil, pod)
+	defer testCtx.controller.Stop()
+
+	testCtx.assertAllowResponse(t)
+
+	testCtx.logs.assertNoLogContains(t,
+		"observer ignoring pod - not within zpdb scope",
+		"considering pod eviction",
+		"pod eviction allowed",
+	)
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", "200")))
 }
 
@@ -790,6 +815,24 @@ func newPod(name string, sts *appsv1.StatefulSet) *corev1.Pod {
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
 		},
+	}
+}
+
+func newDeploymentPod(name string) *corev1.Pod {
+	controller := true
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       types.UID(uuid.New().String()),
+			Name:      name,
+			Namespace: testNamespace,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1",
+				Kind:       "ReplicaSet",
+				Name:       "distributor-zone-b-abc",
+				Controller: &controller,
+			}},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
 	}
 }
 

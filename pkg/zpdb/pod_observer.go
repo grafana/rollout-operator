@@ -7,7 +7,9 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -124,11 +126,20 @@ func (c *podObserver) accept(obj interface{}) (*corev1.Pod, bool) {
 		return nil, false
 	}
 	if pdbConfig == nil {
-		level.Debug(c.logger).Log("msg", "observer ignoring pod - not within zpdb scope", "pod", pod.Name)
+		if !isDeploymentManagedPod(pod) {
+			level.Debug(c.logger).Log("msg", "observer ignoring pod - not within zpdb scope", "pod", pod.Name)
+		}
 		return nil, false
 	}
 
 	return pod, true
+}
+
+func isDeploymentManagedPod(pod *corev1.Pod) bool {
+	owner := metav1.GetControllerOf(pod)
+	// Deployment pods are directly controlled by ReplicaSets; checking the local owner reference avoids
+	// an API lookup on every pod informer event.
+	return owner != nil && owner.APIVersion == appsv1.SchemeGroupVersion.String() && owner.Kind == "ReplicaSet"
 }
 
 func (c *podObserver) onPodAdded(obj interface{}) {
