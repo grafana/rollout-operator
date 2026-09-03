@@ -38,6 +38,11 @@
     // Include the custom resource definiton for the zpdb.
     zpdb_custom_resource_definition_enabled: $._config.rollout_operator_webhooks_enabled,
 
+    // Include the custom resource definition for RolloutHealthCheck.
+    // Enabled whenever the operator is enabled; health checks are evaluated by the controller.
+    // When webhooks are enabled, CREATE/UPDATE are also validated by admission.
+    rollout_health_check_custom_resource_definition_enabled: $._config.rollout_operator_enabled,
+
     // Configure the rollout operator to enable support for ReplicaTemplates
     rollout_operator_replica_template_access_enabled: false,
 
@@ -52,6 +57,7 @@
     ignore_rollout_operator_prepare_downscale_webhook_failures: false,
     ignore_rollout_operator_zpdb_eviction_webhook_failures: false,
     ignore_rollout_operator_zpdb_validation_webhook_failures: false,
+    ignore_rollout_operator_rollout_health_check_validation_webhook_failures: false,
   },
 
   assert !$._config.rollout_operator_replica_template_access_enabled || $._config.rollout_operator_webhooks_enabled : 'rollout_operator_replica_template_access_enabled requires rollout_operator_webhooks_enabled=true',
@@ -61,12 +67,16 @@
   assert !$._config.ignore_rollout_operator_prepare_downscale_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_prepare_downscale_webhook_failures requires rollout_operator_webhooks_enabled=true',
   assert !$._config.ignore_rollout_operator_zpdb_eviction_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_zpdb_eviction_webhook_failures requires rollout_operator_webhooks_enabled=true',
   assert !$._config.ignore_rollout_operator_zpdb_validation_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_zpdb_validation_webhook_failures requires rollout_operator_webhooks_enabled=true',
+  assert !$._config.ignore_rollout_operator_rollout_health_check_validation_webhook_failures || $._config.rollout_operator_webhooks_enabled : 'ignore_rollout_operator_rollout_health_check_validation_webhook_failures requires rollout_operator_webhooks_enabled=true',
   assert !$._config.replica_template_custom_resource_definition_enabled || $._config.rollout_operator_webhooks_enabled : 'replica_template_custom_resource_definition_enabled requires rollout_operator_webhooks_enabled=true',
 
   local enableWebhooks = $._config.rollout_operator_replica_template_access_enabled || $._config.rollout_operator_webhooks_enabled,
 
   zpdb_template:: std.parseYaml(importstr 'crds/zone-aware-pod-disruption-budget.yaml'),
   zpdb_custom_resource: if !$._config.zpdb_custom_resource_definition_enabled then null else $.zpdb_template,
+
+  rollout_health_check_template:: std.parseYaml(importstr 'crds/rollout-health-check.yaml'),
+  rollout_health_check_custom_resource: if !$._config.rollout_health_check_custom_resource_definition_enabled then null else $.rollout_health_check_template,
 
   replica_template:: std.parseYaml(importstr 'crds/replica-templates.yaml'),
   replica_template_custom_resource: if !$._config.replica_template_custom_resource_definition_enabled then null else $.replica_template,
@@ -134,6 +144,9 @@
         policyRule.withApiGroups('') +
         policyRule.withResources(['configmaps']) +
         policyRule.withVerbs(['get', 'update', 'create']),
+        policyRule.withApiGroups('') +
+        policyRule.withResources(['events']) +
+        policyRule.withVerbs(['create', 'patch']),
       ] +
       (
         if $._config.rollout_operator_replica_template_access_enabled then [
@@ -145,6 +158,9 @@
       [
         policyRule.withApiGroups($.zpdb_template.spec.group) +
         policyRule.withResources([$.zpdb_template.spec.names.plural]) +
+        policyRule.withVerbs(['get', 'list', 'watch']),
+        policyRule.withApiGroups($.rollout_health_check_template.spec.group) +
+        policyRule.withResources([$.rollout_health_check_template.spec.names.plural]) +
         policyRule.withVerbs(['get', 'list', 'watch']),
       ]
 
@@ -237,6 +253,43 @@
             name: 'rollout-operator',
             namespace: $._config.namespace,
             path: '/admission/zpdb-validation',
+            port: 443,
+          },
+        },
+      },
+    ]),
+
+  rollout_health_check_validation_webhook: if !enableWebhooks then null else
+    validatingWebhookConfiguration.new('rollout-health-check-validation-%s' % $._config.namespace) +
+    validatingWebhookConfiguration.mixin.metadata.withLabels({
+      'grafana.com/namespace': $._config.namespace,
+      'grafana.com/inject-rollout-operator-ca': 'true',
+    }) +
+    validatingWebhookConfiguration.withWebhooksMixin([
+      validatingWebhook.withName('rollout-health-check-validation-%s.grafana.com' % $._config.namespace)
+      + validatingWebhook.withAdmissionReviewVersions(['v1'])
+      + validatingWebhook.withFailurePolicy(if $._config.ignore_rollout_operator_rollout_health_check_validation_webhook_failures then 'Ignore' else 'Fail')
+      + validatingWebhook.withSideEffects('None')
+      + validatingWebhook.withRulesMixin([
+        {
+          apiGroups: ['rollout-operator.grafana.com'],
+          apiVersions: ['v1'],
+          operations: ['CREATE', 'UPDATE'],
+          resources: ['rollouthealthchecks'],
+          scope: 'Namespaced',
+        },
+      ])
+      + {
+        namespaceSelector: {
+          matchLabels: {
+            'kubernetes.io/metadata.name': $._config.namespace,
+          },
+        },
+        clientConfig: {
+          service: {
+            name: 'rollout-operator',
+            namespace: $._config.namespace,
+            path: '/admission/rollout-health-check-validation',
             port: 443,
           },
         },

@@ -25,16 +25,21 @@ import (
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // Required to get the GCP auth provider working.
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"github.com/grafana/rollout-operator/pkg/admission"
 	"github.com/grafana/rollout-operator/pkg/controller"
+	"github.com/grafana/rollout-operator/pkg/healthcheck"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
 	"github.com/grafana/rollout-operator/pkg/tlscert"
 	"github.com/grafana/rollout-operator/pkg/webhooks"
@@ -167,6 +172,7 @@ func main() {
 	reg := prometheus.NewRegistry()
 	metrics := newMetrics(reg)
 	zpdbMetrics := zpdb.NewMetrics(reg)
+	healthMetrics := healthcheck.NewMetrics(reg)
 
 	ready := atomic.NewBool(false)
 	restart := make(chan string)
@@ -293,6 +299,14 @@ func main() {
 	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, podsFactory, cfg.zpdbPodReadyAnnotationPatchTimeout, logger, zpdbMetrics)
 	check(evictionController.Start())
 
+	healthObserver := healthcheck.NewObserver(dynamicClient, cfg.kubeNamespace, logger, healthMetrics)
+	check(healthObserver.Start())
+
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartStructuredLogging(0)
+	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: coreKubeClient.CoreV1().Events(cfg.kubeNamespace)})
+	eventRecorder := eventBroadcaster.NewRecorder(clientgoscheme.Scheme, corev1.EventSource{Component: "rollout-operator"})
+
 	maybeStartTLSServer(cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
 
 	// Monitors the validating and mutating webhook configurations and provides a metric
@@ -308,6 +322,8 @@ func main() {
 
 	// Init the controller
 	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
+	healthEvaluator := healthcheck.NewEvaluator(nil, healthMetrics, logger)
+	c.SetHealthCheck(healthcheck.NewGate(healthObserver, healthEvaluator, healthMetrics, eventRecorder, logger), healthMetrics)
 	if err := c.Init(); err != nil {
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
@@ -317,6 +333,8 @@ func main() {
 		waitForSignalOrRestart(logger, restart)
 		c.Stop()
 		evictionController.Stop()
+		healthObserver.Stop()
+		eventBroadcaster.Shutdown()
 		webhookObserver.Stop()
 		if webhookCollector != nil {
 			reg.Unregister(webhookCollector)
@@ -402,6 +420,10 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 		return admission.ZoneAwarePdbValidatingWebhookHandler(ctx, l, ar)
 	}
 
+	rolloutHealthCheckValidationFunc := func(ctx context.Context, l log.Logger, ar v1.AdmissionReview, _ *kubernetes.Clientset) *v1.AdmissionResponse {
+		return admission.RolloutHealthCheckValidatingWebhookHandler(ctx, l, ar)
+	}
+
 	tlsSrv, err := newTLSServer(cfg, logger, cert, metrics)
 	if err != nil {
 		fatal(fmt.Errorf("failed to create tls server: %w", err))
@@ -410,7 +432,8 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 	// Each webhook that issues Kubernetes API calls gets its own dedicated client, so that an overloaded
 	// webhook is rate limited independently (its own per-API-group buckets) and cannot throttle the other
 	// webhooks or the core controller. The pod-eviction webhook uses the eviction controller's dedicated
-	// client; the zpdb-validation webhook makes no API calls, so it is served with a nil client.
+	// client; the zpdb-validation and rollout-health-check-validation webhooks make no API calls, so
+	// they are served with a nil client.
 	noDownscaleKubeClient, err := newDedicatedKubeClient(wireComponentConfig("no-downscale"))
 	if err != nil {
 		fatal(fmt.Errorf("failed to create no-downscale webhook Kubernetes client: %w", err))
@@ -431,6 +454,7 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, prepareDownscaleKubeClient, webhookHandlerTimeout))
 	tlsSrv.Handle(zpdb.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, nil, webhookHandlerTimeout))
 	tlsSrv.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(zpdbValidationFunc, logger, nil, webhookHandlerTimeout))
+	tlsSrv.Handle(admission.RolloutHealthCheckValidatorWebhookPath, admission.Serve(rolloutHealthCheckValidationFunc, logger, nil, webhookHandlerTimeout))
 	if err := tlsSrv.Start(); err != nil {
 		fatal(fmt.Errorf("failed to start tls server: %w", err))
 	}
