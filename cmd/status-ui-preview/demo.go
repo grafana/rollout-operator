@@ -51,6 +51,7 @@ func newDemoController() (*controller.RolloutController, error) {
 		nil,
 		demoClusterDomain,
 		demoNamespace,
+		controller.NewPodInformerFactory(kubeClient, demoNamespace),
 		nil,
 		5*time.Second,
 		prometheus.NewRegistry(),
