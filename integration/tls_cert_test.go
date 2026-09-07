@@ -163,10 +163,14 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 	requireEventuallyWebhookMatchesSecretCA(t, ctx, api, webhookName)
 
 	t.Log("Switch to a long-lived certificate so admission checks aren't racing another short expiry.")
-	requireUpdateSelfSignedCertExpiration(t, ctx, api, "1w")
+	// Stop every certificate writer before replacing the secret so an old ReplicaSet
+	// cannot recreate it with the short lifetime.
+	requireUpdateSelfSignedCertDeployment(t, ctx, api, "45s", 0)
+	requireRolloutOperatorStopped(t, ctx, api)
+	requireUpdateSelfSignedCertDeployment(t, ctx, api, "1w", 0)
 	err := api.CoreV1().Secrets(corev1.NamespaceDefault).Delete(ctx, certificateSecretName, metav1.DeleteOptions{})
 	require.NoError(t, err)
-	requireDeleteNonTerminatingPods(t, ctx, api, "name=rollout-operator")
+	requireUpdateSelfSignedCertDeployment(t, ctx, api, "1w", 1)
 
 	require.Eventually(t, func() bool {
 		secret, err := api.CoreV1().Secrets(corev1.NamespaceDefault).Get(ctx, certificateSecretName, metav1.GetOptions{})
@@ -206,7 +210,7 @@ func createRolloutOperatorDeployment(t *testing.T, ctx context.Context, api *kub
 	require.NoError(t, err)
 }
 
-func requireUpdateSelfSignedCertExpiration(t *testing.T, ctx context.Context, api *kubernetes.Clientset, expiration string) {
+func requireUpdateSelfSignedCertDeployment(t *testing.T, ctx context.Context, api *kubernetes.Clientset, expiration string, replicas int32) {
 	t.Helper()
 
 	require.Eventually(t, func() bool {
@@ -215,6 +219,7 @@ func requireUpdateSelfSignedCertExpiration(t *testing.T, ctx context.Context, ap
 			t.Logf("failed to get rollout-operator deployment: %v", err)
 			return false
 		}
+		deployment.Spec.Replicas = &replicas
 		deployment.Spec.Template.Spec.Containers[0].Args = setSelfSignedCertExpiration(
 			deployment.Spec.Template.Spec.Containers[0].Args,
 			expiration,
@@ -225,7 +230,7 @@ func requireUpdateSelfSignedCertExpiration(t *testing.T, ctx context.Context, ap
 			return false
 		}
 		return true
-	}, 30*time.Second, 500*time.Millisecond, "should update self-signed certificate expiration to %s", expiration)
+	}, 30*time.Second, 500*time.Millisecond, "should update self-signed certificate expiration to %s and replicas to %d", expiration, replicas)
 }
 
 func setSelfSignedCertExpiration(args []string, expiration string) []string {
@@ -267,29 +272,27 @@ func requireRolloutOperatorReady(t *testing.T, ctx context.Context, api *kuberne
 	}, 5*time.Minute, 500*time.Millisecond, "rollout-operator should be running and ready")
 }
 
-func requireDeleteNonTerminatingPods(t *testing.T, ctx context.Context, api *kubernetes.Clientset, selector string) {
+func requireRolloutOperatorStopped(t *testing.T, ctx context.Context, api *kubernetes.Clientset) {
 	t.Helper()
 
 	require.Eventually(t, func() bool {
-		pods, err := api.CoreV1().Pods(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		deployment, err := api.AppsV1().Deployments(corev1.NamespaceDefault).Get(ctx, "rollout-operator", metav1.GetOptions{})
 		if err != nil {
-			t.Logf("failed to list pods matching %s: %v", selector, err)
+			t.Logf("failed to get rollout-operator deployment: %v", err)
 			return false
 		}
-		deleted := 0
-		for _, pod := range pods.Items {
-			if pod.DeletionTimestamp != nil {
-				continue
-			}
-			if err := api.CoreV1().Pods(corev1.NamespaceDefault).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
-				t.Logf("failed to delete pod %s: %v", pod.Name, err)
-				return false
-			}
-			deleted++
+		if deployment.Status.ObservedGeneration < deployment.Generation || deployment.Status.Replicas != 0 {
+			t.Log("waiting for the Deployment controller to finish scaling down")
+			return false
 		}
-		t.Logf("Deleted %d non-terminating pods matching %s", deleted, selector)
-		return true
-	}, 30*time.Second, 500*time.Millisecond, "should delete non-terminating pods matching %s", selector)
+		pods, err := api.CoreV1().Pods(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: "name=rollout-operator"})
+		if err != nil {
+			t.Logf("failed to list rollout-operator pods: %v", err)
+			return false
+		}
+		// Terminating pods may still write the secret until their processes exit.
+		return len(pods.Items) == 0
+	}, 3*time.Minute, 500*time.Millisecond, "rollout-operator should be scaled down with no pods remaining")
 }
 
 func findNonTerminatingPod(ctx context.Context, t *testing.T, api *kubernetes.Clientset, selector string) (*corev1.Pod, bool) {
