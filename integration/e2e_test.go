@@ -678,32 +678,39 @@ func TestCrossZoneEvictionDelayReadyFlapAndRestart(t *testing.T) {
 	ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
 	require.ErrorContains(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request")
 
-	// Leave enough elapsed time to distinguish the original deadline from a reset on restart.
+	// An expired delay must stay expired after restart; a fresh timer would block admission.
+	deadline := readyAfter.Add(time.Minute)
 	require.Eventually(t, func() bool {
-		return time.Now().After(readyAfter.Add(20 * time.Second))
-	}, 30*time.Second, 100*time.Millisecond)
+		return time.Now().After(deadline)
+	}, time.Minute+10*time.Second, 100*time.Millisecond)
 
-	t.Log("Restart rollout-operator before the delay expires.")
+	t.Log("Restart rollout-operator after the original delay expires.")
 	operatorPod := requireGetPod(t, ctx, api, eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator"))
 	require.NoError(t, api.CoreV1().Pods(corev1.NamespaceDefault).Delete(ctx, operatorPod.Name, metav1.DeleteOptions{}))
+	var restartedAt time.Time
 	require.Eventually(t, func() bool {
 		pods, err := api.CoreV1().Pods(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: "name=rollout-operator"})
 		if err != nil || len(pods.Items) != 1 || pods.Items[0].UID == operatorPod.UID {
 			return false
 		}
-		return expectPodPhase(corev1.PodRunning)(t, &pods.Items[0]) && expectReady()(t, &pods.Items[0])
+		for _, status := range pods.Items[0].Status.ContainerStatuses {
+			if status.Name == "rollout-operator" && status.State.Running != nil {
+				restartedAt = status.State.Running.StartedAt.Time
+			}
+		}
+		return !restartedAt.IsZero() && expectPodPhase(corev1.PodRunning)(t, &pods.Items[0]) && expectReady()(t, &pods.Items[0])
 	}, 2*time.Minute, 500*time.Millisecond, "rollout-operator should restart")
 
-	deadline := readyAfter.Add(time.Minute)
-	if time.Now().Before(deadline) {
-		require.ErrorContains(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request", "restart must not bypass the remaining delay")
-	}
-
+	// Pod readiness can precede Service endpoint convergence. Retry admission, but never
+	// long enough for a timer reset by the new process to expire and hide a regression.
+	resetDeadline := restartedAt.Add(time.Minute)
+	wait := min(30*time.Second, time.Until(resetDeadline)-5*time.Second)
+	require.Positive(t, wait, "operator startup consumed the window needed to distinguish a reset delay")
 	cordonNode(t, ctx, api)
 	require.Eventually(t, func() bool {
 		return api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev) == nil
-	}, max(time.Until(deadline), 0)+3*time.Second, 100*time.Millisecond, "eviction should be allowed at the original Ready deadline, without a new delay after restart")
-	require.True(t, time.Now().After(deadline), "eviction must not be allowed before the original Ready deadline")
+	}, wait, 500*time.Millisecond, "expired readiness delay must remain expired after restart")
+	require.True(t, time.Now().Before(resetDeadline), "admission must succeed before a reset delay could expire")
 }
 
 func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
