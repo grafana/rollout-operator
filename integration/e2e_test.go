@@ -12,7 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/kubernetes/scheme"
@@ -529,9 +528,8 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 
 }
 
-// TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay validates that a cross-zone eviction
-// in the same partition is denied until the pod has recovered and the delay has elapsed, including across
-// rollout-operator restarts, while evictions in other partitions are unaffected.
+// TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay validates that a cross-zone eviction for the same partition
+// is denied while the crossZoneEvictionDelay has not expired, and then allowed after the delay has elapsed and the evicted pod has recovered.
 func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *testing.T) {
 	ctx := context.Background()
 
@@ -569,16 +567,95 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 	}
 
-	t.Log("Wait for partition 1's initial readiness delay so it can be evicted independently of partition 0.")
-	require.Eventually(t, func() bool {
-		for _, name := range []string{"mock-zone-a-1", "mock-zone-b-1"} {
-			since, found := podReadyTransitionTime(requireGetPod(t, ctx, api, name))
-			if !found || !time.Now().After(since.Add(15*time.Second)) {
-				return false
-			}
+	{
+		t.Log("Cordon the node.")
+		cordonNode(t, ctx, api)
+	}
+
+	{
+		t.Log("Evict mock-zone-a-0 (partition 0). Wait for the initial cross-zone eviction delay window to elapse.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-0", Namespace: corev1.NamespaceDefault}}
+		require.Eventually(t, func() bool {
+			return api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev) == nil
+		}, 45*time.Second, time.Second, "Eviction should be allowed once the initial cross-zone eviction delay expires")
+	}
+
+	{
+		t.Log("Immediately try to evict mock-zone-b-0 (same partition 0, different zone) - should be denied due to cross-zone eviction delay.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request", "Eviction should be denied due to cross-zone eviction delay")
+	}
+
+	{
+		t.Log("Uncordon the node so the evicted pod can recover.")
+		uncordonNode(t, ctx, api)
+	}
+
+	{
+		t.Log("Wait for evicted pod to recover.")
+		awaitPodRunning(t, ctx, api, "mock-zone-a-0")
+	}
+
+	{
+		t.Log("Verify that an eviction in another partition (partition 1) is not affected by the cross-zone eviction delay for partition 0.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-1", Namespace: corev1.NamespaceDefault}}
+		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "Eviction in a different partition should not be affected by the cross-zone eviction delay")
+	}
+
+	{
+		t.Log("Verify that mock-zone-b-0 eviction is still denied while the cross-zone eviction delay has not expired.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
+		require.ErrorContainsf(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request", "Eviction should still be denied while cross-zone eviction delay has not expired")
+	}
+
+	{
+		t.Log("Wait for the cross-zone eviction delay to expire, then evict mock-zone-b-0.")
+		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
+		evict := func() bool {
+			return api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev) == nil
 		}
-		return true
-	}, 30*time.Second, time.Second, "partition 1 should outlive its initial readiness delay")
+		require.Eventually(t, evict, 45*time.Second, time.Second, "Eviction should be allowed after cross-zone eviction delay expires")
+	}
+}
+
+// TestCrossZoneEvictionDelayReadyFlapAndRestart ensures readiness flaps restart the delay,
+// but restarting the operator preserves the Kubernetes readiness deadline.
+func TestCrossZoneEvictionDelayReadyFlapAndRestart(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
+	api := cluster.API()
+
+	path := initManifestFiles(t, "cross-zone-delay-restart")
+
+	{
+		t.Log("Create rollout operator and check it's running and ready.")
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
+
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
+
+		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+
+		t.Log("Await CABundle assignment")
+		require.Eventually(t, awaitCABundleAssignment(2, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
+	}
+
+	{
+		t.Log("Create a valid zpdb configuration with crossZoneEvictionDelay.")
+		awaitZoneAwarePodDisruptionBudgetCreation(t, ctx, cluster, path+yamlZpdbConfig)
+	}
+
+	{
+		t.Log("Create 2 zones each with 2 pods. There are 2 partitions across 2 zones.")
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", 2)
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b", 2)
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	}
 
 	readyBefore, found := podReadyTransitionTime(requireGetPod(t, ctx, api, "mock-zone-a-0"))
 	require.True(t, found)
@@ -601,10 +678,10 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 	ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
 	require.ErrorContains(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request")
 
-	t.Log("Evict partition 1 while partition 0 is still within its cross-zone eviction delay.")
-	otherPartitionEviction := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-1", Namespace: corev1.NamespaceDefault}}
-	require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, otherPartitionEviction), "another partition's delay must not block this eviction")
-	require.ErrorContains(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request", "partition 0 must still be delayed when partition 1's eviction succeeds")
+	// Leave enough elapsed time to distinguish the original deadline from a reset on restart.
+	require.Eventually(t, func() bool {
+		return time.Now().After(readyAfter.Add(20 * time.Second))
+	}, 30*time.Second, 100*time.Millisecond)
 
 	t.Log("Restart rollout-operator before the delay expires.")
 	operatorPod := requireGetPod(t, ctx, api, eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator"))
@@ -617,20 +694,16 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 		return expectPodPhase(corev1.PodRunning)(t, &pods.Items[0]) && expectReady()(t, &pods.Items[0])
 	}, 2*time.Minute, 500*time.Millisecond, "rollout-operator should restart")
 
-	require.ErrorContains(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request", "operator restart must not reset the delay")
-
-	t.Log("Shorten the delay after restart so the test can verify allowance without waiting for the configured delay.")
-	zpdbResource := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault)
-	zpdb, err := zpdbResource.Get(ctx, "mock-rollout", metav1.GetOptions{})
-	require.NoError(t, err)
-	require.NoError(t, unstructured.SetNestedField(zpdb.Object, "1s", "spec", "crossZoneEvictionDelay"))
-	_, err = zpdbResource.Update(ctx, zpdb, metav1.UpdateOptions{})
-	require.NoError(t, err)
+	deadline := readyAfter.Add(time.Minute)
+	if time.Now().Before(deadline) {
+		require.ErrorContains(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request", "restart must not bypass the remaining delay")
+	}
 
 	cordonNode(t, ctx, api)
 	require.Eventually(t, func() bool {
 		return api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev) == nil
-	}, 30*time.Second, time.Second, "eviction should be allowed after Ready.LastTransitionTime plus the delay")
+	}, max(time.Until(deadline), 0)+3*time.Second, 100*time.Millisecond, "eviction should be allowed at the original Ready deadline, without a new delay after restart")
+	require.True(t, time.Now().After(deadline), "eviction must not be allowed before the original Ready deadline")
 }
 
 func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
