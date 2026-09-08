@@ -113,8 +113,6 @@ func TestSelfSignedCertificate_RenewsExpiredSecretOnStartup(t *testing.T) {
 // certificate and waits for the expiration-driven restart to renew the secret.
 // After that renewal is observed, the test switches to a long-lived certificate before
 // exercising admission — avoiding a second short-expiry race during webhook checks.
-// It still does not update the operator Deployment during the expired window (that race
-// was the main source of flakes in the original e2e test).
 func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 	ctx := context.Background()
 	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
@@ -163,8 +161,8 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 	requireEventuallyWebhookMatchesSecretCA(t, ctx, api, webhookName)
 
 	t.Log("Switch to a long-lived certificate so admission checks aren't racing another short expiry.")
-	// Stop every certificate writer before replacing the secret so an old ReplicaSet
-	// cannot recreate it with the short lifetime.
+	// Stop every certificate writer before replacing the secret so pods configured
+	// with the short lifetime cannot recreate it.
 	requireUpdateSelfSignedCertDeployment(t, ctx, api, "45s", 0)
 	requireRolloutOperatorStopped(t, ctx, api)
 	requireUpdateSelfSignedCertDeployment(t, ctx, api, "1w", 0)
