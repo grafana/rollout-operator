@@ -602,7 +602,7 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 
 	require.ErrorContains(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request", "operator restart must not reset the delay")
 
-	t.Log("Shorten the delay after restart so the test can verify allowance without waiting three minutes.")
+	t.Log("Shorten the delay after restart so the test can verify allowance without waiting for the configured delay.")
 	zpdbResource := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(corev1.NamespaceDefault)
 	zpdb, err := zpdbResource.Get(ctx, "mock-rollout", metav1.GetOptions{})
 	require.NoError(t, err)

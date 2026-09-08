@@ -293,4 +293,7 @@ The ready time comes from the Pod `Ready` condition's `lastTransitionTime`, whic
 `rollout-operator` restarts. If Kubernetes does not provide a usable transition time, pod evictions within the same partition
 are denied while the delay is configured.
 
+The kubelet and `rollout-operator` node clocks must be synchronized. The previous annotation could also cross node clocks
+when `rollout-operator` restarted on another node.
+
 This can be monitored in the `rollout-operator` logs via the message `Pod not considered ready - not enough time has elapsed since this pod became ready`.

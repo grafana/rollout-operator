@@ -43,7 +43,7 @@ import (
 
 const defaultServerSelfSignedCertExpiration = model.Duration(365 * 24 * time.Hour)
 
-const zpdbPodReadyAnnotationPatchTimeoutFlag = "zpdb.pod-ready-annotation-patch-timeout"
+const deprecatedZPDBPodReadyAnnotationPatchTimeoutFlag = "zpdb.pod-ready-annotation-patch-timeout"
 
 var (
 	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale"}
@@ -117,12 +117,12 @@ func (cfg *config) register(fs *flag.FlagSet) {
 
 	fs.BoolVar(&cfg.useZoneTracker, "use-zone-tracker", false, "Use the zone tracker to prevent simultaneous downscales in different zones")
 	fs.StringVar(&cfg.zoneTrackerConfigMapName, "zone-tracker.config-map-name", "rollout-operator-zone-tracker", "The name of the ConfigMap to use for the zone tracker")
-	fs.DurationVar(&cfg.deprecatedZPDBPodReadyAnnotationPatchTimeout, zpdbPodReadyAnnotationPatchTimeoutFlag, 5*time.Second, "Deprecated: accepted for compatibility and has no effect.")
+	fs.DurationVar(&cfg.deprecatedZPDBPodReadyAnnotationPatchTimeout, deprecatedZPDBPodReadyAnnotationPatchTimeoutFlag, 5*time.Second, "Deprecated: accepted for compatibility and has no effect.")
 }
 
 func warnDeprecatedFlags(fs *flag.FlagSet, logger log.Logger) {
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == zpdbPodReadyAnnotationPatchTimeoutFlag {
+		if f.Name == deprecatedZPDBPodReadyAnnotationPatchTimeoutFlag {
 			level.Warn(logger).Log("msg", "deprecated flag has no effect", "flag", "-"+f.Name)
 		}
 	})

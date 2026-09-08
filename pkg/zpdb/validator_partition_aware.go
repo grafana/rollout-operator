@@ -97,7 +97,7 @@ func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
 
 	now := time.Now()
 	since, found := podReadyTransitionTime(pod)
-	if found && !now.Before(since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
+	if found && now.After(since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
 		return true
 	}
 

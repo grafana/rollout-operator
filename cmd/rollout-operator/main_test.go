@@ -84,7 +84,7 @@ func TestDeprecatedZPDBReadyAnnotationPatchTimeoutFlag(t *testing.T) {
 		wantWarning bool
 	}{
 		{name: "omitted", wantWarning: false},
-		{name: "explicitly set", args: []string{"-" + zpdbPodReadyAnnotationPatchTimeoutFlag + "=10s"}, wantWarning: true},
+		{name: "explicitly set", args: []string{"-" + deprecatedZPDBPodReadyAnnotationPatchTimeoutFlag + "=10s"}, wantWarning: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var cfg config
@@ -96,7 +96,7 @@ func TestDeprecatedZPDBReadyAnnotationPatchTimeoutFlag(t *testing.T) {
 			warnDeprecatedFlags(fs, log.NewLogfmtLogger(&logs))
 			if tc.wantWarning {
 				require.Contains(t, logs.String(), "level=warn")
-				require.Contains(t, logs.String(), "flag=-"+zpdbPodReadyAnnotationPatchTimeoutFlag)
+				require.Contains(t, logs.String(), "flag=-"+deprecatedZPDBPodReadyAnnotationPatchTimeoutFlag)
 				require.Contains(t, logs.String(), "msg=\"deprecated flag has no effect\"")
 				return
 			}
