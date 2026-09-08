@@ -96,7 +96,7 @@ func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
 	}
 
 	now := time.Now()
-	since, found := podReadyTransitionTime(pod)
+	since, status, found := podReadyTransitionTime(pod)
 	if found && now.After(since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
 		return true
 	}
@@ -106,15 +106,19 @@ func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
 		reason = "Unable to determine when pod last became ready"
 		since = now
 	}
-	level.Info(v.log).Log("msg", "Pod not considered ready", "reason", reason, "pod", pod.Name, "time-until-ready", since.Add(v.pdbConfig.crossZoneEvictionDelay).Sub(now))
+	readyStatus := string(status)
+	if readyStatus == "" {
+		readyStatus = "missing"
+	}
+	level.Info(v.log).Log("msg", "Pod not considered ready", "reason", reason, "pod", pod.Name, "ready-condition-status", readyStatus, "time-until-ready", since.Add(v.pdbConfig.crossZoneEvictionDelay).Sub(now))
 	return false
 }
 
-func podReadyTransitionTime(pod *corev1.Pod) (time.Time, bool) {
+func podReadyTransitionTime(pod *corev1.Pod) (time.Time, corev1.ConditionStatus, bool) {
 	for _, condition := range pod.Status.Conditions {
-		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue && !condition.LastTransitionTime.IsZero() {
-			return condition.LastTransitionTime.Time, true
+		if condition.Type == corev1.PodReady {
+			return condition.LastTransitionTime.Time, condition.Status, condition.Status == corev1.ConditionTrue && !condition.LastTransitionTime.IsZero()
 		}
 	}
-	return time.Time{}, false
+	return time.Time{}, "", false
 }

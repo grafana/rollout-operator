@@ -1,6 +1,7 @@
 package zpdb
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -108,6 +109,35 @@ func TestIsReady_NoReadyConditionDenied(t *testing.T) {
 	pod.Status.Conditions = nil
 
 	assert.False(t, v.isReady(pod), "ready pod without a Ready condition should be denied while a delay is configured")
+}
+
+func TestIsReady_LogsReadyConditionStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status corev1.ConditionStatus
+		want   string
+	}{
+		{name: "false", status: corev1.ConditionFalse, want: "False"},
+		{name: "unknown", status: corev1.ConditionUnknown, want: "Unknown"},
+		{name: "missing", want: "missing"},
+		{name: "true without transition time", status: corev1.ConditionTrue, want: "True"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, _ := newTestValidatorPartitionAware(time.Minute)
+			var logs bytes.Buffer
+			v.log, _ = spanlogger.New(context.Background(), log.NewLogfmtLogger(&logs), "test", util.NoTenantResolver{})
+			defer v.log.Finish()
+			pod := readyRunningPod("pod-1", time.Time{})
+			pod.Status.Conditions[0].Status = tc.status
+			if tc.status == "" {
+				pod.Status.Conditions = nil
+			}
+
+			require.False(t, v.isReady(pod))
+			require.Contains(t, logs.String(), "Unable to determine when pod last became ready")
+			require.Contains(t, logs.String(), "ready-condition-status="+tc.want)
+		})
+	}
 }
 
 func TestIsReady_TransitionOutsideDelayWindow(t *testing.T) {
