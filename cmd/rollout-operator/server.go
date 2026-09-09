@@ -57,3 +57,7 @@ func (s *server) Handle(pattern string, handler http.Handler) {
 func (s *server) PathPrefix(tpl string) *mux.Route {
 	return s.mux.PathPrefix(tpl)
 }
+
+func (s *server) Router() *mux.Router {
+	return s.mux
+}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/ui/status/static/status.css">
+</head>
+<body>
+  <header class="page-header">
+    <a class="back-link" href="/ui/status/">← Rollout status</a>
+    <h1>{{.Title}}</h1>
+    {{if .Name}}<p class="statefulset-name"><code>{{.Name}}</code></p>{{end}}
+    {{if .Namespace}}
+    <p class="meta">Namespace <code>{{.Namespace}}</code>{{if not .ObservedAt.IsZero}} · Observed {{.ObservedAt.Format "2006-01-02 15:04:05 UTC"}}{{end}}</p>
+    {{end}}
+    <p class="meta read-only">Read-only</p>
+  </header>
+  <main>
+    {{if .Error}}
+    <div class="banner {{if .Unavailable}}banner-warn{{else}}banner-error{{end}}">{{.Error}}</div>
+    {{else}}
+    <section class="configuration-page">
+      <dl>
+        {{range .Configuration}}
+        <div>
+          <dt><span>{{.Source}}</span> <code>{{.Name}}</code></dt>
+          <dd><code>{{.Value}}</code></dd>
+        </div>
+        {{end}}
+      </dl>
+    </section>
+    {{end}}
+  </main>
+</body>
+</html>
