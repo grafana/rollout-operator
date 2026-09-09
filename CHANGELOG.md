@@ -7,6 +7,7 @@
 * [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
 * [FEATURE] Add a read-only `/ui/status` HTML page for StatefulSet rollout group progress (phase, ready replicas, revisions, updated pods). #473
 * [FEATURE] Added Kubernetes Lease leader election to allow the rollout-operator to function in high availability mode. Enable with -leader-election.enabled=true. #472
+* [ENHANCEMENT] Allow startup without the ReplicaTemplate or ZoneAwarePodDisruptionBudget CRDs and recover automatically when they are installed later. ZPDB enforcement is inactive while its CRD is absent; startup still waits for cache synchronization when it is present. Expose readiness metrics for both resources. #476
 
 ## v0.40.0
 
