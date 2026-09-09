@@ -87,7 +87,7 @@ func (c *configObserver) start() error {
 	_, listErr := c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
 	cancel()
 	if listErr != nil && !apierrors.IsNotFound(listErr) {
-		return listErr
+		level.Warn(c.logger).Log("msg", "zpdb resource check failed; waiting for informer cache sync", "err", listErr)
 	}
 
 	go c.pdbFactory.Start(c.stopCh)
