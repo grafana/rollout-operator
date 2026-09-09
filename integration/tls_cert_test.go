@@ -123,7 +123,7 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 	webhookName := createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookNoDownscale).Name
 
 	t.Log("Create rollout-operator with a short-lived self-signed certificate.")
-	createRolloutOperatorDependencies(t, ctx, api, cluster.ExtAPI(), path, true)
+	createRolloutOperatorDependencies(t, ctx, api, cluster.ExtAPI(), path, true, true)
 	createRolloutOperatorDeployment(t, ctx, api, path, func(deployment *appsv1.Deployment) {
 		deployment.Spec.Template.Spec.Containers[0].Args = setSelfSignedCertExpiration(
 			deployment.Spec.Template.Spec.Containers[0].Args,
