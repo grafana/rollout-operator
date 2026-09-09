@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Allow startup without the ReplicaTemplate or ZoneAwarePodDisruptionBudget CRDs and recover automatically when they are installed later. ZPDB enforcement is inactive while its CRD is absent; startup still waits for cache synchronization when it is present. Expose readiness metrics for both resources. #476
 * [CHANGE] ZPDB cross-zone eviction delays use the Pod Ready condition's `lastTransitionTime` instead of the `grafana.com/ready-time` annotation, eliminating annotation PATCH requests and measuring the delay from Kubernetes readiness transitions. The `-zpdb.pod-ready-annotation-patch-timeout` flag is deprecated, has no effect, and logs a warning when supplied. #498
 * [ENHANCEMENT] Update Go to `1.27` #494
 * [ENHANCEMENT] Updated dependencies, including: #491

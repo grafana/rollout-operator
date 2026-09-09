@@ -187,6 +187,28 @@ func zoneAwarePodDisruptionBudget(namespace, name, rolloutGroup string, maxUnava
 	return zpdb
 }
 
+func replicaTemplateSchema() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Group:    "rollout-operator.grafana.com",
+		Version:  "v1",
+		Resource: "replicatemplates",
+	}
+}
+
+func replicaTemplate(namespace, name string, replicas int64) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "rollout-operator.grafana.com/v1",
+		"kind":       "ReplicaTemplate",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": namespace,
+		},
+		"spec": map[string]interface{}{
+			"replicas": replicas,
+		},
+	}}
+}
+
 // serviceNameToNodePort maps service names to their assigned NodePorts
 func serviceNameToNodePort(name string) (int32, error) {
 	switch name {

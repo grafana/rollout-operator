@@ -9,10 +9,11 @@ type Metrics struct {
 	ConfigurationsObserved *prometheus.CounterVec
 	EvictionRequests       *prometheus.CounterVec
 	InFlightRequests       *prometheus.GaugeVec
+	ConfigObserverReady    prometheus.Gauge
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
-	return &Metrics{
+	metrics := &Metrics{
 		ConfigurationsObserved: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_zpdb_configurations_observed_total",
 			Help: "Number of zpdb configurations observed by the configuration controller.",
@@ -25,5 +26,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "rollout_operator_zpdb_inflight_eviction_requests",
 			Help: "Number of zpdb eviction requests which are currently in-flight.",
 		}, []string{}),
+		ConfigObserverReady: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "rollout_operator_zpdb_config_observer_ready",
+			Help: "Whether the ZPDB configuration observer has synchronized with the Kubernetes API.",
+		}),
 	}
+	metrics.ConfigObserverReady.Set(0)
+	return metrics
 }
