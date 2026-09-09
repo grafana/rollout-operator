@@ -3,6 +3,7 @@
 ## main / unreleased
 
 * [FEATURE] Add a read-only `/ui/status` HTML page for StatefulSet rollout group progress (phase, ready replicas, revisions, updated pods). #473
+* [CHANGE] ZPDB cross-zone eviction delays use the Pod Ready condition's `lastTransitionTime` instead of the `grafana.com/ready-time` annotation, eliminating annotation PATCH requests and measuring the delay from Kubernetes readiness transitions. The `-zpdb.pod-ready-annotation-patch-timeout` flag is deprecated, has no effect, and logs a warning when supplied. #498
 * [ENHANCEMENT] Update Go to `1.27` #494
 * [ENHANCEMENT] Updated dependencies, including: #491
   * `github.com/stretchr/testify` from `v1.12.0` to `v1.12.1`

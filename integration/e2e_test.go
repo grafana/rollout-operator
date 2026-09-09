@@ -573,10 +573,6 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 	}
 
 	{
-		// The crossZoneEvictionDelay window starts at the rollout-operator's first observation
-		// of each pod (see runbook: "Cross-zone eviction delays"). For freshly-created pods that
-		// is now, so the very first eviction has to wait for the initial window to elapse before
-		// the validator considers any pod in the partition ready.
 		t.Log("Evict mock-zone-a-0 (partition 0). Wait for the initial cross-zone eviction delay window to elapse.")
 		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-a-0", Namespace: corev1.NamespaceDefault}}
 		require.Eventually(t, func() bool {
@@ -620,6 +616,101 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 		}
 		require.Eventually(t, evict, 45*time.Second, time.Second, "Eviction should be allowed after cross-zone eviction delay expires")
 	}
+}
+
+// TestCrossZoneEvictionDelayReadyFlapAndRestart ensures readiness flaps restart the delay,
+// but restarting the operator preserves the Kubernetes readiness deadline.
+func TestCrossZoneEvictionDelayReadyFlapAndRestart(t *testing.T) {
+	ctx := context.Background()
+
+	cluster := createKindCluster(t, "rollout-operator:latest", "mock-service:latest")
+	api := cluster.API()
+
+	path := initManifestFiles(t, "cross-zone-delay-restart")
+
+	{
+		t.Log("Create rollout operator and check it's running and ready.")
+		createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
+
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
+		_ = createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
+
+		rolloutOperatorPod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+		requireEventuallyPod(t, api, ctx, rolloutOperatorPod, expectPodPhase(corev1.PodRunning), expectReady())
+
+		t.Log("Await CABundle assignment")
+		require.Eventually(t, awaitCABundleAssignment(2, ctx, api), time.Second*30, time.Millisecond*10, "New webhooks have CABundle added")
+	}
+
+	{
+		t.Log("Create a valid zpdb configuration with crossZoneEvictionDelay.")
+		awaitZoneAwarePodDisruptionBudgetCreation(t, ctx, cluster, path+yamlZpdbConfig)
+	}
+
+	{
+		t.Log("Create 2 zones each with 2 pods. There are 2 partitions across 2 zones.")
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-a", 2)
+		createMockServiceZone(t, ctx, api, corev1.NamespaceDefault, "mock-zone-b", 2)
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	}
+
+	readyBefore, found := podReadyTransitionTime(requireGetPod(t, ctx, api, "mock-zone-a-0"))
+	require.True(t, found)
+
+	t.Log("Make mock-zone-a-0 unready, then ready, to reset its Kubernetes Ready transition time.")
+	setMockPodReady(t, ctx, api, "mock-zone-a-0", false)
+	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectNotReady())
+	setMockPodReady(t, ctx, api, "mock-zone-a-0", true)
+	requireEventuallyPod(t, api, ctx, "mock-zone-a-0", expectReady())
+	readyAfter, found := podReadyTransitionTime(requireGetPod(t, ctx, api, "mock-zone-a-0"))
+	require.True(t, found)
+	require.True(t, readyAfter.After(readyBefore), "Ready.LastTransitionTime should advance after readiness recovers")
+
+	for _, podName := range []string{"mock-zone-a-0", "mock-zone-a-1", "mock-zone-b-0", "mock-zone-b-1"} {
+		pod := requireGetPod(t, ctx, api, podName)
+		_, exists := pod.Annotations["grafana.com/ready-time"]
+		require.False(t, exists, "rollout-operator must not write a ready-time annotation")
+	}
+
+	ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
+	require.ErrorContains(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev), "denied the request")
+
+	// An expired delay must stay expired after restart; a fresh timer would block admission.
+	deadline := readyAfter.Add(time.Minute)
+	require.Eventually(t, func() bool {
+		return time.Now().After(deadline)
+	}, time.Minute+10*time.Second, 100*time.Millisecond)
+
+	t.Log("Restart rollout-operator after the original delay expires.")
+	operatorPod := requireGetPod(t, ctx, api, eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator"))
+	require.NoError(t, api.CoreV1().Pods(corev1.NamespaceDefault).Delete(ctx, operatorPod.Name, metav1.DeleteOptions{}))
+	var restartedAt time.Time
+	require.Eventually(t, func() bool {
+		pods, err := api.CoreV1().Pods(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: "name=rollout-operator"})
+		if err != nil || len(pods.Items) != 1 || pods.Items[0].UID == operatorPod.UID {
+			return false
+		}
+		for _, status := range pods.Items[0].Status.ContainerStatuses {
+			if status.Name == "rollout-operator" && status.State.Running != nil {
+				restartedAt = status.State.Running.StartedAt.Time
+			}
+		}
+		return !restartedAt.IsZero() && expectPodPhase(corev1.PodRunning)(t, &pods.Items[0]) && expectReady()(t, &pods.Items[0])
+	}, 2*time.Minute, 500*time.Millisecond, "rollout-operator should restart")
+
+	// Pod readiness can precede Service endpoint convergence. Retry admission, but never
+	// long enough for a timer reset by the new process to expire and hide a regression.
+	resetDeadline := restartedAt.Add(time.Minute)
+	wait := min(30*time.Second, time.Until(resetDeadline)-5*time.Second)
+	require.Positive(t, wait, "operator startup consumed the window needed to distinguish a reset delay")
+	cordonNode(t, ctx, api)
+	require.Eventually(t, func() bool {
+		return api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev) == nil
+	}, wait, 500*time.Millisecond, "expired readiness delay must remain expired after restart")
+	require.True(t, time.Now().Before(resetDeadline), "admission must succeed before a reset delay could expire")
 }
 
 func TestNoDownscale_CanDownscaleUnrelatedResource(t *testing.T) {
