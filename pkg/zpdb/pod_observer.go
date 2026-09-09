@@ -3,44 +3,40 @@ package zpdb
 import (
 	"errors"
 	"reflect"
-	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	k8cache "k8s.io/client-go/tools/cache"
 )
 
 // An podObserver listens for pod changes, invalidating the pod eviction cache on a pod state change.
 type podObserver struct {
-	podsFactory         informers.SharedInformerFactory
-	podLister           corelisters.PodLister
-	podsInformer        k8cache.SharedIndexInformer
-	podEvictCache       *podEvictionCache
-	podReadinessTracker *podReadinessTracker
-	configObserver      *configObserver
-	logger              log.Logger
-	stopCh              chan struct{}
+	podsFactory    informers.SharedInformerFactory
+	podLister      corelisters.PodLister
+	podsInformer   k8cache.SharedIndexInformer
+	podEvictCache  *podEvictionCache
+	configObserver *configObserver
+	logger         log.Logger
+	stopCh         chan struct{}
 }
 
 // newPodObserver builds a pod observer on top of the given shared pod informer factory. The factory is
 // shared with the rollout controller: both need a full view of the pods in the namespace, and a factory
 // each would mean two watches and two in-memory copies of every pod.
-func newPodObserver(kubeClient kubernetes.Interface, namespace string, podsFactory informers.SharedInformerFactory, readyAnnotationPatchTimeout time.Duration, configObserver *configObserver, logger log.Logger) *podObserver {
+func newPodObserver(podsFactory informers.SharedInformerFactory, configObserver *configObserver, logger log.Logger) *podObserver {
 	podsInformer := podsFactory.Core().V1().Pods()
 
 	c := &podObserver{
-		podsFactory:         podsFactory,
-		podLister:           podsInformer.Lister(),
-		podsInformer:        podsInformer.Informer(),
-		podEvictCache:       newPodEvictionCache(),
-		podReadinessTracker: newPodReadinessTracker(kubeClient, namespace, readyAnnotationPatchTimeout, logger),
-		configObserver:      configObserver,
-		logger:              logger,
-		stopCh:              make(chan struct{}),
+		podsFactory:    podsFactory,
+		podLister:      podsInformer.Lister(),
+		podsInformer:   podsInformer.Informer(),
+		podEvictCache:  newPodEvictionCache(),
+		configObserver: configObserver,
+		logger:         logger,
+		stopCh:         make(chan struct{}),
 	}
 
 	return c
@@ -137,7 +133,6 @@ func (c *podObserver) onPodAdded(obj interface{}) {
 		return
 	}
 
-	c.podReadinessTracker.observed(pod)
 	c.invalidatePodEvictionCache(pod, "added")
 }
 
@@ -147,7 +142,6 @@ func (c *podObserver) onPodUpdated(_, new interface{}) {
 		return
 	}
 
-	c.podReadinessTracker.observed(pod)
 	c.invalidatePodEvictionCache(pod, "updated")
 }
 

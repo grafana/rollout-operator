@@ -160,6 +160,31 @@ func expectedPodReadyState(expectedReady bool) func(t *testing.T, pod *corev1.Po
 	}
 }
 
+func podReadyTransitionTime(pod *corev1.Pod) (time.Time, bool) {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue && !condition.LastTransitionTime.IsZero() {
+			return condition.LastTransitionTime.Time, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func setMockPodReady(t *testing.T, ctx context.Context, api *kubernetes.Clientset, podName string, ready bool) {
+	t.Helper()
+	request := api.CoreV1().RESTClient().Post()
+	if !ready {
+		request = api.CoreV1().RESTClient().Delete()
+	}
+	err := request.Namespace(corev1.NamespaceDefault).
+		Resource("pods").
+		Name(podName).
+		SubResource("proxy").
+		Suffix("ready").
+		Do(ctx).
+		Error()
+	require.NoError(t, err)
+}
+
 func requireEventuallyPodCount(ctx context.Context, t *testing.T, api *kubernetes.Clientset, selector string, expectedCount int) {
 	require.Eventually(t, func() bool {
 		l, err := api.CoreV1().Pods(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: selector})
@@ -195,6 +220,13 @@ func eventuallyGetFirstPod(ctx context.Context, t *testing.T, api *kubernetes.Cl
 		return true
 	}, 5*time.Minute, 500*time.Millisecond, "Could not find pods matching %s", selector)
 	return podName
+}
+
+func requireGetPod(t *testing.T, ctx context.Context, api *kubernetes.Clientset, podName string) *corev1.Pod {
+	t.Helper()
+	pod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, podName, metav1.GetOptions{})
+	require.NoError(t, err)
+	return pod
 }
 
 // makeMockReady sends a POST request to the /ready endpoint of the mock service, to make it become ready

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-logfmt/logfmt"
 	"github.com/google/uuid"
@@ -113,7 +112,7 @@ func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawCon
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
 	testCtx.kubeClient = fake.NewClientset(objects...)
-	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, newTestPodsFactory(testCtx.kubeClient), 5*time.Second, testCtx.logs, zpdbMetrics)
+	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, newTestPodsFactory(testCtx.kubeClient), testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {
@@ -131,7 +130,7 @@ func newTestContextWithoutAdmissionReview(t *testing.T, pdbRawConfig *unstructur
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
 
 	kubeClient := fake.NewClientset(objects...)
-	testCtx.controller = NewEvictionController(kubeClient, newFakeDynamicClient(), testNamespace, newTestPodsFactory(kubeClient), 5*time.Second, testCtx.logs, zpdbMetrics)
+	testCtx.controller = NewEvictionController(kubeClient, newFakeDynamicClient(), testNamespace, newTestPodsFactory(kubeClient), testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
 
 	if pdbRawConfig != nil {
