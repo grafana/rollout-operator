@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Allow startup without the ReplicaTemplate or ZoneAwarePodDisruptionBudget CRDs and recover automatically when they are installed later. ZPDB enforcement is inactive while its CRD is absent; startup still waits for cache synchronization when it is present. Expose readiness metrics for both resources. #476
+
 ## v0.41.0
 
 * [ENHANCEMENT] Add ability to watch ReplicaTemplates so replica changes trigger scaling reconciliation without waiting for the informer re-sync. Enable with -replica-templates.watch-enabled=true. #503
