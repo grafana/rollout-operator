@@ -1786,7 +1786,7 @@ func TestRolloutController_UsesTheSuppliedPodInformerFactory(t *testing.T) {
 	kubeClient := fake.NewClientset()
 	podsFactory := NewPodInformerFactory(kubeClient, testNamespace)
 
-	c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, podsFactory, nil, 5*time.Second, prometheus.NewPedanticRegistry(), log.NewNopLogger(), &mockEvictionController{})
+	c := NewRolloutController(kubeClient, nil, nil, nil, nil, testClusterDomain, testNamespace, podsFactory, nil, 5*time.Second, prometheus.NewPedanticRegistry(), log.NewNopLogger(), &mockEvictionController{})
 	require.NoError(t, c.Init())
 	defer c.Stop()
 
