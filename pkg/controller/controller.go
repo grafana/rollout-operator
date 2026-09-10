@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listersv1 "k8s.io/client-go/listers/apps/v1"
@@ -64,6 +65,9 @@ type RolloutController struct {
 	dynamicClient        dynamic.Interface
 	podHTTPClient        *instrumentation.PodHTTPClient
 	logger               log.Logger
+
+	replicaTemplatesFactory  dynamicinformer.DynamicSharedInformerFactory
+	replicaTemplatesInformer cache.SharedIndexInformer
 
 	zpdbController ZPDBEvictionController
 
@@ -171,6 +175,18 @@ func (c *RolloutController) Init() error {
 		return err
 	}
 
+	if c.replicaTemplatesInformer != nil {
+		_, err = c.replicaTemplatesInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    func(interface{}) { c.enqueueReconcile() },
+			UpdateFunc: c.onReplicaTemplateUpdated,
+			DeleteFunc: func(interface{}) { c.enqueueReconcile() },
+		})
+		if err != nil {
+			return err
+		}
+		c.replicaTemplatesFactory.Start(c.stopCh)
+	}
+
 	// Start informers. Start only starts informers the shared factory has not started yet, so whichever of
 	// the pod factory's two owners gets here first binds the pod informer's lifetime to its stop channel
 	// and the other call is a no-op.
@@ -179,7 +195,11 @@ func (c *RolloutController) Init() error {
 
 	// Wait until all informer caches have been synced.
 	level.Info(c.logger).Log("msg", "informer caches are syncing")
-	if ok := cache.WaitForCacheSync(c.stopCh, c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced); !ok {
+	synced := []cache.InformerSynced{c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced}
+	if c.replicaTemplatesInformer != nil {
+		synced = append(synced, c.replicaTemplatesInformer.HasSynced)
+	}
+	if ok := cache.WaitForCacheSync(c.stopCh, synced...); !ok {
 		return errors.New("informer caches failed to sync")
 	}
 	level.Info(c.logger).Log("msg", "informer caches have synced")
