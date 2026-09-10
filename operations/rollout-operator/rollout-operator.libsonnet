@@ -39,7 +39,7 @@
     zpdb_custom_resource_definition_enabled: $._config.rollout_operator_webhooks_enabled,
 
     // Configure the rollout operator to enable support for ReplicaTemplates
-    rollout_operator_replica_template_access_enabled: false,
+    rollout_operator_replica_template_access_enabled: true,
 
     // Include the custom resource definiton for ReplicaTemplates.
     replica_template_custom_resource_definition_enabled: $._config.rollout_operator_webhooks_enabled,

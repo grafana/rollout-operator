@@ -100,7 +100,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.kubeClusterDomain, "kubernetes.cluster-domain", "cluster.local.", "The Kubernetes cluster domain.")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
-	fs.BoolVar(&cfg.watchReplicaTemplates, "replica-templates.watch-enabled", false, "Watch ReplicaTemplates for desired replica changes. Requires the CRD and namespace list/watch permissions.")
+	fs.BoolVar(&cfg.watchReplicaTemplates, "replica-templates.watch-enabled", true, "Watch ReplicaTemplates for desired replica changes. Requires the CRD and namespace list/watch permissions.")
 	cfg.clusterValidationCfg.RegisterFlagsWithPrefix("server.cluster-validation.http.", fs)
 
 	fs.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
