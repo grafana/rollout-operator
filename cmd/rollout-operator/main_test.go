@@ -71,6 +71,7 @@ func TestConfigValidate(t *testing.T) {
 func TestConfigDefaults(t *testing.T) {
 	cfg := newValidConfig(t)
 	require.Equal(t, 10*time.Second, cfg.serverTLSRequestTimeout)
+	require.True(t, cfg.watchReplicaTemplates)
 	// Rate limiting is on by default (previously the 0/0 defaults disabled it); a regression flipping
 	// these back to 0 would silently turn off client-side throttling, so assert them explicitly.
 	require.Equal(t, float64(5), cfg.kubeClientQPS)

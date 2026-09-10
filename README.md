@@ -96,7 +96,7 @@ To support scaling based on reference resource, rollout-operator needs to be all
   - patch
 ```
 
-For ReplicaTemplates, enable `-replica-templates.watch-enabled=true` to reconcile desired replica changes without waiting for the five-minute informer resync. This requires the ReplicaTemplate CRD and `get`, `list`, and `watch` permissions on `replicatemplates` in the operator's namespace. Status-only updates do not trigger reconciliation. The Jsonnet option `rollout_operator_replica_template_access_enabled` enables the watch and grants these permissions.
+ReplicaTemplate watching is enabled by default, so desired replica changes trigger reconciliation without waiting for the five-minute informer resync. This requires the ReplicaTemplate CRD and `get`, `list`, and `watch` permissions on `replicatemplates` in the operator's namespace. Status-only updates do not trigger reconciliation. The Jsonnet option `rollout_operator_replica_template_access_enabled` controls the watch and grants these permissions.
 
 ## Delayed scaledown
 
