@@ -73,6 +73,7 @@
 
   rollout_operator_args:: {
     'kubernetes.namespace': $._config.namespace,
+    [if $._config.rollout_operator_replica_template_access_enabled then 'replica-templates.watch-enabled']: true,
     'use-zone-tracker': true,
     'zone-tracker.config-map-name': 'rollout-operator-zone-tracker',
   } + if enableWebhooks then {
@@ -136,6 +137,9 @@
       ] +
       (
         if $._config.rollout_operator_replica_template_access_enabled then [
+          policyRule.withApiGroups($.replica_template.spec.group) +
+          policyRule.withResources([$.replica_template.spec.names.plural]) +
+          policyRule.withVerbs(['get', 'list', 'watch']),
           policyRule.withApiGroups($.replica_template.spec.group) +
           policyRule.withResources(['%s/scale' % $.replica_template.spec.names.plural, '%s/status' % $.replica_template.spec.names.plural]) +
           policyRule.withVerbs(['get', 'patch']),
