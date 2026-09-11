@@ -1,0 +1,32 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: phased-deployment-rollout-operator-development
+  labels:
+    grafana.com/namespace: rollout-operator-development
+    grafana.com/inject-rollout-operator-ca: "true"
+webhooks:
+  - name: phased-deployment-rollout-operator-development.grafana.com
+    admissionReviewVersions: [v1]
+    clientConfig:
+      service:
+        name: rollout-operator
+        namespace: rollout-operator-development
+        path: /admission/phased-deployment
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    sideEffects: NoneOnDryRun
+    timeoutSeconds: 10
+    objectSelector:
+      matchLabels:
+        grafana.com/rollout-phased: "true"
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: rollout-operator-development
+    rules:
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments]
+        scope: Namespaced
