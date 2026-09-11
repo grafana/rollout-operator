@@ -23,3 +23,4 @@ make integration    # Integration tests (requires Docker + kind)
 make build-test-images
 go test -v -tags requires_docker -timeout 30m ./integration -run TestName
 ```
+- Security issues should be reported via [Grafana's security issue reporting page](https://grafana.com/legal/report-a-security-issue/) and not directly in this repository.
