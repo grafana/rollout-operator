@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.40.0
+
 * [CHANGE] ZPDB cross-zone eviction delays use the Pod Ready condition's `lastTransitionTime` instead of the `grafana.com/ready-time` annotation, eliminating annotation PATCH requests and measuring the delay from Kubernetes readiness transitions. The `-zpdb.pod-ready-annotation-patch-timeout` flag is deprecated, has no effect, and logs a warning when supplied. #498
 * [ENHANCEMENT] Update Go to `1.27` #494
 * [ENHANCEMENT] Updated dependencies, including: #491
@@ -10,6 +12,8 @@
   * `k8s.io/apiextensions-apiserver` from `v0.36.3` to `v0.36.4`
   * `k8s.io/apimachinery` from `v0.36.3` to `v0.36.4`
   * `k8s.io/client-go` from `v0.36.3` to `v0.36.4`
+* [ENHANCEMENT] Updated dependencies to address CVEs, including: #501 #502
+  * `google.golang.org/grpc` from `v1.83.0` to `v1.83.2` for CVE-2026-84304, CVE-2026-84303 and CVE-2026-84445
 
 
 ## v0.39.0
