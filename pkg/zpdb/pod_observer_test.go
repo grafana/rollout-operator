@@ -134,6 +134,40 @@ func TestPodObserver_InvalidObject(t *testing.T) {
 	observer.onPodDeleted(invalidObj)
 }
 
+func TestIsDeploymentManagedPod(t *testing.T) {
+	controller := true
+	notController := false
+	tests := map[string]struct {
+		owner *metav1.OwnerReference
+		want  bool
+	}{
+		"deployment ReplicaSet": {
+			owner: &metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Controller: &controller},
+			want:  true,
+		},
+		"StatefulSet": {
+			owner: &metav1.OwnerReference{APIVersion: "apps/v1", Kind: "StatefulSet", Controller: &controller},
+		},
+		"non-controller ReplicaSet reference": {
+			owner: &metav1.OwnerReference{APIVersion: "apps/v1", Kind: "ReplicaSet", Controller: &notController},
+		},
+		"ReplicaSet from another API group": {
+			owner: &metav1.OwnerReference{APIVersion: "example.com/v1", Kind: "ReplicaSet", Controller: &controller},
+		},
+		"no owner": {},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			pod := &corev1.Pod{}
+			if tc.owner != nil {
+				pod.OwnerReferences = []metav1.OwnerReference{*tc.owner}
+			}
+			require.Equal(t, tc.want, isDeploymentManagedPod(pod))
+		})
+	}
+}
+
 // TestObserver_IgnorePodEvents validates the pod eviction cache is not invalidated until the pod phase changes
 func TestObserver_IgnorePodEvents(t *testing.T) {
 	_, observer := newPodObserverTestCase(t)
