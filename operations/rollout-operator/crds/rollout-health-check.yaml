@@ -1,0 +1,134 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: rollouthealthchecks.rollout-operator.grafana.com
+spec:
+  group: rollout-operator.grafana.com
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - selector
+                - prometheusURL
+                - checks
+              properties:
+                selector:
+                  type: object
+                  description: Selector preventing this policy from being attached to an unrelated workload.
+                  required:
+                    - matchLabels
+                  properties:
+                    matchLabels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                prometheusURL:
+                  type: string
+                  description: Base URL of the Prometheus HTTP API used to evaluate checks.
+                  minLength: 1
+                checks:
+                  type: array
+                  description: Ordered list of PromQL health checks evaluated before progressing to the next zone.
+                  minItems: 1
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - query
+                      - successQuery
+                    properties:
+                      name:
+                        type: string
+                        description: Unique name of this check within the RolloutHealthCheck.
+                        minLength: 1
+                      currentRange:
+                        type: string
+                        description: Range vector duration substituted for ${range} when evaluating candidate pods. Defaults to 5m.
+                      baselineRange:
+                        type: string
+                        description: Range vector duration substituted for ${range} when evaluating stable pods at the pre-rollout timestamp. Defaults to 10m.
+                      errorPolicy:
+                        type: object
+                        description: Retry and action policy when a Prometheus query fails or is unreachable. Defaults to retryInterval=10s, maxAttempts=3, exhaustedAction=Pause.
+                        properties:
+                          retryInterval:
+                            type: string
+                            description: Delay between query attempts after an error. Defaults to 10s.
+                          maxAttempts:
+                            type: integer
+                            description: Maximum query attempts including the first. Defaults to 3.
+                            minimum: 1
+                          exhaustedAction:
+                            type: string
+                            description: Behavior when all attempts fail. Defaults to Pause.
+                            enum:
+                              - Pause
+                              - Warn
+                              - Disabled
+                      failurePolicy:
+                        type: object
+                        description: How failed successQuery results accumulate before gating. Defaults to reevaluationInterval=2m30s, consecutiveFailures=3, consecutiveSuccesses=1, exceededAction=Pause.
+                        properties:
+                          reevaluationInterval:
+                            type: string
+                            description: Minimum time between evaluations that update consecutive counters. Defaults to 2m30s.
+                          consecutiveFailures:
+                            type: integer
+                            description: Number of consecutive failed evaluations required before exceededAction. Defaults to 3.
+                            minimum: 1
+                          consecutiveSuccesses:
+                            type: integer
+                            description: Number of consecutive successful evaluations required to pass. Defaults to 1.
+                            minimum: 1
+                          exceededAction:
+                            type: string
+                            description: Behavior when consecutiveFailures is reached. Defaults to Pause.
+                            enum:
+                              - Pause
+                              - Warn
+                              - Disabled
+                      noDataPolicy:
+                        type: object
+                        description: Retry and action policy when a query returns no data. Defaults to retryInterval=30s, maxAttempts=3, exhaustedAction=Pause.
+                        properties:
+                          retryInterval:
+                            type: string
+                            description: Delay between query attempts after no-data. Defaults to 30s.
+                          maxAttempts:
+                            type: integer
+                            description: Maximum query attempts including the first. Defaults to 3.
+                            minimum: 1
+                          exhaustedAction:
+                            type: string
+                            description: Behavior when all attempts return no data. Defaults to Pause.
+                            enum:
+                              - Pause
+                              - Warn
+                              - Disabled
+                      disabled:
+                        type: boolean
+                        description: When true, this check is skipped while other checks remain active.
+                      query:
+                        type: string
+                        description: |
+                          PromQL that must return exactly one scalar. Required placeholders: ${targetMatchers} (namespace, zone/name, and pod matchers) and ${range}.
+                        minLength: 1
+                      successQuery:
+                        type: string
+                        description: |
+                          PromQL evaluated after substituting ${current} and ${baseline} scalars. Must return scalar 1 (pass) or 0 (fail).
+                        minLength: 1
+  scope: Namespaced
+  names:
+    kind: RolloutHealthCheck
+    plural: rollouthealthchecks
+    singular: rollouthealthcheck
+    shortNames:
+      - rhc
