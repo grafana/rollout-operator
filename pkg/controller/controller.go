@@ -556,7 +556,12 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	if sts.Annotations[config.RolloutPausedAnnotationKey] == config.RolloutPausedAnnotationValue {
 		level.Info(c.logger).Log("msg", "StatefulSet rollout is paused, skipping pod updates", "statefulset", sts.Name)
-		return false, nil
+		// Pausing pod updates must preserve the readiness gate for other zones.
+		hasNotReadyPods, err := c.hasStatefulSetNotReadyPods(sts)
+		if err != nil {
+			return true, fmt.Errorf("unable to check if StatefulSet %s has not ready pods: %w", sts.Name, err)
+		}
+		return hasNotReadyPods, nil
 	}
 
 	podsToUpdate, err := c.podsNotMatchingUpdateRevision(sts)
