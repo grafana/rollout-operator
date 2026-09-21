@@ -77,8 +77,7 @@ func (c *configObserver) start() error {
 		return err
 	}
 	if err := c.pdbInformer.SetWatchErrorHandler(func(_ *k8cache.Reflector, err error) {
-		c.metrics.ConfigObserverReady.Set(0)
-		level.Warn(c.logger).Log("msg", "zpdb config observer unavailable", "err", err)
+		level.Warn(c.logger).Log("msg", "zpdb config observer watch failed", "err", err)
 	}); err != nil {
 		return err
 	}
