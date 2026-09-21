@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
+	k8cache "k8s.io/client-go/tools/cache"
 
 	rolloutconfig "github.com/grafana/rollout-operator/pkg/config"
 )
@@ -149,6 +150,35 @@ func TestObserver_StartRetriesTransientErrors(t *testing.T) {
 				t.Fatal("startup did not recover after API recovery")
 			}
 		})
+	}
+}
+
+type watchErrorCapturingInformer struct {
+	k8cache.SharedIndexInformer
+	handler k8cache.WatchErrorHandler
+}
+
+func (i *watchErrorCapturingInformer) SetWatchErrorHandler(handler k8cache.WatchErrorHandler) error {
+	i.handler = handler
+	return i.SharedIndexInformer.SetWatchErrorHandler(handler)
+}
+
+func TestObserver_WatchErrorsPreserveReadiness(t *testing.T) {
+	_, observer := newConfigObserverTestCase()
+	informer := &watchErrorCapturingInformer{SharedIndexInformer: observer.pdbInformer}
+	observer.pdbInformer = informer
+	require.NoError(t, observer.start())
+	defer observer.stop()
+	require.True(t, observer.pdbInformer.HasSynced())
+	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigObserverReady))
+
+	for _, watchErr := range []error{
+		apierrors.NewResourceExpired("resource version expired"),
+		apierrors.NewServiceUnavailable("API temporarily unavailable"),
+	} {
+		informer.handler(nil, watchErr)
+		require.True(t, observer.pdbInformer.HasSynced())
+		require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigObserverReady))
 	}
 }
 
