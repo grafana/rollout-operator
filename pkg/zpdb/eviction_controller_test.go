@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	rolloutconfig "github.com/grafana/rollout-operator/pkg/config"
 )
@@ -501,6 +502,39 @@ func TestPodEviction_OwnerFallsBackToGetWhenExcludedFromList(t *testing.T) {
 	require.Equal(t, sts.Name, owner.Name)
 	require.Len(t, kubeClient.Actions(), 1)
 	require.True(t, kubeClient.Actions()[0].Matches("get", "statefulsets"))
+}
+
+func TestPodEviction_StatefulSetListFailurePreservesDecisionOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		maxUnavailable int
+		reason         string
+		status         int
+	}{
+		{name: "evictions disabled", maxUnavailable: 0, reason: "max unavailable = 0", status: 403},
+		{name: "evictions enabled", maxUnavailable: 1, reason: "minimum number of StatefulSets not found", status: 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sts := newEvictionControllerSts(statefulSetZoneA)
+			pod := newPod(testPodZoneA0, sts)
+			testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(tc.maxUnavailable, rolloutGroupValue), pod, sts)
+			defer testCtx.controller.Stop()
+			testCtx.kubeClient.PrependReactor("list", "statefulsets", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, fmt.Errorf("list failed")
+			})
+			testCtx.kubeClient.ClearActions()
+
+			testCtx.assertDenyResponse(t, tc.reason, tc.status)
+
+			var statefulSetActions []string
+			for _, action := range testCtx.kubeClient.Actions() {
+				if action.GetResource().Resource == "statefulsets" {
+					statefulSetActions = append(statefulSetActions, action.GetVerb())
+				}
+			}
+			require.Equal(t, []string{"list", "get"}, statefulSetActions)
+		})
+	}
 }
 
 // TestPodEviction_MultiZoneClassic tests a classic multi-zone topology.

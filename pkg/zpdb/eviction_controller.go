@@ -256,11 +256,10 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	defer lock.Unlock()
 
 	// A single live list keeps the owner and related zones consistent while saving an API request.
-	allStatefulSets, err := request.client.findRelatedStatefulSets(pod.Namespace, pdbConfig.selector)
-	if err != nil {
-		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find related stateful sets - a minimum of 2 StatefulSets is required", "err", err)
-		c.metrics.EvictionRequests.WithLabelValues("min-sts-not-found", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
-		return request.denyWithReason("minimum number of StatefulSets not found", http.StatusBadRequest)
+	allStatefulSets, listErr := request.client.findRelatedStatefulSets(pod.Namespace, pdbConfig.selector)
+	if listErr != nil {
+		// Preserve the owner and maxUnavailable checks when the zone list fails.
+		allStatefulSets = nil
 	}
 
 	var sts *appsv1.StatefulSet
@@ -287,6 +286,11 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		level.Info(request.log).Log("msg", logDenyMesg, "reason", "max unavailable = 0")
 		c.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", fmt.Sprintf("%d", http.StatusForbidden)).Inc()
 		return request.denyWithReason("max unavailable = 0", http.StatusForbidden)
+	}
+	if listErr != nil {
+		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find related stateful sets - a minimum of 2 StatefulSets is required", "err", listErr)
+		c.metrics.EvictionRequests.WithLabelValues("min-sts-not-found", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
+		return request.denyWithReason("minimum number of StatefulSets not found", http.StatusBadRequest)
 	}
 
 	// Assumption - each StatefulSet manages all the pods for a single zone. This list of StatefulSets covers all zones.
