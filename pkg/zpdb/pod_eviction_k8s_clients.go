@@ -33,15 +33,31 @@ func (a *k8sClient) podByName(namespace string, name string) (*corev1.Pod, error
 	}
 }
 
-// owner returns the StatefulSet which manages a pod or an error if the owner can not be found or is not a StatefulSet
-func (a *k8sClient) owner(pod *corev1.Pod) (*appsv1.StatefulSet, error) {
+func statefulSetOwnerReference(pod *corev1.Pod) (*metav1.OwnerReference, error) {
 	owner := metav1.GetControllerOf(pod)
 	if owner == nil {
 		return nil, errors.New("unable to find a StatefulSet pod owner")
 	} else if owner.Kind != "StatefulSet" {
 		return nil, fmt.Errorf("pod owner is not a StatefulSet - %s has owner %s (%s)", pod.Name, owner.Name, owner.Kind)
 	}
+	return owner, nil
+}
 
+// owner returns the StatefulSet which manages a pod or an error if the owner can not be found or is not a StatefulSet
+func (a *k8sClient) owner(pod *corev1.Pod, related *appsv1.StatefulSetList) (*appsv1.StatefulSet, error) {
+	owner, err := statefulSetOwnerReference(pod)
+	if err != nil {
+		return nil, err
+	}
+	if related != nil {
+		for i := range related.Items {
+			if related.Items[i].Name == owner.Name {
+				return &related.Items[i], nil
+			}
+		}
+	}
+
+	// The ZPDB selector may exclude the owner, so keep the live lookup for that case.
 	if sts, err := a.kubeClient.AppsV1().StatefulSets(pod.Namespace).Get(a.ctx, owner.Name, metav1.GetOptions{}); err != nil {
 		return nil, fmt.Errorf("unable to find StatefulSet %s by name: %w", owner.Name, err)
 	} else if sts == nil {

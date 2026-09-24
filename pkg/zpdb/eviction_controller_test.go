@@ -468,6 +468,41 @@ func TestPodEviction_SingleZoneMultiplePodsUpscale(t *testing.T) {
 	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("min-sts-not-found", "400")))
 }
 
+func TestPodEviction_ReusesStatefulSetListForOwner(t *testing.T) {
+	objects := make([]runtime.Object, 0, 6)
+	for _, name := range []string{statefulSetZoneA, statefulSetZoneB, statefulSetZoneC} {
+		sts := newEvictionControllerSts(name)
+		*sts.Spec.Replicas = 1
+		sts.Status.Replicas = 1
+		objects = append(objects, sts, newPod(name+"-0", sts))
+	}
+
+	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objects...)
+	defer testCtx.controller.Stop()
+	testCtx.assertAllowResponse(t)
+
+	var statefulSetActions []string
+	for _, action := range testCtx.kubeClient.Actions() {
+		if action.GetResource().Resource == "statefulsets" {
+			statefulSetActions = append(statefulSetActions, action.GetVerb())
+		}
+	}
+	require.Equal(t, []string{"list"}, statefulSetActions)
+}
+
+func TestPodEviction_OwnerFallsBackToGetWhenExcludedFromList(t *testing.T) {
+	sts := newEvictionControllerSts(statefulSetZoneA)
+	pod := newPod(testPodZoneA0, sts)
+	kubeClient := fake.NewClientset(sts)
+	client := k8sClient{ctx: t.Context(), kubeClient: kubeClient}
+
+	owner, err := client.owner(pod, &appsv1.StatefulSetList{})
+	require.NoError(t, err)
+	require.Equal(t, sts.Name, owner.Name)
+	require.Len(t, kubeClient.Actions(), 1)
+	require.True(t, kubeClient.Actions()[0].Matches("get", "statefulsets"))
+}
+
 // TestPodEviction_MultiZoneClassic tests a classic multi-zone topology.
 // There are 3 StatefulSets (zone a, b, c) and each has 3 pods.
 func TestPodEviction_MultiZoneClassic(t *testing.T) {
