@@ -300,6 +300,18 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		c.metrics.EvictionRequests.WithLabelValues("min-sts-not-found", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
 		return request.denyWithReason("minimum number of StatefulSets not found", http.StatusBadRequest)
 	}
+	ownerInGroup := false
+	for i := range allStatefulSets.Items {
+		if allStatefulSets.Items[i].UID == sts.UID {
+			ownerInGroup = true
+			break
+		}
+	}
+	if !ownerInGroup {
+		level.Error(request.log).Log("msg", logDenyMesg, "reason", "owner StatefulSet is not in the related StatefulSets", "sts", sts.Name)
+		c.metrics.EvictionRequests.WithLabelValues("owner-sts-not-in-group", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
+		return request.denyWithReason("owner StatefulSet is not in the related StatefulSets", http.StatusBadRequest)
+	}
 
 	// this is the partition of the pod being evicted - for classic zones the partition will be an empty string
 	partition, err := pdbConfig.podPartition(pod)

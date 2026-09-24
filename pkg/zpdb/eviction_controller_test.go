@@ -504,6 +504,26 @@ func TestPodEviction_OwnerFallsBackToGetWhenExcludedFromList(t *testing.T) {
 	require.True(t, kubeClient.Actions()[0].Matches("get", "statefulsets"))
 }
 
+func TestPodEviction_DeniesWhenOwnerIsExcludedFromRelatedStatefulSets(t *testing.T) {
+	owner := newEvictionControllerSts(statefulSetZoneA)
+	delete(owner.Labels, rolloutconfig.RolloutGroupLabelKey)
+	pod := newPod(testPodZoneA0, owner)
+	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), pod, owner, newEvictionControllerSts(statefulSetZoneB), newEvictionControllerSts(statefulSetZoneC))
+	defer testCtx.controller.Stop()
+	testCtx.kubeClient.ClearActions()
+
+	testCtx.assertDenyResponse(t, "owner StatefulSet is not in the related StatefulSets", 400)
+	require.Equal(t, float64(1), testutil.ToFloat64(testCtx.controller.metrics.EvictionRequests.WithLabelValues("owner-sts-not-in-group", "400")))
+
+	var statefulSetActions []string
+	for _, action := range testCtx.kubeClient.Actions() {
+		if action.GetResource().Resource == "statefulsets" {
+			statefulSetActions = append(statefulSetActions, action.GetVerb())
+		}
+	}
+	require.Equal(t, []string{"list", "get"}, statefulSetActions)
+}
+
 func TestPodEviction_StatefulSetListFailurePreservesDecisionOrder(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
