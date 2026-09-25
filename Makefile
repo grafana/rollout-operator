@@ -51,6 +51,10 @@ help: ## Display this help and any documented user-facing targets
 rollout-operator: $(GO_FILES) ## Build the rollout-operator binary
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' ./cmd/rollout-operator
 
+.PHONY: status-ui-preview
+status-ui-preview: ## Serve the status UI with demo data on 127.0.0.1:8080
+	go run ./cmd/status-ui-preview
+
 .PHONY: rollout-operator-boringcrypto
 rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary with boringcrypto
 	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -tags netgo ./cmd/rollout-operator

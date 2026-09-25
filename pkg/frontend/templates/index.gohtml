@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/ui/status/static/status.css">
+</head>
+<body>
+  <header class="page-header">
+    <h1>{{.Title}}</h1>
+    {{if .Namespace}}
+    <p class="meta">Namespace <code>{{.Namespace}}</code>{{if not .ObservedAt.IsZero}} · Observed {{.ObservedAt.Format "2006-01-02 15:04:05 UTC"}}{{end}}</p>
+    {{end}}
+    <p class="meta read-only">Read-only</p>
+  </header>
+  <main>
+    {{if .Error}}
+    <div class="banner {{if .Unavailable}}banner-warn{{else}}banner-error{{end}}">{{.Error}}</div>
+    {{end}}
+
+    {{if and (not .Error) .Empty}}
+    <div class="banner banner-info">No StatefulSets with a <code>rollout-group</code> label were found in this namespace.</div>
+    {{end}}
+
+    {{range .Groups}}
+    <details class="group" open>
+      <summary>
+        <span class="group-name">{{.Name}}</span>
+        <span class="phase {{phaseClass .Phase}}">{{.Phase}}</span>
+        {{if .Reason}}<span class="reason">{{.Reason}}</span>{{end}}
+      </summary>
+      <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>StatefulSet</th>
+            <th>Phase</th>
+            <th>Ready</th>
+            <th>Updated</th>
+            <th>Revisions</th>
+            <th>Config</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Members}}
+          <tr>
+            <td><code>{{.Name}}</code></td>
+            <td><span class="phase {{phaseClass .Phase}}">{{.Phase}}</span></td>
+            <td>{{.ReadyReplicas}}/{{.DesiredReplicas}}</td>
+            <td>{{.UpdatedPods}}/{{.TotalPods}}</td>
+            <td class="revisions">
+              <div>current: <code>{{.CurrentRevision}}</code></div>
+              <div>update: <code>{{.UpdateRevision}}</code></div>
+            </td>
+            <td>
+              <a class="config-link" href="/ui/status/statefulset/{{.Name}}">View</a>
+            </td>
+            <td>{{.Reason}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      </div>
+    </details>
+    {{end}}
+  </main>
+</body>
+</html>
