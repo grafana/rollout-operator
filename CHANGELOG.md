@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [FEATURE] Add opt-in phased Deployment rollouts that wait for canary Deployments to complete before unpausing the main Deployment. #461
 * [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
 
 ## v0.40.0
