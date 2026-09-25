@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [FEATURE] Gate StatefulSet rollouts between zones on configurable Prometheus health checks through the RolloutHealthCheck resource. #469
 * [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
 
 ## v0.40.0
