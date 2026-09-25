@@ -61,4 +61,40 @@ const (
 	// StatefulSets in the same rollout group to continue rolling out.
 	RolloutPausedAnnotationKey   = "grafana.com/rollout-paused"
 	RolloutPausedAnnotationValue = "true"
+
+	// RolloutHealthCheckAnnotationKey references a namespaced RolloutHealthCheck CR used to gate
+	// progression between zones after the first zone has rolled.
+	RolloutHealthCheckAnnotationKey = "grafana.com/rollout-health-check"
+
+	// RolloutHealthCheckStartedAtAnnotationKey stores "<updateRevision>=<RFC3339>" marking when
+	// the operator first observed pods needing an update for that revision. Used as the baseline
+	// evaluation timestamp (T0) for health checks.
+	RolloutHealthCheckStartedAtAnnotationKey = "grafana.com/rollout-health-check-started-at"
+
+	// RolloutPhasedLabelKey opts a Deployment into phased (canary-gated) rollouts.
+	RolloutPhasedLabelKey   = "grafana.com/rollout-phased"
+	RolloutPhasedLabelValue = "true"
+
+	// RolloutCanaryAnnotationKey names one or more canary Deployments (comma-separated) that must
+	// finish rolling before this Deployment is allowed to proceed.
+	RolloutCanaryAnnotationKey = "grafana.com/rollout-canary"
+
+	// RolloutRevisionAnnotationKey is a shared revision stamp set by Git/jsonnet. The operator
+	// only gates when this value changes, so zone-local template differences are ignored.
+	RolloutRevisionAnnotationKey = "grafana.com/rollout-revision"
+
+	// RolloutBypassUntilAnnotationKey is an RFC3339 timestamp. While now is before that time,
+	// the operator skips pausing and unpauses an already-gated Deployment.
+	RolloutBypassUntilAnnotationKey = "grafana.com/rollout-bypass-until"
+
+	// Operator-owned state annotations written by the webhook and phased Deployment controller.
+	RolloutDependencyPhaseAnnotationKey       = "grafana.com/rollout-dependency-phase"
+	RolloutDependencyRevisionAnnotationKey    = "grafana.com/rollout-dependency-revision"
+	RolloutDependencyReasonAnnotationKey      = "grafana.com/rollout-dependency-reason"
+	RolloutHadPausedAnnotationKey             = "grafana.com/rollout-had-paused"
+	RolloutCanariesReadyRevisionAnnotationKey = "grafana.com/rollout-canaries-ready-revision"
+
+	// Dependency phase values.
+	RolloutDependencyPhaseWaiting  = "waiting"
+	RolloutDependencyPhaseComplete = "complete"
 )
