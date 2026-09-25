@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [FEATURE] Gate phased Deployment rollout progression on canary readiness and RolloutHealthCheck results. #478
 * [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
 
 ## v0.40.0
