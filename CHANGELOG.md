@@ -3,6 +3,7 @@
 ## main / unreleased
 
 * [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
+* [FEATURE] Added Kubernetes Lease leader election so only one rollout-operator instance runs controllers and admission webhooks.
 
 ## v0.40.0
 

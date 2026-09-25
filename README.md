@@ -187,7 +187,7 @@ Offers a `ValidatingAdmissionWebhook` to validate `ZoneAwarePodDisruptionBudget`
 
 ### RBAC
 
-When running the `rollout-operator` as a pod, it needs a Role with at least the following privileges:
+When running the `rollout-operator` as a pod, it uses a Kubernetes Lease to ensure only one instance is active. It needs a Role with at least the following privileges:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -215,6 +215,14 @@ rules:
   resources:
   - statefulsets/status
   verbs:
+  - update
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - create
   - update
 - apiGroups:
   - rollout-operator.grafana.com
