@@ -245,10 +245,25 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		c.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", fmt.Sprintf("%d", http.StatusOK)).Inc()
 		return request.allow()
 	}
+	if _, err := statefulSetOwnerReference(pod); err != nil {
+		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find pod owner", "err", err)
+		c.metrics.EvictionRequests.WithLabelValues("sts-no-found", fmt.Sprintf("%d", http.StatusInternalServerError)).Inc()
+		return request.denyWithReason(err.Error(), http.StatusInternalServerError)
+	}
 
-	// get the StatefulSet who manages this pod
+	lock := c.findLock(pdbConfig.name)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// A single live list keeps the owner and related zones consistent while saving an API request.
+	allStatefulSets, listErr := request.client.findRelatedStatefulSets(pod.Namespace, pdbConfig.selector)
+	if listErr != nil {
+		// Preserve the owner and maxUnavailable checks when the zone list fails.
+		allStatefulSets = nil
+	}
+
 	var sts *appsv1.StatefulSet
-	if sts, err = request.client.owner(pod); err != nil {
+	if sts, err = request.client.owner(pod, allStatefulSets); err != nil {
 		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find pod owner", "err", err)
 		c.metrics.EvictionRequests.WithLabelValues("sts-no-found", fmt.Sprintf("%d", http.StatusInternalServerError)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusInternalServerError)
@@ -256,10 +271,6 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 
 	// ie ingester-zone-a
 	request.log.SetSpanAndLogTag("owner", sts.Name)
-
-	lock := c.findLock(pdbConfig.name)
-	lock.Lock()
-	defer lock.Unlock()
 
 	// the number of allowed unavailable pods in other zones.
 	maxUnavailable := pdbConfig.maxUnavailablePods(sts)
@@ -276,19 +287,30 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		c.metrics.EvictionRequests.WithLabelValues("max-unavailable-0", fmt.Sprintf("%d", http.StatusForbidden)).Inc()
 		return request.denyWithReason("max unavailable = 0", http.StatusForbidden)
 	}
-
-	// Find the all StatefulSets which span all zones.
-	// Assumption - each StatefulSet manages all the pods for a single zone. This list of StatefulSets covers all zones.
-	// During a migration it may be possible to break this assumption, but during a migration the maxUnavailable will be set to 0 and the eviction request will be denied.
-	allStatefulSets, err := request.client.findRelatedStatefulSets(sts.Namespace, pdbConfig.selector)
-	if err != nil || allStatefulSets == nil || len(allStatefulSets.Items) <= 1 {
-		if err != nil {
-			level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find related stateful sets - a minimum of 2 StatefulSets is required", "err", err)
-		} else {
-			level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find related stateful sets - a minimum of 2 StatefulSets is required")
-		}
+	if listErr != nil {
+		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find related stateful sets - a minimum of 2 StatefulSets is required", "err", listErr)
 		c.metrics.EvictionRequests.WithLabelValues("min-sts-not-found", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
 		return request.denyWithReason("minimum number of StatefulSets not found", http.StatusBadRequest)
+	}
+
+	// Assumption - each StatefulSet manages all the pods for a single zone. This list of StatefulSets covers all zones.
+	// During a migration it may be possible to break this assumption, but during a migration the maxUnavailable will be set to 0 and the eviction request will be denied.
+	if allStatefulSets == nil || len(allStatefulSets.Items) <= 1 {
+		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find related stateful sets - a minimum of 2 StatefulSets is required")
+		c.metrics.EvictionRequests.WithLabelValues("min-sts-not-found", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
+		return request.denyWithReason("minimum number of StatefulSets not found", http.StatusBadRequest)
+	}
+	ownerInGroup := false
+	for i := range allStatefulSets.Items {
+		if allStatefulSets.Items[i].UID == sts.UID {
+			ownerInGroup = true
+			break
+		}
+	}
+	if !ownerInGroup {
+		level.Error(request.log).Log("msg", logDenyMesg, "reason", "owner StatefulSet is not in the related StatefulSets", "sts", sts.Name)
+		c.metrics.EvictionRequests.WithLabelValues("owner-sts-not-in-group", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
+		return request.denyWithReason("owner StatefulSet is not in the related StatefulSets", http.StatusBadRequest)
 	}
 
 	// this is the partition of the pod being evicted - for classic zones the partition will be an empty string
