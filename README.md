@@ -156,6 +156,141 @@ spec:
 
 To resume normal rollout behavior, remove the annotation or set it to any value other than `true`.
 
+## Health-check driven rollout gating
+
+After the first zone in a rollout group finishes updating, the operator can evaluate cell-level health before starting the next zone. Pod readiness remains the within-zone gate; health checks are an additional between-zone gate.
+
+Attach a check to StatefulSets in the group:
+
+```yaml
+metadata:
+  annotations:
+    grafana.com/rollout-health-check: ingester-cell-health
+```
+
+Define the reusable configuration as a namespaced `RolloutHealthCheck`:
+
+```yaml
+apiVersion: rollout-operator.grafana.com/v1
+kind: RolloutHealthCheck
+metadata:
+  name: ingester-cell-health
+spec:
+  selector:
+    matchLabels:
+      rollout-group: ingester
+  prometheusURL: http://critical-prometheus.critical-o11y.svc.cluster.local.:9090/critical-prometheus
+  checks:
+    - name: request-error-rate
+      currentRange: 5m
+      baselineRange: 10m
+      errorPolicy:
+        retryInterval: 10s
+        maxAttempts: 3
+        exhaustedAction: Pause   # Pause | Warn | Disabled
+      failurePolicy:
+        reevaluationInterval: 2m30s
+        consecutiveFailures: 3
+        consecutiveSuccesses: 1
+        exceededAction: Pause   # Pause | Warn | Disabled
+      noDataPolicy:
+        retryInterval: 30s
+        maxAttempts: 3
+        exhaustedAction: Pause
+      # ${targetMatchers} is replaced with namespace, zone (pod "name" label), and pod matchers
+      # for candidate or stable pods. ${range} is replaced with currentRange or baselineRange.
+      query: |
+        scalar(
+          sum(
+            rate(
+              cortex_request_duration_seconds_count{
+                ${targetMatchers},
+                status_code=~"5..",
+                route!~"ready|debug_pprof"
+              }[${range}]
+            )
+          )
+          or vector(0)
+        )
+      # ${current} and ${baseline} are the scalar results of the query above.
+      # Must return scalar 1 (pass) or 0 (fail).
+      successQuery: |
+        (
+          (${current} < bool 1)
+          +
+          (${current} < bool (2 * ${baseline}))
+        ) > bool 0
+```
+
+Behavior:
+
+- The first zone always rolls without a health evaluation (minimum blast radius is one zone).
+- Before starting a subsequent zone, each enabled check runs against candidate pods (already updated) and stable pods (not yet updated).
+- Query errors use `errorPolicy` (retries spaced by `retryInterval` across reconciles, then `exhaustedAction`). No-data uses `noDataPolicy` the same way. Defaults pause when attempts are exhausted.
+- Failed success queries accumulate under `failurePolicy`. Progression pauses until `consecutiveSuccesses` pass results are observed (default 1). After `consecutiveFailures`, `exceededAction` applies (`Pause` by default). Re-queries that update those counters are spaced by `reevaluationInterval`.
+- `Warn` emits a warning event/log and continues. `Disabled` (or `disabled: true` on a check) skips that check.
+- If the annotation references a missing `RolloutHealthCheck`, or the check's selector does not match the StatefulSet, the rollout proceeds as today and the operator emits an error log, a Kubernetes event, and increments `rollout_operator_health_check_misconfigured_total`.
+- Remove the annotation (or set individual checks to `Disabled`) to bypass the gate. The operator never reverts workload versions.
+
+The operator stores `grafana.com/rollout-health-check-started-at: <updateRevision>=<RFC3339>` on StatefulSets when it first observes pods needing that revision; the earliest timestamp in the group is used as the baseline evaluation time.
+
+Create/update of `RolloutHealthCheck` objects is validated by the `/admission/rollout-health-check-validation` webhook when webhooks are enabled.
+
+## Phased Deployment rollouts
+
+Opt-in sequencing for Kubernetes Deployments (proposal 4c). A main Deployment stays paused until its canary Deployment(s) finish rolling and become ready. Readiness is latched for the current shared revision once every canary is fully rolled, so routine pod evictions or autoscaling do not return an active gate to its initial readiness check. A canary must continue to report the target revision. Batches are explicit Deployments in Git; the operator only toggles `spec.paused` and never manages ReplicaSets. Prometheus health gating is a separate feature (proposal 4b) and is not part of this gate.
+
+### Enablement
+
+Label opted-in Deployments and stamp a shared revision from Git/jsonnet. Point the main Deployment at its canary with `grafana.com/rollout-canary` (comma-separated for coordinated groups):
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query-frontend-zone-a
+  labels:
+    grafana.com/rollout-phased: "true"
+  annotations:
+    grafana.com/rollout-revision: "r388"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query-frontend-zone-b
+  labels:
+    grafana.com/rollout-phased: "true"
+  annotations:
+    grafana.com/rollout-canary: query-frontend-zone-a
+    grafana.com/rollout-revision: "r388"
+```
+
+Coordinated canary groups (for example querier zone-b waiting on both querier and query-frontend zone-a):
+
+```yaml
+metadata:
+  annotations:
+    grafana.com/rollout-canary: querier-zone-a,query-frontend-zone-a
+    grafana.com/rollout-revision: "r388"
+```
+
+The mutating webhook `/admission/phased-deployment` (scoped to `grafana.com/rollout-phased: "true"`) pauses the main Deployment when the revision changes and re-applies `spec.paused: true` on later applies while the gate is active (including Flux server-side apply).
+
+Add `grafana.com/rollout-health-check` to a gated Deployment to evaluate the referenced `RolloutHealthCheck` after its canaries are fully rolled out and before it is unpaused. Canary pods are evaluated as the candidate and the paused Deployment's pods as the stable baseline. The `RolloutHealthCheck` selector must match the gated Deployment's labels.
+
+Disable by removing `grafana.com/rollout-canary` (the webhook clears gate state and restores the prior pause intent) and optionally the `grafana.com/rollout-phased` label. If you remove only the label while the Deployment is still paused by the operator, unpause it manually.
+
+### Incident bypass
+
+During an incident, apply a time-limited bypass so the Deployment uses native Kubernetes rolling updates:
+
+```bash
+kubectl annotate deployment query-frontend-zone-b \
+  grafana.com/rollout-bypass-until="2026-07-24T16:00:00Z" --overwrite
+```
+
+While the bypass is active, the operator does not pause new updates and unpauses an already-gated Deployment. It emits a Warning event (`RolloutBypass`) and increments `rollout_operator_phased_deployment_bypass_total`. Existing readiness checks and the native Deployment strategy still apply.
+
 ## Operations
 
 ### HTTP endpoints
@@ -174,7 +309,11 @@ Prometheus metrics endpoint.
 
 #### `/admission/no-downscale`
 
-Offers a `ValidatingAdmissionWebhook` that rejects the requests that decrease the number of replicas in objects labeled as `grafana.com/no-downscale: true`. See [Webhooks](#webhooks) section below. 
+Offers a `ValidatingAdmissionWebhook` that rejects the requests that decrease the number of replicas in objects labeled as `grafana.com/no-downscale: true`. See [Webhooks](#webhooks) section below.
+
+#### `/admission/phased-deployment`
+
+Offers a `MutatingAdmissionWebhook` that pauses opted-in main Deployments while a canary gate is active. See [Phased Deployment rollouts](#phased-deployment-rollouts).
 
 #### `/pods/eviction`
 
@@ -183,6 +322,10 @@ Offers a `ValidatingAdmissionWebhook` which can apply a `ZoneAwarePodDisruptionB
 #### `/admission/zpdb-validation`
 
 Offers a `ValidatingAdmissionWebhook` to validate `ZoneAwarePodDisruptionBudget` configuration files and will reject any misconfigured files.
+
+#### `/admission/rollout-health-check-validation`
+
+Offers a `ValidatingAdmissionWebhook` to validate `RolloutHealthCheck` configuration and will reject misconfigured objects.
 
 
 ### RBAC
@@ -216,6 +359,21 @@ rules:
   - statefulsets/status
   verbs:
   - update
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - list
+  - get
+  - watch
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
 - apiGroups:
   - rollout-operator.grafana.com
   resources:
