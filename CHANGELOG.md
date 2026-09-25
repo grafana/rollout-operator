@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
+
 ## v0.40.0
 
 * [CHANGE] ZPDB cross-zone eviction delays use the Pod Ready condition's `lastTransitionTime` instead of the `grafana.com/ready-time` annotation, eliminating annotation PATCH requests and measuring the delay from Kubernetes readiness transitions. The `-zpdb.pod-ready-annotation-patch-timeout` flag is deprecated, has no effect, and logs a warning when supplied. #498

@@ -789,6 +789,54 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
 		},
+		"paused partially updated not-ready zone blocks other zones": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2), withAnnotations(map[string]string{
+					config.RolloutPausedAnnotationKey: config.RolloutPausedAnnotationValue,
+				})),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash, withNotReady()),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+		},
+		"paused fully updated not-ready zone blocks other zones": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withReplicas(3, 2), withAnnotations(map[string]string{
+					config.RolloutPausedAnnotationKey: config.RolloutPausedAnnotationValue,
+				})),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash, withNotReady()),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+		},
+		"paused later zone with stale ready count blocks earlier zone": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withPrevRevision(), withReplicas(3, 3), withAnnotations(map[string]string{
+					config.RolloutPausedAnnotationKey: config.RolloutPausedAnnotationValue,
+				})),
+				mockStatefulSet("ingester-zone-a", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testLastRevisionHash, withNotReady()),
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+			},
+		},
 		"should roll out normally if rollout-paused annotation is not set to true": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision(), withAnnotations(map[string]string{

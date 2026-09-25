@@ -137,7 +137,7 @@ To resume normal behavior, remove the annotation.
 
 ## Pausing rollouts
 
-The `grafana.com/rollout-paused` annotation allows you to temporarily prevent the operator from deleting pods in a StatefulSet to roll out changes. While paused, the operator skips the StatefulSet during reconciliation and moves on to the next one in the rollout group, so other StatefulSets in the same group can continue rolling out normally.
+The `grafana.com/rollout-paused` annotation allows you to temporarily prevent the operator from deleting pods in a StatefulSet to roll out changes. While paused, the operator skips pod updates for that StatefulSet. If all its pods are Ready, other StatefulSets in the rollout group can continue rolling out. If it has any not-Ready or missing pods, it blocks pod updates in the other StatefulSets until it becomes Ready, even if all its existing pods are already on the target revision.
 
 To pause rollouts for a StatefulSet, add the annotation with the value `true`:
 

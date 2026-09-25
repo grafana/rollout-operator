@@ -367,6 +367,14 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	}
 
 	for _, sts := range sets {
+		if sts.Annotations[config.RolloutPausedAnnotationKey] == config.RolloutPausedAnnotationValue {
+			level.Info(c.logger).Log("msg", "StatefulSet rollout is paused, skipping pod updates", "statefulset", sts.Name)
+			if len(notReadySets) == 1 && notReadySets[0] == sts {
+				return nil
+			}
+			continue
+		}
+
 		ongoing, err := c.updateStatefulSetPods(ctx, sts)
 		if err != nil {
 			// Do not continue with other StatefulSets because this StatefulSet
@@ -553,11 +561,6 @@ func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error)
 
 func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.StatefulSet) (bool, error) {
 	level.Debug(c.logger).Log("msg", "reconciling StatefulSet", "statefulset", sts.Name)
-
-	if sts.Annotations[config.RolloutPausedAnnotationKey] == config.RolloutPausedAnnotationValue {
-		level.Info(c.logger).Log("msg", "StatefulSet rollout is paused, skipping pod updates", "statefulset", sts.Name)
-		return false, nil
-	}
 
 	podsToUpdate, err := c.podsNotMatchingUpdateRevision(sts)
 	if err != nil {
