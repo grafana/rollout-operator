@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Add an opt-in ReplicaTemplate watch so replica changes trigger scaling reconciliation without waiting for the informer resync. #503
 * [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
 
 ## v0.40.0
