@@ -178,6 +178,9 @@ func (c *RolloutController) memberStatus(sts *v1.StatefulSet) (status.Member, er
 	case hasNotReady:
 		member.Phase = status.PhaseWaiting
 		member.Reason = "waiting for pods to become Ready"
+	case desired != sts.Status.ReadyReplicas:
+		member.Phase = status.PhaseWaiting
+		member.Reason = "waiting for replicas to reach the desired count"
 	case sts.Status.CurrentRevision != "" && updateRev != "" && sts.Status.CurrentRevision != updateRev:
 		// Pods match the update revision and are ready; currentRevision lag is transient.
 		member.Phase = status.PhaseComplete
@@ -203,19 +206,28 @@ func statefulSetHasNotReadyPods(sts *v1.StatefulSet, pods []*corev1.Pod) bool {
 
 const multipleNotReadyReason = "multiple StatefulSets have not-Ready pods"
 
-// applyZoneGating mirrors reconcile ordering: only one StatefulSet is actively
-// updated at a time. Multi not-ready (including paused) blocks everything; a sole
-// not-ready paused set does not, because updateStatefulSetPods skips it.
+// applyZoneGating mirrors reconcile ordering so the displayed active zone is
+// the one the controller can actually update.
 func applyZoneGating(members []status.Member) {
-	var notReady, notReadyActive []string
+	for _, m := range members {
+		if m.Phase != status.PhaseDegraded {
+			continue
+		}
+		for i := range members {
+			if members[i].Phase == status.PhaseProgressing {
+				members[i].Phase = status.PhaseWaiting
+				members[i].Reason = fmt.Sprintf("rollout blocked by %s", m.Name)
+			}
+		}
+		return
+	}
+
+	var notReady []string
 	for _, m := range members {
 		if !m.NotReady {
 			continue
 		}
 		notReady = append(notReady, m.Name)
-		if !m.Paused {
-			notReadyActive = append(notReadyActive, m.Name)
-		}
 	}
 	if len(notReady) > 1 {
 		for i := range members {
@@ -226,8 +238,8 @@ func applyZoneGating(members []status.Member) {
 		}
 		return
 	}
-	if len(notReadyActive) == 1 {
-		blocker := notReadyActive[0]
+	if len(notReady) == 1 {
+		blocker := notReady[0]
 		for i := range members {
 			m := &members[i]
 			if m.Name == blocker {
@@ -248,6 +260,10 @@ func applyZoneGating(members []status.Member) {
 		case status.PhaseComplete, status.PhaseDegraded, status.PhasePaused:
 			continue
 		case status.PhaseProgressing, status.PhaseWaiting:
+			// Spec changes can outpace StatefulSet status without gating another zone.
+			if m.Phase == status.PhaseWaiting && !m.NotReady {
+				continue
+			}
 			if blocker == "" {
 				blocker = m.Name
 				continue

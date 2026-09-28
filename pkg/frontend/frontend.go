@@ -32,6 +32,7 @@ func New(reader status.Reader) (*Frontend, error) {
 
 	tmpl, err := template.New("").Funcs(template.FuncMap{
 		"phaseClass": phaseClass,
+		"basePath":   func() string { return BasePath },
 	}).ParseFS(embeddedFS, "templates/*.gohtml")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}}</title>
-  <link rel="stylesheet" href="/ui/status/static/status.css">
+  <link rel="stylesheet" href="{{basePath}}/static/status.css">
 </head>
 <body>
   <header class="page-header">
@@ -55,7 +55,7 @@
               <div>update: <code>{{.UpdateRevision}}</code></div>
             </td>
             <td>
-              <a class="config-link" href="/ui/status/statefulset/{{.Name}}">View</a>
+              <a class="config-link" href="{{basePath}}/statefulset/{{.Name}}">View</a>
             </td>
             <td>{{.Reason}}</td>
           </tr>

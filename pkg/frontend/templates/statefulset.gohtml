@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}}</title>
-  <link rel="stylesheet" href="/ui/status/static/status.css">
+  <link rel="stylesheet" href="{{basePath}}/static/status.css">
 </head>
 <body>
   <header class="page-header">
-    <a class="back-link" href="/ui/status/">← Rollout status</a>
+    <a class="back-link" href="{{basePath}}/">← Rollout status</a>
     <h1>{{.Title}}</h1>
     {{if .Name}}<p class="statefulset-name"><code>{{.Name}}</code></p>{{end}}
     {{if .Namespace}}
