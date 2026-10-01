@@ -117,6 +117,14 @@ func getCustomScaleResourceForStatefulset(ctx context.Context, sts *appsv1.State
 	reference := fmt.Sprintf("%s/%s", kind, name)
 
 	mappings, err := restMapper.RESTMappings(targetGK)
+	if err != nil && targetGK == replicaTemplateGroupKind && targetGV.Version == replicaTemplateGVR.Version {
+		mappings = []*meta.RESTMapping{{
+			Resource:         replicaTemplateGVR,
+			GroupVersionKind: targetGV.WithKind(kind),
+			Scope:            meta.RESTScopeNamespace,
+		}}
+		err = nil
+	}
 	if err != nil {
 		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("unable to find custom resource mapping for reference resource %s: %v", reference, err)
 	}
