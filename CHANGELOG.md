@@ -2,7 +2,10 @@
 
 ## main / unreleased
 
+## v0.28.10
+
 * [ENHANCEMENT] Update Go to `1.27`. #495
+* [ENHANCEMENT] Updated dependencies to resolve CVEs. #518
 
 ## v0.28.9
 
