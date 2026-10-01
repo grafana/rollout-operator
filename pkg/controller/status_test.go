@@ -624,7 +624,7 @@ func TestRolloutController_Snapshot(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			objs := append(append([]runtime.Object{}, tc.statefulSets...), tc.pods...)
 			kubeClient := fake.NewClientset(objs...)
-			c := NewRolloutController(kubeClient, nil, nil, nil, testClusterDomain, testNamespace, NewPodInformerFactory(kubeClient, testNamespace), nil, 5*time.Second, prometheus.NewPedanticRegistry(), log.NewNopLogger(), &mockEvictionController{})
+			c := NewRolloutController(kubeClient, nil, nil, nil, nil, testClusterDomain, testNamespace, NewPodInformerFactory(kubeClient, testNamespace), nil, 5*time.Second, prometheus.NewPedanticRegistry(), log.NewNopLogger(), &mockEvictionController{})
 			require.NoError(t, c.Init())
 			defer c.Stop()
 
