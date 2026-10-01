@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	v1 "k8s.io/api/apps/v1"
@@ -209,14 +210,18 @@ const multipleNotReadyReason = "multiple StatefulSets have not-Ready pods"
 // applyZoneGating mirrors reconcile ordering so the displayed active zone is
 // the one the controller can actually update.
 func applyZoneGating(members []status.Member) {
+	var degraded []string
 	for _, m := range members {
-		if m.Phase != status.PhaseDegraded {
-			continue
+		if m.Phase == status.PhaseDegraded {
+			degraded = append(degraded, m.Name)
 		}
+	}
+	if len(degraded) > 0 {
+		reason := fmt.Sprintf("rollout blocked by %s", strings.Join(degraded, ", "))
 		for i := range members {
 			if members[i].Phase == status.PhaseProgressing {
 				members[i].Phase = status.PhaseWaiting
-				members[i].Reason = fmt.Sprintf("rollout blocked by %s", m.Name)
+				members[i].Reason = reason
 			}
 		}
 		return

@@ -287,6 +287,53 @@ func TestRolloutController_Snapshot(t *testing.T) {
 				},
 			}},
 		},
+		"multiple invalid update strategies name every blocker": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) {
+					sts.Spec.UpdateStrategy.Type = v1.RollingUpdateStatefulSetStrategyType
+				}),
+				mockStatefulSet("ingester-zone-b", func(sts *v1.StatefulSet) {
+					sts.Spec.UpdateStrategy.Type = v1.RollingUpdateStatefulSetStrategyType
+				}),
+				mockStatefulSet("ingester-zone-c", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-c-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-c-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-c-2", testPrevRevisionHash),
+			},
+			wantGroups: []status.Group{{
+				Name:   "ingester",
+				Phase:  status.PhaseDegraded,
+				Reason: "update strategy is RollingUpdate; OnDelete is required",
+				Members: []status.Member{
+					{
+						Name: "ingester-zone-a", DesiredReplicas: 3, ReadyReplicas: 3,
+						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 3, TotalPods: 3, UpdateStrategy: string(v1.RollingUpdateStatefulSetStrategyType),
+						Phase: status.PhaseDegraded, Reason: "update strategy is RollingUpdate; OnDelete is required",
+					},
+					{
+						Name: "ingester-zone-b", DesiredReplicas: 3, ReadyReplicas: 3,
+						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 3, TotalPods: 3, UpdateStrategy: string(v1.RollingUpdateStatefulSetStrategyType),
+						Phase: status.PhaseDegraded, Reason: "update strategy is RollingUpdate; OnDelete is required",
+					},
+					{
+						Name: "ingester-zone-c", DesiredReplicas: 3, ReadyReplicas: 3,
+						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 0, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase: status.PhaseWaiting, Reason: "rollout blocked by ingester-zone-a, ingester-zone-b",
+					},
+				},
+			}},
+		},
 		"degraded takes priority over multi not-ready wait": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withReplicas(3, 2), func(sts *v1.StatefulSet) {
