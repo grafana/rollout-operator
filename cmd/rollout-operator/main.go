@@ -337,7 +337,7 @@ func main() {
 	}()
 
 	err = runWithLeaderElection(ctx, coreKubeClient, cfg, identity, logger, ready, func(leaderCtx context.Context) {
-		runOperator(leaderCtx, cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, dynamicClient, restMapper, scaleClient, restart, reg, metrics, zpdbMetrics, ready)
+		runOperator(leaderCtx, cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, dynamicClient, restMapper, scaleClient, restart, reg, metrics, zpdbMetrics, ready, statusReader)
 	})
 	if err != nil {
 		fatal(err)
@@ -359,6 +359,7 @@ func runOperator(
 	metrics *metrics,
 	zpdbMetrics *zpdb.Metrics,
 	ready *atomic.Bool,
+	statusReader *status.Holder,
 ) {
 	// watches for validating webhooks being added - this is only started if the TLS server is started
 	webhookObserver := tlscert.NewWebhookObserver(coreKubeClient, cfg.kubeNamespace, logger)
@@ -408,6 +409,7 @@ func runOperator(
 	go func() {
 		<-ctx.Done()
 		ready.Store(false)
+		statusReader.Set(nil)
 		c.Stop()
 		evictionController.Stop()
 		webhookObserver.Stop()
