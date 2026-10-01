@@ -2,6 +2,7 @@
 
 ## main / unreleased
 
+* [FEATURE] Add opt-in phased Deployment rollouts that wait for canary Deployments to complete before unpausing the main Deployment. #461
 * [ENHANCEMENT] Reuse the related StatefulSet list to resolve a pod's owner during ZPDB eviction, avoiding a redundant Kubernetes API GET on the common path. #516
 * [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
 * [FEATURE] Add a read-only `/ui/status` HTML page for StatefulSet rollout group progress (phase, ready replicas, revisions, updated pods). #473

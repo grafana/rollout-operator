@@ -61,6 +61,12 @@ deny contains msg if {
 
 deny contains msg if {
     has_webhooks_deployment
+    not has_phased_deployment_webhook
+    msg := "Missing phased_deployment webhook"
+}
+
+deny contains msg if {
+    has_webhooks_deployment
     not has_no_downscale_webhook
     msg := "Missing no_downscale webhook"
 }
