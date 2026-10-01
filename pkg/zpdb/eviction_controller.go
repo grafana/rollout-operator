@@ -245,7 +245,8 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		c.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", fmt.Sprintf("%d", http.StatusOK)).Inc()
 		return request.allow()
 	}
-	if _, err := statefulSetOwnerReference(pod); err != nil {
+	ownerRef, err := statefulSetOwnerReference(pod)
+	if err != nil {
 		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find pod owner", "err", err)
 		c.metrics.EvictionRequests.WithLabelValues("sts-no-found", fmt.Sprintf("%d", http.StatusInternalServerError)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusInternalServerError)
@@ -263,7 +264,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	}
 
 	var sts *appsv1.StatefulSet
-	if sts, err = request.client.owner(pod, allStatefulSets); err != nil {
+	if sts, err = request.client.owner(pod, ownerRef, allStatefulSets); err != nil {
 		level.Error(request.log).Log("msg", logDenyMesg, "reason", "unable to find pod owner", "err", err)
 		c.metrics.EvictionRequests.WithLabelValues("sts-no-found", fmt.Sprintf("%d", http.StatusInternalServerError)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusInternalServerError)

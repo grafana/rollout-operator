@@ -43,12 +43,8 @@ func statefulSetOwnerReference(pod *corev1.Pod) (*metav1.OwnerReference, error) 
 	return owner, nil
 }
 
-// owner returns the StatefulSet which manages a pod or an error if the owner can not be found or is not a StatefulSet
-func (a *k8sClient) owner(pod *corev1.Pod, related *appsv1.StatefulSetList) (*appsv1.StatefulSet, error) {
-	owner, err := statefulSetOwnerReference(pod)
-	if err != nil {
-		return nil, err
-	}
+// owner resolves a validated StatefulSet owner reference against the related sets or the API.
+func (a *k8sClient) owner(pod *corev1.Pod, owner *metav1.OwnerReference, related *appsv1.StatefulSetList) (*appsv1.StatefulSet, error) {
 	if related != nil {
 		for i := range related.Items {
 			if related.Items[i].Name == owner.Name {

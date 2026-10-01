@@ -497,7 +497,9 @@ func TestPodEviction_OwnerFallsBackToGetWhenExcludedFromList(t *testing.T) {
 	kubeClient := fake.NewClientset(sts)
 	client := k8sClient{ctx: t.Context(), kubeClient: kubeClient}
 
-	owner, err := client.owner(pod, &appsv1.StatefulSetList{})
+	ownerRef, err := statefulSetOwnerReference(pod)
+	require.NoError(t, err)
+	owner, err := client.owner(pod, ownerRef, &appsv1.StatefulSetList{})
 	require.NoError(t, err)
 	require.Equal(t, sts.Name, owner.Name)
 	require.Len(t, kubeClient.Actions(), 1)
