@@ -3,6 +3,7 @@ package zpdb
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -336,4 +338,41 @@ func TestObserver_WaitsForMissingCRDByDefault(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("startup did not stop")
 	}
+}
+
+func TestConfigObserverStartWaitsForInitialHandlers(t *testing.T) {
+	client, observer := newConfigObserverTestCase()
+	pdb := newPDB("initial-budget")
+	pdb.SetNamespace(testNamespace)
+	require.NoError(t, client.Tracker().Add(pdb))
+
+	// Blocking cache writes exposes the gap between informer and handler synchronization.
+	observer.pdbCache.lock.Lock()
+	unlock := sync.OnceFunc(observer.pdbCache.lock.Unlock)
+	t.Cleanup(func() {
+		unlock()
+		observer.stop()
+	})
+	started := make(chan error, 1)
+	go func() { started <- observer.start() }()
+	require.Eventually(t, observer.pdbInformer.HasSynced, 5*time.Second, 10*time.Millisecond)
+	select {
+	case err := <-started:
+		t.Fatalf("observer started before the initial handler populated the ZPDB cache: %v", err)
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	unlock()
+	select {
+	case err := <-started:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("observer did not start after the initial handler completed")
+	}
+	cfg, err := observer.pdbCache.find(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Labels: map[string]string{rolloutconfig.RolloutGroupLabelKey: "test-group"},
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.Equal(t, "initial-budget", cfg.name)
 }
