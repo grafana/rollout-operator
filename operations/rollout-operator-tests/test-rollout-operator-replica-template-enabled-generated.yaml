@@ -98,6 +98,7 @@ rules:
   - get
   - watch
   - delete
+  - patch
 - apiGroups:
   - apps
   resources:
@@ -209,6 +210,7 @@ spec:
     targetPort: 8443
   selector:
     name: rollout-operator
+    rollout-operator.grafana.com/leader: "true"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -237,6 +239,11 @@ spec:
         - -server-tls.enabled=true
         - -use-zone-tracker=true
         - -zone-tracker.config-map-name=rollout-operator-zone-tracker
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         image: grafana/rollout-operator:v0.40.0
         imagePullPolicy: IfNotPresent
         name: rollout-operator

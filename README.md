@@ -223,6 +223,7 @@ rules:
   - get
   - watch
   - delete
+  - patch
 - apiGroups:
   - apps
   resources:
@@ -619,3 +620,11 @@ To run a specific integration test (in this example `TestNoDownscale_UpdatingSca
 make build-test-images
 go test -v -tags requires_docker -timeout 30m ./integration -run TestNoDownscale_UpdatingScaleSubresource
 ```
+
+## Leader election
+
+Operators in the same namespace share the Lease configured by `-leader-election.lease-name` (default `rollout-operator`). Only the leader runs controllers and admission webhooks. Healthy standbys report Ready, so separate single-replica Deployments in different availability zones can both become available.
+
+The webhook Service must select `rollout-operator.grafana.com/leader: "true"` in addition to its application labels. The operator sets this pod label after leader initialization and clears it on startup and graceful shutdown. Grant `patch` on `pods`, and provide the pod name through the `POD_NAME` downward API environment variable or `-kubernetes.pod-name`. The hostname is used when neither is provided. The supplied Jsonnet and development manifests configure these requirements.
+
+Both Deployments must use the same namespace, Lease name, and Service application labels. Leadership loss exits the process; a replacement waits for Lease expiration before taking over.
