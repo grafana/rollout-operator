@@ -399,19 +399,34 @@ func runOperator(
 		evictionController.AllowMissingCRDs()
 	}
 	defer stopOnCancel(ctx, evictionController.Stop)()
-	if err := evictionController.Start(); err != nil {
+	c := controller.NewRolloutController(coreKubeClient, coreKubeClient.Discovery(), restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
+	if cfg.allowMissingCRDs {
+		c.AllowMissingCRDs()
+	}
+	if cfg.watchReplicaTemplates {
+		c.WatchReplicaTemplates()
+	}
+	defer stopOnCancel(ctx, c.Stop)()
+	defer stopOnCancel(ctx, func() {
+		ready.Store(false)
+		statusReader.Set(nil)
+	})()
+	if err := startAdmissionAndControllers(cfg.serverTLSEnabled, ready, func() error {
+		if err := maybeStartTLSServer(ctx, cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver); err != nil {
+			return err
+		}
+		// Route bootstrap validation to the elected leader once its TLS listener is available.
+		if cfg.serverTLSEnabled {
+			return setLeaderLabel(ctx, coreKubeClient, cfg, true)
+		}
+		return nil
+	}, evictionController.Start, c.Init); err != nil {
 		if ctx.Err() != nil {
 			return
 		}
 		fatal(err)
 	}
-
-	if err := maybeStartTLSServer(ctx, cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver); err != nil {
-		if ctx.Err() != nil {
-			return
-		}
-		fatal(err)
-	}
+	statusReader.Set(c)
 
 	// Monitors the validating and mutating webhook configurations and provides a metric
 	// which tracks the configured FailurePolicy
@@ -429,29 +444,6 @@ func runOperator(
 		defer reg.Unregister(webhookCollector)
 	}
 
-	// Init the controller
-	c := controller.NewRolloutController(coreKubeClient, coreKubeClient.Discovery(), restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
-	if cfg.allowMissingCRDs {
-		c.AllowMissingCRDs()
-	}
-	if cfg.watchReplicaTemplates {
-		c.WatchReplicaTemplates()
-	}
-	defer stopOnCancel(ctx, c.Stop)()
-	if err := c.Init(); err != nil {
-		if ctx.Err() != nil {
-			return
-		}
-		fatal(fmt.Errorf("failed to init controller: %w", err))
-	}
-	statusReader.Set(c)
-
-	defer stopOnCancel(ctx, func() {
-		ready.Store(false)
-		statusReader.Set(nil)
-	})()
-
-	// Publish the leader only after its admission caches and TLS listener are initialized.
 	if err := setLeaderLabel(ctx, coreKubeClient, cfg, true); err != nil {
 		if ctx.Err() != nil {
 			return
@@ -563,6 +555,27 @@ func runWithLeaderElection(
 		return nil
 	}
 	return errors.New("leader election lease lost")
+}
+
+func startAdmissionAndControllers(webhooksEnabled bool, ready *atomic.Bool, startAdmission func() error, startEviction, initController func() error) error {
+	if err := startAdmission(); err != nil {
+		ready.Store(false)
+		return fmt.Errorf("failed to start admission server: %w", err)
+	}
+	// Service endpoints must serve stateless validation while informer dependencies converge.
+	if webhooksEnabled {
+		ready.Store(true)
+	}
+	if err := startEviction(); err != nil {
+		ready.Store(false)
+		return fmt.Errorf("failed to start eviction controller: %w", err)
+	}
+	if err := initController(); err != nil {
+		ready.Store(false)
+		return fmt.Errorf("failed to init controller: %w", err)
+	}
+	ready.Store(true)
+	return nil
 }
 
 func waitForSignalOrRestart(logger log.Logger, restart chan string) {

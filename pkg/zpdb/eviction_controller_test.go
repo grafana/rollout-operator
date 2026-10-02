@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-kit/log"
 	"github.com/go-logfmt/logfmt"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -16,9 +19,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -981,4 +986,68 @@ func newPDBMaxUnavailableWithRegex(maxUnavailable int, rolloutGroup string, podN
 			},
 		},
 	}
+}
+
+func TestEvictionControllerDeniesRequestsUntilInitialized(t *testing.T) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: testPodZoneA0, Namespace: testNamespace}}
+	client := fake.NewClientset(pod)
+	c := NewEvictionController(client, newFakeDynamicClient(), testNamespace, newTestPodsFactory(client), log.NewNopLogger(), NewMetrics(prometheus.NewRegistry()))
+	request := createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace)
+	assertInitializing := func() {
+		t.Helper()
+		response := c.HandlePodEvictionRequest(context.Background(), request, NewMaxUnavailableZeroOverrideNone())
+		require.False(t, response.Allowed)
+		require.Equal(t, request.Request.UID, response.UID)
+		require.Equal(t, int32(http.StatusServiceUnavailable), response.Result.Code)
+		require.Equal(t, "ZPDB controller is initializing", response.Result.Message)
+	}
+	assertInitializing()
+	require.Empty(t, client.Actions())
+	require.ErrorContains(t, c.MarkPodAsDeleted(context.Background(), testNamespace, testPodZoneA0, "test", NewMaxUnavailableZeroOverrideNone()), "initializing")
+	require.NoError(t, c.Start())
+	response := c.HandlePodEvictionRequest(context.Background(), request, NewMaxUnavailableZeroOverrideNone())
+	require.True(t, response.Allowed)
+	c.Stop()
+	assertInitializing()
+}
+
+func TestEvictionControllerRecoversWhenCRDBecomesAvailable(t *testing.T) {
+	client := fake.NewClientset(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: testPodZoneA0, Namespace: testNamespace}})
+	dynamicClient := newFakeDynamicClient()
+	missing := make(chan struct{}, 1)
+	available := make(chan struct{})
+	dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
+		select {
+		case <-available:
+			return false, nil, nil
+		default:
+			select {
+			case missing <- struct{}{}:
+			default:
+			}
+			return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: ZoneAwarePodDisruptionBudgetsSpecGroup, Resource: ZoneAwarePodDisruptionBudgetsNamePlural}, "")
+		}
+	})
+	c := NewEvictionController(client, dynamicClient, testNamespace, newTestPodsFactory(client), log.NewNopLogger(), NewMetrics(prometheus.NewRegistry()))
+	t.Cleanup(c.Stop)
+	started := make(chan error, 1)
+	go func() { started <- c.Start() }()
+	select {
+	case <-missing:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ZPDB informer did not attempt to list")
+	}
+	request := createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace)
+	response := c.HandlePodEvictionRequest(context.Background(), request, NewMaxUnavailableZeroOverrideNone())
+	require.False(t, response.Allowed)
+	require.Equal(t, int32(http.StatusServiceUnavailable), response.Result.Code)
+	close(available)
+	select {
+	case err := <-started:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("controller did not recover after CRD became available")
+	}
+	response = c.HandlePodEvictionRequest(context.Background(), request, NewMaxUnavailableZeroOverrideNone())
+	require.True(t, response.Allowed)
 }
