@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -44,6 +45,8 @@ func NewMaxUnavailableZeroOverride(maxUnavailable int) MaxUnavailableZeroOverrid
 }
 
 type EvictionController struct {
+	initialized atomic.Bool
+
 	// a lock used to control finding a specific named lock
 	lock sync.RWMutex
 
@@ -87,10 +90,12 @@ func (c *EvictionController) Start() error {
 	if err := c.podObserver.start(); err != nil {
 		return fmt.Errorf("failed to start zpdb pod observer: %w", err)
 	}
+	c.initialized.Store(true)
 	return nil
 }
 
 func (c *EvictionController) Stop() {
+	c.initialized.Store(false)
 	c.cfgObserver.stop()
 	c.podObserver.stop()
 }
@@ -188,6 +193,12 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		level.Warn(request.log).Log("msg", logDenyMesg, "reason", "not a valid create pod eviction request", "err", err)
 		c.metrics.EvictionRequests.WithLabelValues("invalid-request", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusBadRequest)
+	}
+
+	// An empty cache during bootstrap must not classify protected pods as out of scope.
+	if !c.initialized.Load() {
+		c.metrics.EvictionRequests.WithLabelValues("initializing", fmt.Sprintf("%d", http.StatusServiceUnavailable)).Inc()
+		return request.denyWithReason("ZPDB controller is initializing", http.StatusServiceUnavailable)
 	}
 
 	// Before making any Kubernetes API calls, check whether this pod is in zpdb scope at all according to the
