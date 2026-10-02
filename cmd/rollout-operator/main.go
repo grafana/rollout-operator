@@ -305,9 +305,11 @@ func main() {
 		fatal(fmt.Errorf("failed to create pod eviction Kubernetes client: %w", err))
 	}
 	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, podsFactory, logger, zpdbMetrics)
-	check(evictionController.Start())
-
-	maybeStartTLSServer(cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
+	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
+	check(startAdmissionAndControllers(cfg.serverTLSEnabled, ready, func() {
+		maybeStartTLSServer(cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
+	}, evictionController.Start, c.Init))
+	statusReader.Set(c)
 
 	// Monitors the validating and mutating webhook configurations and provides a metric
 	// which tracks the configured FailurePolicy
@@ -319,13 +321,6 @@ func main() {
 		}
 		check(reg.Register(webhookCollector))
 	}
-
-	// Init the controller
-	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
-	if err := c.Init(); err != nil {
-		fatal(fmt.Errorf("failed to init controller: %w", err))
-	}
-	statusReader.Set(c)
 
 	// Listen to sigterm, as well as for restart (like for certificate renewal).
 	go func() {
@@ -339,11 +334,26 @@ func main() {
 		}
 	}()
 
-	// The operator is ready once the controller successfully initialised.
-	ready.Store(true)
-
 	// Run and block until stopped.
 	c.Run()
+}
+
+func startAdmissionAndControllers(webhooksEnabled bool, ready *atomic.Bool, startAdmission func(), startEviction, initController func() error) error {
+	startAdmission()
+	// Service endpoints must serve stateless validation while informer dependencies converge.
+	if webhooksEnabled {
+		ready.Store(true)
+	}
+	if err := startEviction(); err != nil {
+		ready.Store(false)
+		return fmt.Errorf("failed to start eviction controller: %w", err)
+	}
+	if err := initController(); err != nil {
+		ready.Store(false)
+		return fmt.Errorf("failed to init controller: %w", err)
+	}
+	ready.Store(true)
+	return nil
 }
 
 func waitForSignalOrRestart(logger log.Logger, restart chan string) {

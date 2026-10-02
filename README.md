@@ -203,6 +203,8 @@ Offers a `ValidatingAdmissionWebhook` which can apply a `ZoneAwarePodDisruptionB
 
 #### `/admission/zpdb-validation`
 
+With TLS webhooks enabled, the operator becomes service-ready before its controller caches finish synchronizing. Valid ZPDB resources can be admitted during bootstrap with `failurePolicy: Fail`; pod evictions are denied with a retryable error until the ZPDB controller has initialized. The API server must still be able to reach the webhook Service and trust its CA bundle.
+
 Offers a `ValidatingAdmissionWebhook` to validate `ZoneAwarePodDisruptionBudget` configuration files and will reject any misconfigured files.
 
 
