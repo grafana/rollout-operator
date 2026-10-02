@@ -6,7 +6,7 @@ expected_rules = [
   {
     "apiGroups": [""],
     "resources": ["pods"],
-    "verbs": ["list", "get", "watch", "delete"],
+    "verbs": ["list", "get", "watch", "delete", "patch"],
   },
   {
     "apiGroups": ["apps"],

@@ -85,6 +85,7 @@
   rollout_operator_container::
     container.new('rollout-operator', $._images.rollout_operator) +
     container.withArgsMixin($.util.mapToFlags($.rollout_operator_args)) +
+    container.withEnvMixin([{ name: 'POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } }]) +
     container.withPorts(
       [$.core.v1.containerPort.new('http-metrics', 8001)] +
       if enableWebhooks then
@@ -111,7 +112,7 @@
   rollout_operator_service: if !enableWebhooks then null else
     service.new(
       'rollout-operator',
-      { name: 'rollout-operator' },
+      { name: 'rollout-operator', 'rollout-operator.grafana.com/leader': 'true' },
       servicePort.newNamed('https', 443, 8443) +
       servicePort.withProtocol('TCP'),
     )
@@ -124,7 +125,7 @@
       [
         policyRule.withApiGroups('') +
         policyRule.withResources(['pods']) +
-        policyRule.withVerbs(['list', 'get', 'watch', 'delete']),
+        policyRule.withVerbs(['list', 'get', 'watch', 'delete', 'patch']),
         policyRule.withApiGroups('apps') +
         policyRule.withResources(['statefulsets']) +
         policyRule.withVerbs(['list', 'get', 'watch', 'patch']),

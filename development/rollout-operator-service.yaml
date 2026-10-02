@@ -6,6 +6,7 @@ metadata:
 spec:
   selector:
     name: rollout-operator
+    rollout-operator.grafana.com/leader: "true"
   ports:
     - protocol: TCP
       port: 80
@@ -15,5 +16,4 @@ spec:
       port: 443
       targetPort: 8443
       name: https
-  publishNotReadyAddresses: true
   type: ClusterIP

@@ -74,6 +74,7 @@ type config struct {
 
 	watchReplicaTemplates bool
 
+	kubePodName                 string
 	leaderElectionLeaseName     string
 	leaderElectionLeaseDuration time.Duration
 	leaderElectionRenewDeadline time.Duration
@@ -115,6 +116,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.BoolVar(&cfg.watchReplicaTemplates, "replica-templates.watch-enabled", false, "Watch ReplicaTemplates for desired replica changes. Requires the CRD and namespace list/watch permissions.")
 	cfg.clusterValidationCfg.RegisterFlagsWithPrefix("server.cluster-validation.http.", fs)
 
+	fs.StringVar(&cfg.kubePodName, "kubernetes.pod-name", os.Getenv("POD_NAME"), "Name of this pod, used to select the elected leader for webhook traffic. Defaults to POD_NAME or the hostname.")
 	fs.StringVar(&cfg.leaderElectionLeaseName, "leader-election.lease-name", "rollout-operator", "Name of the Lease used to ensure only one rollout-operator is active in the namespace.")
 	fs.DurationVar(&cfg.leaderElectionLeaseDuration, "leader-election.lease-duration", 15*time.Second, "Duration that non-leaders wait before attempting to acquire an unrenewed leader election Lease.")
 	fs.DurationVar(&cfg.leaderElectionRenewDeadline, "leader-election.renew-deadline", 10*time.Second, "Duration that the leader retries refreshing its Lease before giving up leadership.")
@@ -327,7 +329,10 @@ func main() {
 	if err != nil {
 		fatal(fmt.Errorf("failed to determine leader election identity: %w", err))
 	}
-	identity := fmt.Sprintf("%s_%s", hostname, uuid.NewString())
+	if cfg.kubePodName == "" {
+		cfg.kubePodName = hostname
+	}
+	identity := fmt.Sprintf("%s_%s", cfg.kubePodName, uuid.NewString())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -419,7 +424,13 @@ func runOperator(
 		}
 	}()
 
-	// The operator is ready once the controller successfully initialised.
+	// Publish the leader only after its admission caches and TLS listener are initialized.
+	if err := setLeaderLabel(ctx, coreKubeClient, cfg, true); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		fatal(fmt.Errorf("failed to publish leader pod: %w", err))
+	}
 	ready.Store(true)
 
 	// Run and block until stopped.
@@ -460,11 +471,12 @@ func runWithLeaderElection(
 		Name:            "rollout-operator",
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(leaderCtx context.Context) {
+				ready.Store(false)
 				level.Info(logger).Log("msg", "acquired leader election lease", "lease", cfg.leaderElectionLeaseName, "identity", identity)
 				run(leaderCtx)
 			},
 			OnStoppedLeading: func() {
-				// Followers must not receive webhook traffic because admission state is process-local.
+				// Leadership loss makes this process unavailable until it exits.
 				ready.Store(false)
 			},
 			OnNewLeader: func(newIdentity string) {
@@ -478,6 +490,25 @@ func runWithLeaderElection(
 		return fmt.Errorf("failed to configure leader election: %w", err)
 	}
 
+	// A restarted pod must not retain the routing label from its previous process.
+	if err := setLeaderLabel(ctx, client, cfg, false); err != nil {
+		return fmt.Errorf("failed to clear leader pod label: %w", err)
+	}
+	defer func() {
+		ready.Store(false)
+		// Do not delay process exit with API requests after a lost Lease.
+		if ctx.Err() == nil {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := setLeaderLabel(cleanupCtx, client, cfg, false); err != nil {
+			level.Warn(logger).Log("msg", "failed to clear leader pod label", "err", err)
+		}
+	}()
+
+	// Standbys are available to their Deployment while the Service selects only the leader.
+	ready.Store(true)
 	elector.Run(ctx)
 	ready.Store(false)
 	if ctx.Err() != nil {
