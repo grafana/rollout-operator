@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/kubernetes/scheme"
@@ -565,6 +566,32 @@ func TestZoneAwarePodDisruptionBudgetPartitionModeWithCrossZoneEvictionDelay(t *
 		requireEventuallyPod(t, api, ctx, "mock-zone-b-0", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 		requireEventuallyPod(t, api, ctx, "mock-zone-a-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
 		requireEventuallyPod(t, api, ctx, "mock-zone-b-1", expectPodPhase(corev1.PodRunning), expectReady(), expectVersion("1"))
+	}
+
+	{
+		// Each partition has its own readiness deadline, so partition 0 cannot establish readiness for partition 1.
+		config := map[string]interface{}{}
+		require.NoError(t, loadToMapFromDisk(path+yamlZpdbConfig, config))
+		delayString, found, err := unstructured.NestedString(config, "spec", "crossZoneEvictionDelay")
+		require.NoError(t, err)
+		require.True(t, found)
+		delay, err := time.ParseDuration(delayString)
+		require.NoError(t, err)
+
+		t.Log("Wait for the initial readiness delay to expire in every partition.")
+		require.Eventually(t, func() bool {
+			for _, name := range []string{"mock-zone-a-0", "mock-zone-b-0", "mock-zone-a-1", "mock-zone-b-1"} {
+				pod, err := api.CoreV1().Pods(corev1.NamespaceDefault).Get(ctx, name, metav1.GetOptions{})
+				if err != nil || !util.IsPodRunningAndReady(pod) {
+					return false
+				}
+				readyAt, found := podReadyTransitionTime(pod)
+				if !found || !time.Now().After(readyAt.Add(delay)) {
+					return false
+				}
+			}
+			return true
+		}, delay+30*time.Second, 100*time.Millisecond, "All partitions should satisfy the initial cross-zone eviction delay")
 	}
 
 	{
