@@ -49,7 +49,7 @@ func TestSelfSignedCertificate_EmptySecret(t *testing.T) {
 
 	t.Log("Create rollout-operator and wait until it is ready.")
 	createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
-	requireRolloutOperatorReady(t, ctx, api)
+	requireRolloutOperatorLeaderReady(t, ctx, api)
 
 	t.Log("Secret should now contain a valid certificate and the webhook CA should be patched.")
 	requireEventuallyValidCertificateSecret(t, ctx, api)
@@ -84,7 +84,7 @@ func TestSelfSignedCertificate_RenewsExpiredSecretOnStartup(t *testing.T) {
 
 	t.Log("Create rollout-operator and wait until it is ready.")
 	createRolloutOperator(t, ctx, api, cluster.ExtAPI(), path, true)
-	requireRolloutOperatorReady(t, ctx, api)
+	requireRolloutOperatorLeaderReady(t, ctx, api)
 
 	t.Log("Expired secret material should be replaced with a still-valid certificate.")
 	require.Eventually(t, func() bool {
@@ -130,7 +130,7 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 			"45s",
 		)
 	})
-	requireRolloutOperatorReady(t, ctx, api)
+	requireRolloutOperatorLeaderReady(t, ctx, api)
 
 	initialNotAfter := requireEventuallyValidCertificateSecret(t, ctx, api)
 	t.Logf("Initial certificate expires at %s", initialNotAfter)
@@ -157,7 +157,7 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 	}, 3*time.Minute, time.Second, "certificate should be renewed after expiration")
 	t.Logf("Renewed certificate expires at %s", renewedNotAfter)
 
-	requireRolloutOperatorReady(t, ctx, api)
+	requireRolloutOperatorLeaderReady(t, ctx, api)
 	requireEventuallyWebhookMatchesSecretCA(t, ctx, api, webhookName)
 
 	t.Log("Switch to a long-lived certificate so admission checks aren't racing another short expiry.")
@@ -189,7 +189,7 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 		return ok
 	}, 3*time.Minute, time.Second, "certificate should be regenerated with a ~1w lifetime")
 
-	requireRolloutOperatorReady(t, ctx, api)
+	requireRolloutOperatorLeaderReady(t, ctx, api)
 	requireEventuallyWebhookMatchesSecretCA(t, ctx, api, webhookName)
 	requireNoDownscaleWebhookWorks(t, ctx, api)
 }
@@ -249,11 +249,11 @@ func setSelfSignedCertExpiration(args []string, expiration string) []string {
 	return out
 }
 
-func requireRolloutOperatorReady(t *testing.T, ctx context.Context, api *kubernetes.Clientset) {
+func requireRolloutOperatorLeaderReady(t *testing.T, ctx context.Context, api *kubernetes.Clientset) {
 	t.Helper()
 
 	require.Eventually(t, func() bool {
-		pod, ok := findNonTerminatingPod(ctx, t, api, "name=rollout-operator")
+		pod, ok := findNonTerminatingPod(ctx, t, api, "name=rollout-operator,rollout-operator.grafana.com/leader=true")
 		if !ok {
 			return false
 		}
@@ -265,8 +265,22 @@ func requireRolloutOperatorReady(t *testing.T, ctx context.Context, api *kuberne
 			t.Logf("Pod %s is not ready yet", pod.Name)
 			return false
 		}
-		t.Logf("Pod %s is running and ready", pod.Name)
-		return true
+		// Pod readiness also covers standbys; admission requires the leader's Service endpoint.
+		endpoints, err := api.DiscoveryV1().EndpointSlices(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{LabelSelector: "kubernetes.io/service-name=rollout-operator"})
+		if err != nil {
+			t.Logf("failed to list webhook endpoints: %v", err)
+			return false
+		}
+		for _, slice := range endpoints.Items {
+			for _, endpoint := range slice.Endpoints {
+				if endpoint.TargetRef != nil && endpoint.TargetRef.Name == pod.Name && endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready {
+					t.Logf("Leader %s is ready and selected by the webhook Service", pod.Name)
+					return true
+				}
+			}
+		}
+		t.Logf("Leader %s has no ready webhook endpoint yet", pod.Name)
+		return false
 	}, 5*time.Minute, 500*time.Millisecond, "rollout-operator should be running and ready")
 }
 
@@ -384,6 +398,22 @@ func requireNoDownscaleWebhookWorks(t *testing.T, ctx context.Context, api *kube
 	t.Log("Create the service with one replica.")
 	requireCreateStatefulSet(ctx, t, api, mock)
 	requireEventuallyPodCount(ctx, t, api, "name=mock", 1)
+
+	// A ready EndpointSlice can precede kube-proxy applying its routing change.
+	require.Eventually(t, func() bool {
+		current, err := api.AppsV1().StatefulSets(corev1.NamespaceDefault).Get(ctx, mock.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Logf("failed to get webhook probe target: %v", err)
+			return false
+		}
+		current.Spec.Replicas = ptr[int32](2)
+		_, err = api.AppsV1().StatefulSets(corev1.NamespaceDefault).Update(ctx, current, metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}})
+		if err != nil {
+			t.Logf("webhook route not ready: %v", err)
+			return false
+		}
+		return true
+	}, time.Minute, 500*time.Millisecond, "webhook should serve admission through the Service")
 
 	t.Log("Upscale should succeed with a valid webhook certificate.")
 	mock.Spec.Replicas = ptr[int32](2)
