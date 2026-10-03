@@ -26,6 +26,7 @@ spec:
           image: rollout-operator:latest
           imagePullPolicy: IfNotPresent
           args:
+            - -leader-election.enabled=true
             - -kubernetes.namespace=rollout-operator-development
             - -reconcile.interval=1s
             - -log.level=debug

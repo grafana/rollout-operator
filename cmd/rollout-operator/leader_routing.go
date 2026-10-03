@@ -12,6 +12,10 @@ import (
 const leaderLabel = "rollout-operator.grafana.com/leader"
 
 func setLeaderLabel(ctx context.Context, client kubernetes.Interface, cfg config, leader bool) error {
+	if !cfg.leaderElectionEnabled {
+		return nil
+	}
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}

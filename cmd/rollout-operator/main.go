@@ -73,6 +73,7 @@ type config struct {
 	clusterValidationCfg clusterutil.ClusterValidationProtocolConfigForHTTP
 
 	kubePodName                 string
+	leaderElectionEnabled       bool
 	leaderElectionLeaseName     string
 	leaderElectionLeaseDuration time.Duration
 	leaderElectionRenewDeadline time.Duration
@@ -114,6 +115,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	cfg.clusterValidationCfg.RegisterFlagsWithPrefix("server.cluster-validation.http.", fs)
 
 	fs.StringVar(&cfg.kubePodName, "kubernetes.pod-name", os.Getenv("POD_NAME"), "Name of this pod, used to select the elected leader for webhook traffic. Defaults to POD_NAME or the hostname.")
+	fs.BoolVar(&cfg.leaderElectionEnabled, "leader-election.enabled", false, "Enable Lease leader election. Requires Lease access and pod patch permissions, and a webhook Service selecting the leader label.")
 	fs.StringVar(&cfg.leaderElectionLeaseName, "leader-election.lease-name", "rollout-operator", "Name of the Lease used to ensure only one rollout-operator is active in the namespace.")
 	fs.DurationVar(&cfg.leaderElectionLeaseDuration, "leader-election.lease-duration", 15*time.Second, "Duration that non-leaders wait before attempting to acquire an unrenewed leader election Lease.")
 	fs.DurationVar(&cfg.leaderElectionRenewDeadline, "leader-election.renew-deadline", 10*time.Second, "Duration that the leader retries refreshing its Lease before giving up leadership.")
@@ -164,24 +166,26 @@ func (cfg config) validate() error {
 	if cfg.kubeClientQPS > 0 && cfg.kubeClientBurst < 1 {
 		return errors.New("-kubernetes.client-burst must be at least 1 when -kubernetes.client-qps is greater than 0, since each request consumes one token")
 	}
-	if cfg.leaderElectionLeaseName == "" {
-		return errors.New("-leader-election.lease-name cannot be an empty string")
-	}
-	if cfg.leaderElectionLeaseDuration < time.Second {
-		return errors.New("-leader-election.lease-duration must be at least one second")
-	}
-	if cfg.leaderElectionRenewDeadline <= 0 {
-		return errors.New("-leader-election.renew-deadline must be positive")
-	}
-	if cfg.leaderElectionRetryPeriod <= 0 {
-		return errors.New("-leader-election.retry-period must be positive")
-	}
-	serializedLeaseDuration := cfg.leaderElectionLeaseDuration.Truncate(time.Second)
-	if serializedLeaseDuration <= cfg.leaderElectionRenewDeadline {
-		return errors.New("-leader-election.lease-duration, truncated to whole seconds by Kubernetes, must be greater than -leader-election.renew-deadline")
-	}
-	if cfg.leaderElectionRenewDeadline <= time.Duration(leaderelection.JitterFactor*float64(cfg.leaderElectionRetryPeriod)) {
-		return errors.New("-leader-election.renew-deadline must be greater than -leader-election.retry-period multiplied by the client-go jitter factor")
+	if cfg.leaderElectionEnabled {
+		if cfg.leaderElectionLeaseName == "" {
+			return errors.New("-leader-election.lease-name cannot be an empty string")
+		}
+		if cfg.leaderElectionLeaseDuration < time.Second {
+			return errors.New("-leader-election.lease-duration must be at least one second")
+		}
+		if cfg.leaderElectionRenewDeadline <= 0 {
+			return errors.New("-leader-election.renew-deadline must be positive")
+		}
+		if cfg.leaderElectionRetryPeriod <= 0 {
+			return errors.New("-leader-election.retry-period must be positive")
+		}
+		serializedLeaseDuration := cfg.leaderElectionLeaseDuration.Truncate(time.Second)
+		if serializedLeaseDuration <= cfg.leaderElectionRenewDeadline {
+			return errors.New("-leader-election.lease-duration, truncated to whole seconds by Kubernetes, must be greater than -leader-election.renew-deadline")
+		}
+		if cfg.leaderElectionRenewDeadline <= time.Duration(leaderelection.JitterFactor*float64(cfg.leaderElectionRetryPeriod)) {
+			return errors.New("-leader-election.renew-deadline must be greater than -leader-election.retry-period multiplied by the client-go jitter factor")
+		}
 	}
 	if cfg.serverTLSRequestTimeout <= 0 {
 		return errors.New("-server-tls.request-timeout must be positive")
@@ -322,14 +326,17 @@ func main() {
 		fatal(fmt.Errorf("failed to init dynamicClient: %w", err))
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		fatal(fmt.Errorf("failed to determine leader election identity: %w", err))
+	var identity string
+	if cfg.leaderElectionEnabled {
+		hostname, err := os.Hostname()
+		if err != nil {
+			fatal(fmt.Errorf("failed to determine leader election identity: %w", err))
+		}
+		if cfg.kubePodName == "" {
+			cfg.kubePodName = hostname
+		}
+		identity = fmt.Sprintf("%s_%s", cfg.kubePodName, uuid.NewString())
 	}
-	if cfg.kubePodName == "" {
-		cfg.kubePodName = hostname
-	}
-	identity := fmt.Sprintf("%s_%s", cfg.kubePodName, uuid.NewString())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -443,6 +450,11 @@ func runWithLeaderElection(
 	ready *atomic.Bool,
 	run func(context.Context),
 ) error {
+	if !cfg.leaderElectionEnabled {
+		run(ctx)
+		return nil
+	}
+
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
 			Name:      cfg.leaderElectionLeaseName,
