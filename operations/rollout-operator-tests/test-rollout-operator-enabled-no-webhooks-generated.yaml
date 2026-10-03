@@ -19,7 +19,6 @@ rules:
   - get
   - watch
   - delete
-  - patch
 - apiGroups:
   - apps
   resources:
@@ -43,14 +42,6 @@ rules:
   - get
   - update
   - create
-- apiGroups:
-  - coordination.k8s.io
-  resources:
-  - leases
-  verbs:
-  - get
-  - create
-  - update
 - apiGroups:
   - rollout-operator.grafana.com
   resources:
@@ -98,6 +89,7 @@ spec:
       containers:
       - args:
         - -kubernetes.namespace=default
+        - -leader-election.enabled=false
         - -use-zone-tracker=true
         - -zone-tracker.config-map-name=rollout-operator-zone-tracker
         env:

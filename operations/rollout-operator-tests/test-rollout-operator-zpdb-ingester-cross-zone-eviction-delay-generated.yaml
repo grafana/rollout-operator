@@ -98,7 +98,6 @@ rules:
   - get
   - watch
   - delete
-  - patch
 - apiGroups:
   - apps
   resources:
@@ -122,14 +121,6 @@ rules:
   - get
   - update
   - create
-- apiGroups:
-  - coordination.k8s.io
-  resources:
-  - leases
-  verbs:
-  - get
-  - create
-  - update
 - apiGroups:
   - rollout-operator.grafana.com
   resources:
@@ -202,7 +193,6 @@ spec:
     targetPort: 8443
   selector:
     name: rollout-operator
-    rollout-operator.grafana.com/leader: "true"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -228,6 +218,7 @@ spec:
       containers:
       - args:
         - -kubernetes.namespace=default
+        - -leader-election.enabled=false
         - -server-tls.enabled=true
         - -use-zone-tracker=true
         - -zone-tracker.config-map-name=rollout-operator-zone-tracker

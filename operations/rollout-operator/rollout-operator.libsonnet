@@ -28,6 +28,7 @@
 
   _config+:: {
     rollout_operator_enabled: true,
+    rollout_operator_leader_election_enabled: false,
 
     // Configure the rollout operator to accept webhook requests made as part of scaling
     // statefulsets up or down. This allows the rollout operator to ensure that stateful
@@ -74,6 +75,7 @@
   rollout_operator_args:: {
     'kubernetes.namespace': $._config.namespace,
     [if $._config.rollout_operator_replica_template_access_enabled then 'replica-templates.watch-enabled']: true,
+    'leader-election.enabled': $._config.rollout_operator_leader_election_enabled,
     'use-zone-tracker': true,
     'zone-tracker.config-map-name': 'rollout-operator-zone-tracker',
   } + if enableWebhooks then {
@@ -112,7 +114,7 @@
   rollout_operator_service: if !enableWebhooks then null else
     service.new(
       'rollout-operator',
-      { name: 'rollout-operator', 'rollout-operator.grafana.com/leader': 'true' },
+      { name: 'rollout-operator' } + (if $._config.rollout_operator_leader_election_enabled then { 'rollout-operator.grafana.com/leader': 'true' } else {}),
       servicePort.newNamed('https', 443, 8443) +
       servicePort.withProtocol('TCP'),
     )
@@ -125,7 +127,7 @@
       [
         policyRule.withApiGroups('') +
         policyRule.withResources(['pods']) +
-        policyRule.withVerbs(['list', 'get', 'watch', 'delete', 'patch']),
+        policyRule.withVerbs(['list', 'get', 'watch', 'delete'] + (if $._config.rollout_operator_leader_election_enabled then ['patch'] else [])),
         policyRule.withApiGroups('apps') +
         policyRule.withResources(['statefulsets']) +
         policyRule.withVerbs(['list', 'get', 'watch', 'patch']),
@@ -135,10 +137,12 @@
         policyRule.withApiGroups('') +
         policyRule.withResources(['configmaps']) +
         policyRule.withVerbs(['get', 'update', 'create']),
-        policyRule.withApiGroups('coordination.k8s.io') +
-        policyRule.withResources(['leases']) +
-        policyRule.withVerbs(['get', 'create', 'update']),
       ] +
+      (if $._config.rollout_operator_leader_election_enabled then [
+         policyRule.withApiGroups('coordination.k8s.io') +
+         policyRule.withResources(['leases']) +
+         policyRule.withVerbs(['get', 'create', 'update']),
+       ] else []) +
       (
         if $._config.rollout_operator_replica_template_access_enabled then [
           policyRule.withApiGroups($.replica_template.spec.group) +

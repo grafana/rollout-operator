@@ -7,12 +7,14 @@ This operator coordinates the rollout of pods between different StatefulSets wit
 The operator coordinates the rollout of pods belonging to `StatefulSets` with the `rollout-group` label and updates strategy set to `OnDelete`. The label value should identify the group of StatefulSets to which the StatefulSet belongs to. Make sure the StatefulSet has a label `name` in its `spec.template`, as the operator uses it to find pods belonging to it.
 
 For example, given the following StatefulSets in a namespace:
+
 - `ingester-zone-a` with `rollout-group: ingester`
 - `ingester-zone-b` with `rollout-group: ingester`
 - `compactor-zone-a` with `rollout-group: compactor`
 - `compactor-zone-b` with `rollout-group: compactor`
 
 The operator independently coordinates the rollout of pods of each group:
+
 - Rollout group: `ingester`
   - `ingester-zone-a`
   - `ingester-zone-b`
@@ -21,6 +23,7 @@ The operator independently coordinates the rollout of pods of each group:
   - `compactor-zone-b`
 
 For each **rollout group**, the operator **guarantees**:
+
 1. Pods in 2 different StatefulSets are not rolled out at the same time
 1. Pods in a StatefulSet are rolled out if and only if all pods in all other StatefulSets of the same group are `Ready` (otherwise it will start or continue the rollout once this check is satisfied)
 1. Pods are rolled out if and only if all StatefulSets in the same group have `OnDelete` update strategy (otherwise the operator will skip the group and log an error)
@@ -69,10 +72,10 @@ Example usage for a multi-AZ ingester group:
 
 Rollout-operator can use custom resource with `scale` and `status` subresources as a "source of truth" for number of replicas for target statefulset. "Source of truth" resource (or "reference resource") is configured using following annotations:
 
-* `grafana.com/rollout-mirror-replicas-from-resource-name`
-* `grafana.com/rollout-mirror-replicas-from-resource-kind`
-* `grafana.com/rollout-mirror-replicas-from-resource-api-version`
-* `grafana.com/rollout-mirror-replicas-from-resource-write-back`
+- `grafana.com/rollout-mirror-replicas-from-resource-name`
+- `grafana.com/rollout-mirror-replicas-from-resource-kind`
+- `grafana.com/rollout-mirror-replicas-from-resource-api-version`
+- `grafana.com/rollout-mirror-replicas-from-resource-write-back`
 
 These annotations must be set on StatefulSet that rollout-operator will scale (ie. target statefulset).
 Number of replicas in target statefulset will follow replicas in reference resource (from `scale` subresource).
@@ -87,13 +90,13 @@ To support scaling based on reference resource, rollout-operator needs to be all
 
 ```yaml
 - apiGroups:
-  - rollout-operator.grafana.com
+    - rollout-operator.grafana.com
   resources:
-  - replicatemplates/scale
-  - replicatemplates/status
+    - replicatemplates/scale
+    - replicatemplates/status
   verbs:
-  - get
-  - patch
+    - get
+    - patch
 ```
 
 For ReplicaTemplates, enable `-replica-templates.watch-enabled=true` to reconcile desired replica changes without waiting for the five-minute informer resync. This requires the ReplicaTemplate CRD and `get`, `list`, and `watch` permissions on `replicatemplates` in the operator's namespace. Status-only updates do not trigger reconciliation. The Jsonnet option `rollout_operator_replica_template_access_enabled` enables the watch and grants these permissions.
@@ -105,14 +108,15 @@ When using "Scaling based on reference resource", rollout-operator can be config
 This is configured using `grafana.com/rollout-delayed-downscale` and `grafana.com/rollout-prepare-delayed-downscale-url` annotations on target statefulset. First annotation specificies minimum delay duration between call to "prepare-delayed-downscale-url" and actual scaledown, while the second annotation specifies the URL that is called on each pod. (URL is used as-is, but host is replaced with pod's fully qualified domain name.)
 
 Rollout operator has special requirements on the configured endpoint:
-* Endpoint must support `POST` and `DELETE` methods.
-* On `POST` method, pod is supposed to prepare for delayed downscale. Endpoint must also return 200 if preparation succeeded, and JSON body in format: `{"timestamp": 123456789}`, where timestamp is Unix timestamp in seconds when the preparation has been done.
-* Repeated calls with `POST` method should return the same timestamp, unless preparation was done again, and new waiting must start.
-* On `DELETE` method, pod should cancel the preparation for delayed downscale. If there's nothing to do, pod should ignore such `DELETE` request.  
+
+- Endpoint must support `POST` and `DELETE` methods.
+- On `POST` method, pod is supposed to prepare for delayed downscale. Endpoint must also return 200 if preparation succeeded, and JSON body in format: `{"timestamp": 123456789}`, where timestamp is Unix timestamp in seconds when the preparation has been done.
+- Repeated calls with `POST` method should return the same timestamp, unless preparation was done again, and new waiting must start.
+- On `DELETE` method, pod should cancel the preparation for delayed downscale. If there's nothing to do, pod should ignore such `DELETE` request.
 
 Rollout-operator does NOT remember any state of "delayed scaledown" preparation. It relies on timestamps returned from the pod endpoints on `POST` method. When no delayed scaledown is taking place, rollout-operator still keeps calling `DELETE` method regularly, to make sure that there is all pods have cancelled any previous "preparation of delayed scaledown".
 
-How is this different from `grafana.com/prepare-downscale` label used by `/admission/prepare-downscale` webhook? That webhook calls the "prepare-downscale" endpoint called *just* before the downscale is done, and pods are shutdown right after. On the other hand delayed downscale can take many hours. Delayed downscale and "prepare downscale" features can be used together.
+How is this different from `grafana.com/prepare-downscale` label used by `/admission/prepare-downscale` webhook? That webhook calls the "prepare-downscale" endpoint called _just_ before the downscale is done, and pods are shutdown right after. On the other hand delayed downscale can take many hours. Delayed downscale and "prepare downscale" features can be used together.
 
 ## Manual replica override
 
@@ -124,6 +128,7 @@ When set to a non-negative integer, the operator scales the StatefulSet to that 
 - **With `grafana.com/rollout-mirror-replicas-from-resource-*` annotations (mirror-replicas mode)**: Respects the delayed downscale mechanism if configured.
 
 Example:
+
 ```yaml
 apiVersion: apps/v1
 kind: StatefulSet
@@ -197,7 +202,7 @@ renders status through the same snapshot path as the live operator.
 
 #### `/admission/no-downscale`
 
-Offers a `ValidatingAdmissionWebhook` that rejects the requests that decrease the number of replicas in objects labeled as `grafana.com/no-downscale: true`. See [Webhooks](#webhooks) section below. 
+Offers a `ValidatingAdmissionWebhook` that rejects the requests that decrease the number of replicas in objects labeled as `grafana.com/no-downscale: true`. See [Webhooks](#webhooks) section below.
 
 #### `/pods/eviction`
 
@@ -207,7 +212,6 @@ Offers a `ValidatingAdmissionWebhook` which can apply a `ZoneAwarePodDisruptionB
 
 Offers a `ValidatingAdmissionWebhook` to validate `ZoneAwarePodDisruptionBudget` configuration files and will reject any misconfigured files.
 
-
 ### RBAC
 
 When running the `rollout-operator` as a pod, it uses a Kubernetes Lease to ensure only one instance is active. It needs a Role with at least the following privileges:
@@ -216,46 +220,46 @@ When running the `rollout-operator` as a pod, it uses a Kubernetes Lease to ensu
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 rules:
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  verbs:
-  - list
-  - get
-  - watch
-  - delete
-  - patch
-- apiGroups:
-  - apps
-  resources:
-  - statefulsets
-  verbs:
-  - list
-  - get
-  - watch
-- apiGroups:
-  - apps
-  resources:
-  - statefulsets/status
-  verbs:
-  - update
-- apiGroups:
-  - coordination.k8s.io
-  resources:
-  - leases
-  verbs:
-  - get
-  - create
-  - update
-- apiGroups:
-  - rollout-operator.grafana.com
-  resources:
-  - zoneawarepoddisruptionbudgets
-  verbs:
-  - get
-  - list
-  - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - list
+      - get
+      - watch
+      - delete
+      - patch
+  - apiGroups:
+      - apps
+    resources:
+      - statefulsets
+    verbs:
+      - list
+      - get
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - statefulsets/status
+    verbs:
+      - update
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - create
+      - update
+  - apiGroups:
+      - rollout-operator.grafana.com
+    resources:
+      - zoneawarepoddisruptionbudgets
+    verbs:
+      - get
+      - list
+      - watch
 ```
 
 (Please see [Webhooks](#webhooks) section below for extra roles required when using the HTTPS server for webhooks.)
@@ -280,33 +284,33 @@ metadata:
     grafana.com/namespace: default
   name: no-downscale-default
 webhooks:
-- name: no-downscale-default.grafana.com
-  admissionReviewVersions: [v1]
-  clientConfig:
-    service:
-      name: rollout-operator
-      namespace: default
-      path: /admission/no-downscale
-      port: 443
-  failurePolicy: Fail
-  matchPolicy: Equivalent
-  rules:
-  - apiGroups: [apps]
-    apiVersions: [v1]
-    operations: [UPDATE]
-    resources:
-    - statefulsets
-    - deployments
-    - replicasets
-    - statefulsets/scale
-    - deployments/scale
-    - replicasets/scale
-    scope: Namespaced
-  sideEffects: None
-  timeoutSeconds: 10
+  - name: no-downscale-default.grafana.com
+    admissionReviewVersions: [v1]
+    clientConfig:
+      service:
+        name: rollout-operator
+        namespace: default
+        path: /admission/no-downscale
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    rules:
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [UPDATE]
+        resources:
+          - statefulsets
+          - deployments
+          - replicasets
+          - statefulsets/scale
+          - deployments/scale
+          - replicasets/scale
+        scope: Namespaced
+    sideEffects: None
+    timeoutSeconds: 10
 ```
 
-This webhook configuration should point to a `Service` that points to the `rollout-operator`'s HTTPS server exposed on port `-server-tls.port=8443`. 
+This webhook configuration should point to a `Service` that points to the `rollout-operator`'s HTTPS server exposed on port `-server-tls.port=8443`.
 For example:
 
 ```yaml
@@ -319,10 +323,10 @@ spec:
     name: rollout-operator
   type: ClusterIP
   ports:
-  - name: https
-    port: 443
-    protocol: TCP
-    targetPort: 8443
+    - name: https
+      port: 443
+      protocol: TCP
+      targetPort: 8443
 ```
 
 #### No-downscale webhook details
@@ -330,13 +334,13 @@ spec:
 ##### Matching objects
 
 Please note that the webhook will NOT receive the requests for `/scale` operations [if an `objectSelector` is provided](https://github.com/kubernetes/kubernetes/issues/113594).
-For this reason the webhook will perform the check of the `grafana.com/no-downscale` label on the object itself on every received request. 
-When an object like `StatefulSet`, `DeploymentSet` or `ReplicaSet` is changed itself, the validation request will include the changed object and the webhook will be able to check the label on it. 
+For this reason the webhook will perform the check of the `grafana.com/no-downscale` label on the object itself on every received request.
+When an object like `StatefulSet`, `DeploymentSet` or `ReplicaSet` is changed itself, the validation request will include the changed object and the webhook will be able to check the label on it.
 When a `/scale` subresouce is changed (for example by running `kubectl scale ...`) the request will not contain the changed object, and `rollout-operator` will use the Kubernetes API to retrieve the parent object and check the label on it.
- 
+
 You will see in [TLS Certificates](#tls-certificates) section below that this label is also used to inject the CA bundle into the webhook configuration.
 
- > *Note*: if you plan running validations on `DeploymentSet` or `ReplicaSet` objects, you need to make sure that the `rollout-operator` has the privileges to list and get those objects.
+> _Note_: if you plan running validations on `DeploymentSet` or `ReplicaSet` objects, you need to make sure that the `rollout-operator` has the privileges to list and get those objects.
 
 ##### Matching namespaces
 
@@ -346,6 +350,7 @@ If you want to restrict the webhook to a specific namespace, you can use the `na
 ##### Handling errors
 
 The webhook is conservative and allows changes whenever an error occurs:
+
 - When parent object can't be retrieved from the API.
 - When the validation request can't be decoded or includes an unsupported type.
 
@@ -367,33 +372,33 @@ metadata:
     grafana.com/namespace: default
   name: prepare-downscale-default
 webhooks:
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: rollout-operator
-      namespace: default
-      path: /admission/prepare-downscale
-      port: 443
-  failurePolicy: Fail
-  matchPolicy: Equivalent
-  name: prepare-downscale-default.grafana.com
-  rules:
-  - apiGroups:
-    - apps
-    apiVersions:
-    - v1
-    operations:
-    - UPDATE
-    resources:
-    - statefulsets
-    - statefulsets/scale
-    scope: Namespaced
-  sideEffects: NoneOnDryRun
-  timeoutSeconds: 10
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: rollout-operator
+        namespace: default
+        path: /admission/prepare-downscale
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    name: prepare-downscale-default.grafana.com
+    rules:
+      - apiGroups:
+          - apps
+        apiVersions:
+          - v1
+        operations:
+          - UPDATE
+        resources:
+          - statefulsets
+          - statefulsets/scale
+        scope: Namespaced
+    sideEffects: NoneOnDryRun
+    timeoutSeconds: 10
 ```
 
-This webhook configuration should point to a `Service` that points to the `rollout-operator`'s HTTPS server exposed on port `-server-tls.port=8443`. 
+This webhook configuration should point to a `Service` that points to the `rollout-operator`'s HTTPS server exposed on port `-server-tls.port=8443`.
 For example:
 
 ```yaml
@@ -406,10 +411,10 @@ spec:
     name: rollout-operator
   type: ClusterIP
   ports:
-  - name: https
-    port: 443
-    protocol: TCP
-    targetPort: 8443
+    - name: https
+      port: 443
+      protocol: TCP
+      targetPort: 8443
 ```
 
 Note that the `Service` created for the `/admission/no-downscale` can be reused if already present.
@@ -442,7 +447,7 @@ For convenience, `rollout-operator` offers a self-signed certificates generator 
 This generator will generate a self-signed certificate and store it in a secret specified by the flag `-server-tls.self-signed-cert.secret-name`.
 The certificate is stored in a secret in order to reuse it across restarts of the `rollout-operator`.
 
-`rollout-operator` will list all the `ValidatingWebhookConfiguration` or `MutatingWebhookConfiguration` objects in the cluster that are labeled with `grafana.com/inject-rollout-operator-ca: true` and `grafana.com/namespace: <value of -kubernetes-namespace>` and will inject the CA certificate in the `caBundle` field of the webhook configuration. 
+`rollout-operator` will list all the `ValidatingWebhookConfiguration` or `MutatingWebhookConfiguration` objects in the cluster that are labeled with `grafana.com/inject-rollout-operator-ca: true` and `grafana.com/namespace: <value of -kubernetes-namespace>` and will inject the CA certificate in the `caBundle` field of the webhook configuration.
 This mechanism can be disabled by setting `-webhooks.update-ca-bundle=false`.
 
 This signing and injecting is performed at service startup once, so you would need to restart `rollout-operator` if you want to inject the CA certificate in a new `ValidatingWebhookConfiguration` object.
@@ -486,9 +491,9 @@ kind: ClusterRole
 metadata:
   name: rollout-operator-webhook-default-clusterrole
 rules:
-- apiGroups: [admissionregistration.k8s.io]
-  resources: [validatingwebhookconfigurations]
-  verbs: [list, patch, watch]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingwebhookconfigurations]
+    verbs: [list, patch, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -511,7 +516,7 @@ The default expiration for the self-signed certificate is 1 year and it can be c
 
 # ZoneAwarePodDisruptionBudget (ZPDB)
 
-A custom `PodDisruptionBudget` is available for use with the `rollout-operator`. 
+A custom `PodDisruptionBudget` is available for use with the `rollout-operator`.
 
 This is for use with `StatefulSets` which span multiple logical zones and allows for the budget to be evaluated against the pods in other zones.
 
@@ -521,9 +526,9 @@ This allows an operator to perform maintenance on a single zone whilst ensuring 
 
 Consider the following topology where the `ZPDB` has `maxUnavailable` set to 1:
 
-* StatefulSet `ingester-zone-a` manages pods `ingester-zone-a-0` and `ingester-zone-a-1`
-* StatefulSet `ingester-zone-b` manages pods `ingester-zone-b-0` and `ingester-zone-b-1`
-* StatefulSet `ingester-zone-c` manages pods `ingester-zone-c-0` and `ingester-zone-c-1`
+- StatefulSet `ingester-zone-a` manages pods `ingester-zone-a-0` and `ingester-zone-a-1`
+- StatefulSet `ingester-zone-b` manages pods `ingester-zone-b-0` and `ingester-zone-b-1`
+- StatefulSet `ingester-zone-c` manages pods `ingester-zone-c-0` and `ingester-zone-c-1`
 
 When a pod eviction request is received, the availability of the pods in the other zones are considered, as well as the availability in the zone of the pod being evicted.
 
@@ -535,7 +540,7 @@ If `maxUnavailable` is 2, `ingester-zone-a-0` eviction would be granted since zo
 
 If `ingester-zone-a-0` is to be evicted, and `ingester-zone-b-0` has failed, the eviction request will be denied regardless of the value of `maxUnavailable` because another zone is already disrupted.
 
-*A pod eviction is only allowed if the number of unavailable pods is within the maximum unavailability threshold for the zone and no other zone has a disruption.*
+_A pod eviction is only allowed if the number of unavailable pods is within the maximum unavailability threshold for the zone and no other zone has a disruption._
 
 ## Partition awareness
 
@@ -543,7 +548,7 @@ The `ZPDB` can be configured for partition awareness. This is intended for workl
 
 In this configuration, the `ZPDB` determines the partition for a pod being evicted, and considers this eviction against the unavailable counts for ALL pods which serve this partition.
 
-*A pod eviction is only allowed if the number of unavailable pods serving a specific partition is less than the `maxUnavailable` value.*
+_A pod eviction is only allowed if the number of unavailable pods serving a specific partition is less than the `maxUnavailable` value._
 
 Using the same topology as the previous section where the `ZPDB` has `maxUnavailable=1`;
 
@@ -551,7 +556,7 @@ If `ingester-zone-b-0` has failed and `ingester-zone-a-1` is to be evicted, it w
 
 If `ingester-zone-b-0` has failed and `ingester-zone-a-0` is to be evicted, it will be denied as the partition `0` in zone `b` is disrupted.
 
-*Note that there is a key assumption that there is only one pod per partition per zone assigned to each partition. We do not expect there to be multiple pods within a zone serving the same partition.*
+_Note that there is a key assumption that there is only one pod per partition per zone assigned to each partition. We do not expect there to be multiple pods within a zone serving the same partition._
 
 ## Operations
 
@@ -563,9 +568,9 @@ A pod eviction webhook is registered for approving voluntary pod eviction reques
 
 The following is required to enable the `ZoneAwarePodDisruptionBudget`;
 
-* a custom resource definition for the `ZoneAwarePodDisruptionBudget` kind - a sample is provided in [development](./development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml)
-* a `ValidatingWebhookConfiguration` for registering the `rollout-operator` for pod evictions - a sample is provided in [development](./development/eviction-webhook.yaml)
-* a `ZoneAwarePodDisruptionBudget` kind for each set of `StatefulSets` - see below
+- a custom resource definition for the `ZoneAwarePodDisruptionBudget` kind - a sample is provided in [development](./development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml)
+- a `ValidatingWebhookConfiguration` for registering the `rollout-operator` for pod evictions - a sample is provided in [development](./development/eviction-webhook.yaml)
+- a `ZoneAwarePodDisruptionBudget` kind for each set of `StatefulSets` - see below
 
 Example `ZoneAwarePodDisruptionBudget`;
 
@@ -593,11 +598,11 @@ The exact resource attributes should be referenced via the provided custom resou
 
 Functionality includes the ability to;
 
-* set a fixed max unavailable pod threshold
-* set the unavailable pod threshold as a percentage. This can only be used in classic zones and can not be used with partition awareness. The percentage is calculated against the StatefulSet's `spec.Replica` count. 
-* set the selector to match the applicable Pods and StatefulSets
-* set the regular expression to determine a partition name from a pod name (if using partition awareness)
-* set a cross-zone eviction delay to enforce a minimum time before a pod in another zone for the same partition can be evicted (requires partition awareness). The value must be a valid Go duration string (e.g. `20m`, `1h`).
+- set a fixed max unavailable pod threshold
+- set the unavailable pod threshold as a percentage. This can only be used in classic zones and can not be used with partition awareness. The percentage is calculated against the StatefulSet's `spec.Replica` count.
+- set the selector to match the applicable Pods and StatefulSets
+- set the regular expression to determine a partition name from a pod name (if using partition awareness)
+- set a cross-zone eviction delay to enforce a minimum time before a pod in another zone for the same partition can be evicted (requires partition awareness). The value must be a valid Go duration string (e.g. `20m`, `1h`).
 
 Note - `maxUnavailable` can be set to 0. In this case no voluntary evictions in any zone will be allowed.
 
@@ -612,12 +617,14 @@ Note - the `podNameRegexGroup` allows for the capture group index to be set. Thi
 Integration tests require Docker and kind (Kubernetes in Docker).
 
 To run all integration tests:
+
 ```bash
 make build-image
 make integration
 ```
 
 To run a specific integration test (in this example `TestNoDownscale_UpdatingScaleSubresource`):
+
 ```bash
 make build-test-images
 go test -v -tags requires_docker -timeout 30m ./integration -run TestNoDownscale_UpdatingScaleSubresource
@@ -625,8 +632,10 @@ go test -v -tags requires_docker -timeout 30m ./integration -run TestNoDownscale
 
 ## Leader election
 
-Operators in the same namespace share the Lease configured by `-leader-election.lease-name` (default `rollout-operator`). Only the leader runs controllers and admission webhooks. Healthy standbys report Ready, so separate single-replica Deployments in different availability zones can both become available.
+Leader election is disabled by default. Enable it with `-leader-election.enabled=true`, or set `rollout_operator_leader_election_enabled: true` in Jsonnet. With election disabled, run one operator per namespace; no Lease or pod patch permissions are required, and the webhook Service uses only its application labels.
 
-The webhook Service must select `rollout-operator.grafana.com/leader: "true"` in addition to its application labels. The operator sets this pod label after leader initialization and clears it on startup and graceful shutdown. Grant `patch` on `pods`, and provide the pod name through the `POD_NAME` downward API environment variable or `-kubernetes.pod-name`. The hostname is used when neither is provided. The supplied Jsonnet and development manifests configure these requirements.
+When enabled, operators in the same namespace share the Lease configured by `-leader-election.lease-name` (default `rollout-operator`). Only the leader runs controllers and admission webhooks. Healthy standbys report Ready, so separate single-replica Deployments in different availability zones can both become available.
+
+The webhook Service must select `rollout-operator.grafana.com/leader: "true"` in addition to its application labels. The operator sets this pod label after leader initialization and clears it on startup and graceful shutdown. Grant `get`, `create`, and `update` on `leases` in `coordination.k8s.io`, and `patch` on `pods`, and provide the pod name through the `POD_NAME` downward API environment variable or `-kubernetes.pod-name`. The hostname is used when neither is provided. Jsonnet configures these requirements when election is enabled. The development manifests explicitly enable election.
 
 Both Deployments must use the same namespace, Lease name, and Service application labels. Leadership loss exits the process; a replacement waits for Lease expiration before taking over.

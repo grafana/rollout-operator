@@ -46,6 +46,7 @@ func TestConfigValidateLeaderElection(t *testing.T) {
 	for name, modify := range tests {
 		t.Run(name, func(t *testing.T) {
 			cfg := newValidConfig(t)
+			cfg.leaderElectionEnabled = true
 			modify(&cfg)
 			require.Error(t, cfg.validate())
 		})
@@ -54,6 +55,7 @@ func TestConfigValidateLeaderElection(t *testing.T) {
 
 func TestRunWithLeaderElectionAcquiresLease(t *testing.T) {
 	cfg := newValidConfig(t)
+	cfg.leaderElectionEnabled = true
 	cfg.leaderElectionLeaseDuration = 2 * time.Second
 	cfg.leaderElectionRenewDeadline = time.Second
 	cfg.leaderElectionRetryPeriod = 100 * time.Millisecond
@@ -187,6 +189,7 @@ func TestDeprecatedZPDBReadyAnnotationPatchTimeoutFlag(t *testing.T) {
 
 func TestStandbyReadyWithoutWebhookRoutingAndTakeover(t *testing.T) {
 	cfg := newValidConfig(t)
+	cfg.leaderElectionEnabled = true
 	cfg.kubePodName = "standby"
 	cfg.leaderElectionLeaseDuration = 2 * time.Second
 	cfg.leaderElectionRenewDeadline = time.Second
@@ -255,6 +258,7 @@ func TestStandbyReadyWithoutWebhookRoutingAndTakeover(t *testing.T) {
 
 func TestLeaderRoutingPatchFailureKeepsPodUnready(t *testing.T) {
 	cfg := newValidConfig(t)
+	cfg.leaderElectionEnabled = true
 	cfg.kubePodName = "missing-pod"
 	ready := atomic.NewBool(false)
 	err := runWithLeaderElection(t.Context(), fake.NewSimpleClientset(), cfg, "test", log.NewNopLogger(), ready, func(context.Context) {
@@ -262,4 +266,23 @@ func TestLeaderRoutingPatchFailureKeepsPodUnready(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "failed to clear leader pod label")
 	require.False(t, ready.Load())
+}
+
+func TestLeaderElectionDisabledByDefault(t *testing.T) {
+	cfg := newValidConfig(t)
+	require.False(t, cfg.leaderElectionEnabled)
+	cfg.leaderElectionLeaseName = ""
+	cfg.leaderElectionLeaseDuration = 0
+	require.NoError(t, cfg.validate())
+	client := fake.NewSimpleClientset()
+	started := false
+	ctx := t.Context()
+	require.NoError(t, runWithLeaderElection(ctx, client, cfg, "", log.NewNopLogger(), atomic.NewBool(false), func(operatorCtx context.Context) {
+		require.Equal(t, ctx, operatorCtx)
+		started = true
+	}))
+	require.True(t, started)
+	require.NoError(t, setLeaderLabel(ctx, client, cfg, true))
+	require.NoError(t, setLeaderLabel(ctx, client, cfg, false))
+	require.Empty(t, client.Actions(), "default startup must not require Pod patch or Lease access")
 }

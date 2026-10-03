@@ -22,6 +22,15 @@ deny contains msg if {
 deny contains msg if {
     obj := input[_].contents
     is_service(obj)
+    has_leader_election
     not obj.spec.selector["rollout-operator.grafana.com/leader"] == "true"
     msg := sprintf("Service does not select the elected leader, %v", [display_name(obj)])
+}
+
+deny contains msg if {
+    obj := input[_].contents
+    is_service(obj)
+    not has_leader_election
+    has_key(obj.spec.selector, "rollout-operator.grafana.com/leader")
+    msg := sprintf("Disabled leader election must route without the leader label, %v", [display_name(obj)])
 }
