@@ -26,6 +26,7 @@ spec:
           image: rollout-operator:latest
           imagePullPolicy: IfNotPresent
           args:
+            - -leader-election.enabled=true
             - -kubernetes.namespace=rollout-operator-development
             - -reconcile.interval=1s
             - -log.level=debug
@@ -41,6 +42,10 @@ spec:
               port: 8001
               path: /ready
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
               value: http://jaeger.rollout-operator-development.svc.cluster.local.:4318/v1/traces
       restartPolicy: Always

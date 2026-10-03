@@ -2,11 +2,11 @@ package main
 
 # Tests which relate to the expected Role and RoleBinding manifests
 
-expected_rules = [
+expected_rules := [
   {
     "apiGroups": [""],
     "resources": ["pods"],
-    "verbs": ["list", "get", "watch", "delete"],
+    "verbs": pod_verbs,
   },
   {
     "apiGroups": ["apps"],
@@ -23,6 +23,7 @@ expected_rules = [
     "resources": ["configmaps"],
     "verbs": ["get", "update", "create"],
   },
+
 ]
 
 extra_zpdb_rule = {
@@ -96,4 +97,29 @@ deny contains msg if {
     is_role(role)
     role.metadata.name != role_binding.roleRef.name
     msg := sprintf("RoleBinding roleRef name does not match, %v. Got %v, expected %v", [display_name(role_binding), role_binding.roleRef.name, role.metadata.name])
+}
+
+pod_verbs := ["list", "get", "watch", "delete", "patch"] if has_leader_election
+else := ["list", "get", "watch", "delete"]
+
+lease_rule := {
+    "apiGroups": ["coordination.k8s.io"],
+    "resources": ["leases"],
+    "verbs": ["get", "create", "update"],
+}
+
+deny contains msg if {
+    obj := input[_].contents
+    is_role(obj)
+    has_leader_election
+    not rule_present(obj, lease_rule)
+    msg := sprintf("Leader election requires Lease access, %v", [display_name(obj)])
+}
+
+deny contains msg if {
+    obj := input[_].contents
+    is_role(obj)
+    not has_leader_election
+    role_api_group_exists(obj, "coordination.k8s.io")
+    msg := sprintf("Disabled leader election must not grant Lease access, %v", [display_name(obj)])
 }
