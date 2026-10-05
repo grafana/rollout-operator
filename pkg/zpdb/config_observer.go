@@ -61,7 +61,7 @@ func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 }
 
 func (c *configObserver) start() error {
-	_, err := c.pdbInformer.AddEventHandler(k8cache.ResourceEventHandlerFuncs{
+	handler, err := c.pdbInformer.AddEventHandler(k8cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onPdbAdded,
 		UpdateFunc: c.onPdbUpdated,
 		DeleteFunc: c.onPdbDeleted,
@@ -72,9 +72,9 @@ func (c *configObserver) start() error {
 
 	go c.pdbFactory.Start(c.stopCh)
 
-	// Wait until all informer caches have been synced.
+	// Evictions must not see an empty cache while initial ZPDB events are still queued.
 	level.Info(c.logger).Log("msg", "zpdb config informer caches are syncing")
-	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbInformer.HasSynced); !ok {
+	if ok := k8cache.WaitForCacheSync(c.stopCh, handler.HasSynced); !ok {
 		return errors.New("zpdb config informer caches failed to sync")
 	}
 	level.Info(c.logger).Log("msg", "zpdb config informer caches have synced")
