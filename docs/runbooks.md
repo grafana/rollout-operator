@@ -139,17 +139,6 @@ How to **investigate**:
 - Apply the CRD and referenced ReplicaTemplate objects in the namespace managed by the operator. Discovery is checked every 30 seconds; discovering the resource triggers reconciliation without a restart.
 - Verify that the readiness metric returns to `1` and replica mirroring resumes. This metric reports resource discovery, not the existence or accessibility of a particular ReplicaTemplate object.
 
-Both observer alerts are enabled by default in the mixin. For deployments that intentionally do not use one or both CRDs, disable the corresponding alert:
-
-```jsonnet
-_config+:: {
-    rollout_operator_zpdb_config_observer_alert_enabled: false,
-    rollout_operator_replica_template_observer_alert_enabled: false,
-}
-```
-
-These alerts require the readiness metrics to be scraped. They do not detect missing metrics or an unavailable operator.
-
 ## Metrics
 
 A Prometheus metrics endpoint is available at `/metrics` of the rollout-operator deployment.
