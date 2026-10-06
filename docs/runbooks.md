@@ -110,6 +110,46 @@ How to **investigate**:
 - Since this fires before anything is actually being dropped, there is more room to act before impact: reduce the load at its source, or raise the limits. See [Kubernetes API client rate limiting](#kubernetes-api-client-rate-limiting)
 - If it keeps firing without ever tipping into the saturation alert, the limit may simply be sized close to normal peak load - consider raising it rather than treating every firing as an incident
 
+### rollout-operatorZpdbConfigObserverNotReady
+
+This alert fires when `rollout_operator_zpdb_config_observer_ready` remains `0` for 5 minutes.
+
+The observer cannot access the ZPDB resource or has not synchronized its configuration. If the operator started without the ZPDB CRD, ZPDB enforcement is inactive and evictions are allowed without ZPDB checks. Other Kubernetes admission checks and PodDisruptionBudgets still apply.
+
+How to **investigate**:
+
+- Verify that `zoneawarepoddisruptionbudgets.rollout-operator.grafana.com` is installed and established:
+  `kubectl get crd zoneawarepoddisruptionbudgets.rollout-operator.grafana.com`
+- Check operator logs for `zpdb custom resource is unavailable`, `zpdb resource check failed`, or `zpdb config observer watch failed`. Check Kubernetes API availability and the service account's list/watch permissions for ZPDB resources.
+- Apply the CRD and required ZPDB objects in the namespace managed by the operator. Recovery is automatic and requires no restart.
+- Wait for the readiness metric to return to `1`, and verify that valid ZPDB configurations select the intended pods. Observer readiness alone does not guarantee that a matching, valid ZPDB exists.
+- Avoid voluntary disruptions requiring ZPDB protection until configuration and recovery have been verified.
+
+### rollout-operatorReplicaTemplateObserverNotReady
+
+This alert fires when `rollout_operator_replica_template_observer_ready` remains `0` for 5 minutes.
+
+The operator cannot discover the ReplicaTemplate resource and its `/scale` subresource. StatefulSets referencing ReplicaTemplates may be unable to mirror their replica counts; pod rollouts continue.
+
+How to **investigate**:
+
+- Verify that `replicatemplates.rollout-operator.grafana.com` is installed and established, and that the CRD exposes its scale subresource:
+  `kubectl get crd replicatemplates.rollout-operator.grafana.com -o yaml`
+- Check Kubernetes API discovery access and availability. For replica mirroring failures, also check the operator logs and the service account's access to ReplicaTemplate scale/status subresources.
+- Apply the CRD and referenced ReplicaTemplate objects in the namespace managed by the operator. Discovery is checked every 30 seconds; discovering the resource triggers reconciliation without a restart.
+- Verify that the readiness metric returns to `1` and replica mirroring resumes. This metric reports resource discovery, not the existence or accessibility of a particular ReplicaTemplate object.
+
+Both observer alerts are enabled by default in the mixin. For deployments that intentionally do not use one or both CRDs, disable the corresponding alert:
+
+```jsonnet
+_config+:: {
+    rollout_operator_zpdb_config_observer_alert_enabled: false,
+    rollout_operator_replica_template_observer_alert_enabled: false,
+}
+```
+
+These alerts require the readiness metrics to be scraped. They do not detect missing metrics or an unavailable operator.
+
 ## Metrics
 
 A Prometheus metrics endpoint is available at `/metrics` of the rollout-operator deployment.

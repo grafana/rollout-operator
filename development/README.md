@@ -18,6 +18,18 @@ You'll then be able to access the rollout operator at `http://localhost:8080`, a
 
 You can use the StatefulSets to exercise the operator across a multi-zone `test-app` environment.
 
+# Running with CRDs
+
+The development `apply.sh` script installs both CRDs before deploying the operator. The operator can also start before either CRD is installed.
+
+Without the ReplicaTemplate CRD, StatefulSets referencing ReplicaTemplates cannot mirror their replica counts. Pod rollouts continue, and replica mirroring recovers automatically once the CRD and referenced resources are available.
+
+Without the ZoneAwarePodDisruptionBudget CRD, ZPDB enforcement is inactive: the operator allows evictions without ZPDB checks. Other Kubernetes admission checks and PodDisruptionBudgets still apply. If the CRD is already installed at startup, the operator waits until existing ZPDB configurations have been loaded before serving eviction requests.
+
+CRDs and custom resources can be applied later without restarting the operator. Recovery is asynchronous; informer retries and discovery checks can delay activation, and Kubernetes API failures can extend that delay. Verify observer readiness and configuration before relying on ZPDB protection. For installations requiring continuous ZPDB protection, install the CRD and valid ZPDB configuration before starting the operator.
+
+The mixin includes alerts for unavailable observers, enabled by default. See the [observer alert runbooks](../docs/runbooks.md#rollout-operatorzpdbconfigobservernotready) for investigation and instructions to disable alerts for intentionally unused CRDs.
+
 # ZoneAwarePodDisruptionBudget (ZPDB)
 
 Included is a `ZoneAwarePodDisruptionBudget` which can be used to enforce a multi-zone pod disruption budget.

@@ -84,7 +84,31 @@ local utils = import 'mixin-utils/utils.libsonnet';
             message: 'The rollout-operator pod {{ $labels.pod }}' + "'" + 's {{ $labels.component }} client is sustaining over 80% of its configured client-side rate limit for the {{ $labels.api_group }} Kubernetes API group. It is not yet dropping requests, but is at risk of doing so.',
           },
         },
-      ],
+      ] + (if $._config.rollout_operator_zpdb_config_observer_alert_enabled then [
+             {
+               alert: $.alertName('ZpdbConfigObserverNotReady'),
+               expr: 'rollout_operator_zpdb_config_observer_ready == 0',
+               'for': '5m',
+               labels: {
+                 severity: 'warning',
+               },
+               annotations: {
+                 message: 'The rollout-operator pod {{ $labels.pod }} cannot access the ZPDB resource or has not synchronized its configuration. ZPDB protection may be inactive.',
+               },
+             },
+           ] else []) + (if $._config.rollout_operator_replica_template_observer_alert_enabled then [
+                           {
+                             alert: $.alertName('ReplicaTemplateObserverNotReady'),
+                             expr: 'rollout_operator_replica_template_observer_ready == 0',
+                             'for': '5m',
+                             labels: {
+                               severity: 'warning',
+                             },
+                             annotations: {
+                               message: 'The rollout-operator pod {{ $labels.pod }} cannot discover the ReplicaTemplate resource and its scale subresource. ReplicaTemplate replica mirroring may be unavailable.',
+                             },
+                           },
+                         ] else []),
     },
   ],
   groups+: $.withRunbookURL('https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#%s', $.withExtraLabelsAnnotations(alertGroups)),
