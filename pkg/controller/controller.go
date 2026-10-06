@@ -212,13 +212,10 @@ func (c *RolloutController) Init() error {
 		go c.observeReplicaTemplate()
 	}
 
-	// Wait until all informer caches have been synced.
 	level.Info(c.logger).Log("msg", "informer caches are syncing")
-	synced := []cache.InformerSynced{c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced}
-	if c.replicaTemplatesInformer != nil {
-		synced = append(synced, c.replicaTemplatesInformer.HasSynced)
-	}
-	if ok := cache.WaitForCacheSync(c.stopCh, synced...); !ok {
+	// ReplicaTemplate watches only enqueue reconciliation; scaling reads the API directly,
+	// so their cache must not block startup when the CRD is installed later.
+	if ok := cache.WaitForCacheSync(c.stopCh, c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced); !ok {
 		return errors.New("informer caches failed to sync")
 	}
 	level.Info(c.logger).Log("msg", "informer caches have synced")
