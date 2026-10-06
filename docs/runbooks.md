@@ -1,5 +1,39 @@
 # Rollout-operator runbooks
 
+## Leader election and webhook failover
+
+Leader election is disabled by default. Enable high availability with `-leader-election.enabled=true` or the Jsonnet option `rollout_operator_leader_election_enabled: true`. See [Leader election](../README.md#leader-election) for the required RBAC, pod identity, and webhook Service selector.
+
+Only the elected leader runs controllers and serves admission webhooks. Healthy standby pods report Ready; readiness alone does not identify the leader. Inspect the Lease and the pod selected for webhook traffic:
+
+```bash
+kubectl -n <namespace> get lease rollout-operator -o yaml
+kubectl -n <namespace> get pods -l rollout-operator.grafana.com/leader=true
+kubectl -n <namespace> get endpointslices -l kubernetes.io/service-name=rollout-operator
+```
+
+The Lease's `spec.holderIdentity` identifies the elected instance. Replace `rollout-operator` if `-leader-election.lease-name` is customized.
+
+Depending on the failure scenario, there is a delay before the new leader starts serving webhooks. The replacement waits for Lease expiration (default `-leader-election.lease-duration=15s`), initializes its controllers and webhook server, and sets its leader pod label; Service endpoint propagation adds further delay. During webhook unavailability, `failurePolicy: Fail` ensures that eviction and scale requests matching the configured webhooks are denied. Keep this policy enabled to preserve rollout and disruption safeguards during failover.
+
+### Monitor the Lease with kube-state-metrics
+
+Ensure kube-state-metrics collects `leases` in the operator's namespace and has `list` and `watch` access to `leases` in the `coordination.k8s.io` API group. These [Lease metrics](https://github.com/kubernetes/kube-state-metrics/blob/main/docs/metrics/cluster/lease-metrics.md) are experimental; verify that your installed version exposes them.
+
+Show the current holder in the `lease_holder` label:
+
+```promql
+kube_lease_owner{namespace="<namespace>", lease="rollout-operator"} == 1
+```
+
+Show seconds since the last renewal:
+
+```promql
+time() - kube_lease_renew_time{namespace="<namespace>", lease="rollout-operator"}
+```
+
+Compare renewal age with the configured Lease duration, allowing for scrape delay. A holder label can remain after a leader has failed, so use renewal age, operator logs, and Service endpoints to investigate whether that instance is still serving webhooks. Missing metrics can indicate a collector, RBAC, or scrape problem; they do not prove that there is no leader.
+
 ## Alerts
 
 ### IncorrectWebhookConfigurationFailurePolicy
