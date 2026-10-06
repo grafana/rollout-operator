@@ -51,12 +51,6 @@ var replicaTemplateGroupKind = schema.GroupKind{
 	Kind:  "ReplicaTemplate",
 }
 
-var replicaTemplateGVR = schema.GroupVersionResource{
-	Group:    replicaTemplateGroupKind.Group,
-	Version:  "v1",
-	Resource: "replicatemplates",
-}
-
 type ZPDBEvictionController interface {
 	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string, override zpdb.MaxUnavailableZeroOverride) error
 	HasPartitionAwarePdb(pod *corev1.Pod) (bool, error)

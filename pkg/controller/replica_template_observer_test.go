@@ -40,7 +40,7 @@ func TestReplicaTemplateUpdateFiltersStatus(t *testing.T) {
 func TestReplicaTemplateWatchEnqueuesReconcile(t *testing.T) {
 	kube := fake.NewSimpleClientset()
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{replicaTemplateGVR: "ReplicaTemplateList"})
-	c := NewRolloutController(kube, nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+	c := NewRolloutController(kube, nil, nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
 	c.WatchReplicaTemplates()
 	t.Cleanup(c.Stop)
 	require.NoError(t, c.Init())
