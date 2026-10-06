@@ -52,6 +52,10 @@
     alert_extra_labels: {},
     alert_extra_annotations: {},
 
+    // Disable these where the corresponding CRD is intentionally unused.
+    rollout_operator_zpdb_config_observer_alert_enabled: true,
+    rollout_operator_replica_template_observer_alert_enabled: true,
+
     rollout_operator_resources_panel_queries: {
       cpu_usage: 'sum by(%(instanceLabel)s) (rate(container_cpu_usage_seconds_total{%(namespace)s,container=~"%(containerName)s"}[$__rate_interval]))',
       cpu_limit: 'min(container_spec_cpu_quota{%(namespace)s,container=~"%(containerName)s"} / container_spec_cpu_period{%(namespace)s,container=~"%(containerName)s"})',
