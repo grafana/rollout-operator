@@ -6,6 +6,7 @@
 * [ENHANCEMENT] Reuse the related StatefulSet list to resolve a pod's owner during ZPDB eviction, avoiding a redundant Kubernetes API GET on the common path. #516
 * [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
 * [FEATURE] Add a read-only `/ui/status` HTML page for StatefulSet rollout group progress (phase, ready replicas, revisions, updated pods). #473
+* [ENHANCEMENT] Allow startup without the ReplicaTemplate or ZoneAwarePodDisruptionBudget CRDs and recover automatically when they are installed later. While the ZPDB CRD is absent, evictions are allowed without ZPDB checks. When it is already installed, startup waits until existing ZPDB configurations have been loaded. Expose readiness metrics and alerts for both resources; each alert can be disabled for intentionally unused CRDs. #476
 
 ## v0.40.0
 
