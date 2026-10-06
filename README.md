@@ -174,7 +174,11 @@ Prometheus metrics endpoint.
 
 Read-only HTML status page for StatefulSet rollout groups managed by this operator.
 It shows per-group and per-zone phase, replica readiness, revisions, updated pod counts,
-pause state, and operator configuration for each StatefulSet. The page is served from
+pause state, and operator configuration for each StatefulSet. The reason column also
+shows blockers from the last deletion attempt: exhausted rollout `maxUnavailable`,
+terminating pods, and ZPDB denial reasons. Each blocker includes the attempt time;
+it is an observed decision, not a fresh eviction check. Blockers are cleared on the
+next group reconcile and hidden for replaced pods or a changed rollout. The page is served from
 the same HTTP server as `/metrics` and `/ready` (port `-server.port`, default `8001`).
 
 Access is expected via port-forward or a private network path. The endpoint is read-only:
