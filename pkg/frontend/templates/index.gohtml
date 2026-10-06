@@ -57,7 +57,17 @@
             <td>
               <a class="config-link" href="{{basePath}}/statefulset/{{.Name}}">View</a>
             </td>
-            <td>{{.Reason}}</td>
+            <td class="rollout-reason">{{.Reason}}
+              {{if .Blockers}}
+              <ul class="blockers">
+                {{range .Blockers}}
+                <li>{{if .Pod}}<code>{{.Pod}}</code>: {{end}}{{.Reason}}
+                  <div class="meta">Last attempt · {{.ObservedAt.Format "2006-01-02 15:04:05 UTC"}}</div>
+                </li>
+                {{end}}
+              </ul>
+              {{end}}
+            </td>
           </tr>
           {{end}}
         </tbody>

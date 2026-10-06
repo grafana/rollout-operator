@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/grafana/rollout-operator/pkg/config"
 	"github.com/grafana/rollout-operator/pkg/instrumentation"
+	"github.com/grafana/rollout-operator/pkg/status"
 	"github.com/grafana/rollout-operator/pkg/util"
 	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
@@ -66,6 +68,9 @@ type RolloutController struct {
 	logger               log.Logger
 
 	zpdbController ZPDBEvictionController
+
+	blockersMu      sync.RWMutex
+	rolloutBlockers map[string]recordedBlockers
 
 	// This bool is true if we should trigger a reconcile.
 	shouldReconcile atomic.Bool
@@ -278,6 +283,8 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 		return err
 	}
 
+	c.pruneRolloutBlockers(sets)
+
 	// Group statefulsets by the rollout group label. Each group will be reconciled independently.
 	groups := util.GroupStatefulSetsByLabel(sets, config.RolloutGroupLabelKey)
 	var reconcileErrs error
@@ -298,6 +305,7 @@ func (c *RolloutController) reconcile(ctx context.Context) error {
 }
 
 func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, groupName string, sets []*v1.StatefulSet) (returnErr error) {
+	c.clearRolloutBlockers(sets)
 	// Track metrics about the reconcile operation. We always get the failed counter and
 	// last successful gauge so that they get created the first time with the default zero
 	// value the first time.
@@ -561,6 +569,8 @@ func (c *RolloutController) listPods(sel labels.Selector) ([]*corev1.Pod, error)
 
 func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.StatefulSet) (bool, error) {
 	level.Debug(c.logger).Log("msg", "reconciling StatefulSet", "statefulset", sts.Name)
+	var blockers []status.Blocker
+	defer func(attemptedSet *v1.StatefulSet) { c.recordRolloutBlockers(attemptedSet, blockers) }(sts)
 
 	podsToUpdate, err := c.podsNotMatchingUpdateRevision(sts)
 	if err != nil {
@@ -590,6 +600,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 			// checking if the deletionTimestamp has been set (kubectl does something similar too).
 			if pod.DeletionTimestamp != nil {
 				level.Debug(c.logger).Log("msg", fmt.Sprintf("waiting for pod %s to be terminated", pod.Name))
+				blockers = append(blockers, status.Blocker{Pod: pod.Name, PodUID: pod.UID, Reason: "waiting for pod to terminate"})
 				continue
 			}
 
@@ -606,6 +617,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 		if len(podsToDelete) == 0 {
 			if numPods == 0 {
+				blockers = append(blockers, status.Blocker{Reason: fmt.Sprintf("maxUnavailable budget exhausted: %d unavailable, limit %d", numNotReady, maxUnavailable)})
 				level.Info(c.logger).Log(
 					"msg", "StatefulSet has some pods to be updated but maxUnavailable pods has been reached",
 					"statefulset", sts.Name,
@@ -658,6 +670,7 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 				// we allow this update loop to continue. For configurations which have a partition aware ZPDB it is valid
 				// to have multiple disruptions as long as there is at least one healthy pod per partition.
 				level.Debug(c.logger).Log("msg", "zpdb denied pod deletion", "pod", pod.Name, "reason", err)
+				blockers = append(blockers, status.Blocker{Pod: pod.Name, PodUID: pod.UID, Reason: "ZPDB denied deletion: " + err.Error()})
 				continue
 			}
 
@@ -690,10 +703,11 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 		sts.Status.CurrentRevision = sts.Status.UpdateRevision
 
 		level.Debug(c.logger).Log("msg", "updating StatefulSet current revision", "old_current_revision", oldRev, "new_current_revision", sts.Status.UpdateRevision)
-		if sts, err = c.kubeClient.AppsV1().StatefulSets(sts.Namespace).UpdateStatus(ctx, sts, metav1.UpdateOptions{}); err != nil {
+		updatedSet, err := c.kubeClient.AppsV1().StatefulSets(sts.Namespace).UpdateStatus(ctx, sts, metav1.UpdateOptions{})
+		if err != nil {
 			return false, fmt.Errorf("failed to update StatefulSet %s: %w", sts.Name, err)
 		}
-		level.Info(c.logger).Log("msg", "updated StatefulSet current revision", "old_current_revision", oldRev, "new_current_revision", sts.Status.UpdateRevision)
+		level.Info(c.logger).Log("msg", "updated StatefulSet current revision", "old_current_revision", oldRev, "new_current_revision", updatedSet.Status.UpdateRevision)
 	}
 
 	return false, nil
