@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Allow startup without the ReplicaTemplate or ZoneAwarePodDisruptionBudget CRDs and recover automatically when they are installed later. ZPDB enforcement is inactive while its CRD is absent; startup still waits for cache synchronization when it is present. Expose readiness metrics for both resources. #476
+* [ENHANCEMENT] Allow startup without the ReplicaTemplate or ZoneAwarePodDisruptionBudget CRDs and recover automatically when they are installed later. While the ZPDB CRD is absent, evictions are allowed without ZPDB checks. When it is already installed, startup waits until existing ZPDB configurations have been loaded. Expose readiness metrics and alerts for both resources; each alert can be disabled for intentionally unused CRDs. #476
 
 ## v0.41.0
 
