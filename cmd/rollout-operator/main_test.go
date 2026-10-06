@@ -4,16 +4,28 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+
+	"github.com/grafana/rollout-operator/pkg/status"
+	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
 
 func TestConfigValidateLeaderElection(t *testing.T) {
@@ -285,4 +297,62 @@ func TestLeaderElectionDisabledByDefault(t *testing.T) {
 	require.NoError(t, setLeaderLabel(ctx, client, cfg, true))
 	require.NoError(t, setLeaderLabel(ctx, client, cfg, false))
 	require.Empty(t, client.Actions(), "default startup must not require Pod patch or Lease access")
+}
+
+func TestOperatorCancellationDuringStartup(t *testing.T) {
+	for _, resource := range []string{"zoneawarepoddisruptionbudgets", "pods", "statefulsets"} {
+		t.Run(resource, func(t *testing.T) {
+			blocked := make(chan struct{})
+			var once sync.Once
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/"+resource) {
+					once.Do(func() { close(blocked) })
+					http.Error(w, "cache unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				if r.URL.Query().Get("watch") == "true" {
+					http.Error(w, "watch unsupported", http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				kind, apiVersion := "ZoneAwarePodDisruptionBudgetList", "rollout-operator.grafana.com/v1"
+				if strings.HasSuffix(r.URL.Path, "/pods") {
+					kind, apiVersion = "PodList", "v1"
+				}
+				_, _ = fmt.Fprintf(w, `{"apiVersion":%q,"kind":%q,"metadata":{"resourceVersion":"1"},"items":[]}`, apiVersion, kind)
+			}))
+			defer server.Close()
+
+			clientConfig := &rest.Config{Host: server.URL}
+			client, err := kubernetes.NewForConfig(clientConfig)
+			require.NoError(t, err)
+			dynamicClient, err := dynamic.NewForConfig(clientConfig)
+			require.NoError(t, err)
+			cfg := newValidConfig(t)
+			reg := prometheus.NewRegistry()
+			ready := atomic.NewBool(false)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				done <- runWithLeaderElection(ctx, client, cfg, "", log.NewNopLogger(), ready, func(ctx context.Context) {
+					runOperator(ctx, cfg, func(string) *rest.Config { return clientConfig }, nil, log.NewNopLogger(), client, dynamicClient, nil, nil, nil, reg, nil, zpdb.NewMetrics(reg), ready, &status.Holder{})
+				})
+			}()
+
+			select {
+			case <-blocked:
+			case <-time.After(5 * time.Second):
+				t.Fatal("startup did not reach the blocked informer")
+			}
+			cancel()
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("cancelled startup did not return")
+			}
+			require.False(t, ready.Load())
+		})
+	}
 }

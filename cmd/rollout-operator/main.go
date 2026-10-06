@@ -375,6 +375,7 @@ func runOperator(
 ) {
 	// watches for validating webhooks being added - this is only started if the TLS server is started
 	webhookObserver := tlscert.NewWebhookObserver(coreKubeClient, cfg.kubeNamespace, logger)
+	defer stopOnCancel(ctx, webhookObserver.Stop)()
 
 	// The single pod informer for the namespace, shared by the eviction controller and the core controller.
 	podsFactory := controller.NewPodInformerFactory(coreKubeClient, cfg.kubeNamespace)
@@ -392,19 +393,35 @@ func runOperator(
 		fatal(fmt.Errorf("failed to create pod eviction Kubernetes client: %w", err))
 	}
 	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, podsFactory, logger, zpdbMetrics)
-	check(evictionController.Start())
+	defer stopOnCancel(ctx, evictionController.Stop)()
+	if err := evictionController.Start(); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		fatal(err)
+	}
 
-	maybeStartTLSServer(cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
+	if err := maybeStartTLSServer(ctx, cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		fatal(err)
+	}
 
 	// Monitors the validating and mutating webhook configurations and provides a metric
 	// which tracks the configured FailurePolicy
 	var webhookCollector *webhooks.WebhookCollector
 	if cfg.serverTLSEnabled {
 		webhookCollector = webhooks.NewWebhookCollector(coreKubeClient, cfg.kubeNamespace, logger)
+		defer stopOnCancel(ctx, webhookCollector.Stop)()
 		if err := webhookCollector.Start(); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			fatal(fmt.Errorf("failed to start webhook collector: %w", err))
 		}
 		check(reg.Register(webhookCollector))
+		defer reg.Unregister(webhookCollector)
 	}
 
 	// Init the controller
@@ -412,24 +429,19 @@ func runOperator(
 	if cfg.watchReplicaTemplates {
 		c.WatchReplicaTemplates()
 	}
+	defer stopOnCancel(ctx, c.Stop)()
 	if err := c.Init(); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
 	statusReader.Set(c)
 
-	// Stop all leader-only work before another pod can take over.
-	go func() {
-		<-ctx.Done()
+	defer stopOnCancel(ctx, func() {
 		ready.Store(false)
 		statusReader.Set(nil)
-		c.Stop()
-		evictionController.Stop()
-		webhookObserver.Stop()
-		if webhookCollector != nil {
-			reg.Unregister(webhookCollector)
-			webhookCollector.Stop()
-		}
-	}()
+	})()
 
 	// Publish the leader only after its admission caches and TLS listener are initialized.
 	if err := setLeaderLabel(ctx, coreKubeClient, cfg, true); err != nil {
@@ -444,6 +456,22 @@ func runOperator(
 	c.Run()
 	if ctx.Err() == nil {
 		fatal(errors.New("rollout controller stopped unexpectedly"))
+	}
+}
+
+// Register shutdown before initialization so cancellation interrupts informer cache sync.
+func stopOnCancel(ctx context.Context, stop func()) func() {
+	done := make(chan struct{})
+	cancel := context.AfterFunc(ctx, func() {
+		stop()
+		close(done)
+	})
+	return func() {
+		if cancel() {
+			stop()
+		} else {
+			<-done
+		}
 	}
 }
 
@@ -540,10 +568,10 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) *rest.Config, podHTTPClient *instrumentation.PodHTTPClient, logger log.Logger, coreKubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) {
+func maybeStartTLSServer(ctx context.Context, cfg config, wireComponentConfig func(component string) *rest.Config, podHTTPClient *instrumentation.PodHTTPClient, logger log.Logger, coreKubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) error {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
-		return
+		return nil
 	}
 
 	var certProvider tlscert.Provider
@@ -563,9 +591,9 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 		fatal(errors.New("either self-signed certificate should be enabled or path to the certificate and key should be provided"))
 	}
 
-	cert, err := certProvider.Certificate(context.Background())
+	cert, err := certProvider.Certificate(ctx)
 	if err != nil {
-		fatal(fmt.Errorf("failed to get certificate: %w", err))
+		return fmt.Errorf("failed to get certificate: %w", err)
 	}
 
 	checkAndWatchCertificate(cert, logger, restart)
@@ -585,7 +613,13 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 		}
 
 		// Start monitoring for validating webhook configurations and patch if required
-		check(webhookObserver.Init(webHookListener))
+		if err := webhookObserver.Init(webHookListener); err != nil {
+			return err
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
@@ -632,6 +666,7 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 	if err := tlsSrv.Start(); err != nil {
 		fatal(fmt.Errorf("failed to start tls server: %w", err))
 	}
+	return nil
 }
 
 func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, restart chan string) {
