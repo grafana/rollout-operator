@@ -13,7 +13,7 @@ var replicaTemplateGVR = schema.GroupVersionResource{
 }
 
 // WatchReplicaTemplates enables prompt reconciliation of desired replica changes.
-// Call before Init, only when the CRD and list/watch permissions are available.
+// Call before Init with list/watch permissions; the informer retries until the CRD is available.
 func (c *RolloutController) WatchReplicaTemplates() {
 	c.replicaTemplatesFactory = dynamicinformer.NewFilteredDynamicSharedInformerFactory(c.dynamicClient, informerSyncInterval, c.namespace, nil)
 	c.replicaTemplatesInformer = c.replicaTemplatesFactory.ForResource(replicaTemplateGVR).Informer()
