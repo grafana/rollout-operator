@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/google/uuid"
 	"github.com/grafana/dskit/clusterutil"
 	"github.com/grafana/dskit/middleware"
 	"github.com/grafana/dskit/tracing"
@@ -25,12 +26,16 @@ import (
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // Required to get the GCP auth provider working.
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"github.com/grafana/rollout-operator/pkg/admission"
@@ -69,6 +74,13 @@ type config struct {
 
 	watchReplicaTemplates bool
 
+	kubePodName                 string
+	leaderElectionEnabled       bool
+	leaderElectionLeaseName     string
+	leaderElectionLeaseDuration time.Duration
+	leaderElectionRenewDeadline time.Duration
+	leaderElectionRetryPeriod   time.Duration
+
 	serverTLSEnabled        bool
 	serverTLSPort           int
 	serverCertFile          string
@@ -104,6 +116,13 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
 	fs.BoolVar(&cfg.watchReplicaTemplates, "replica-templates.watch-enabled", false, "Watch ReplicaTemplates for desired replica changes. Requires the CRD and namespace list/watch permissions.")
 	cfg.clusterValidationCfg.RegisterFlagsWithPrefix("server.cluster-validation.http.", fs)
+
+	fs.StringVar(&cfg.kubePodName, "kubernetes.pod-name", os.Getenv("POD_NAME"), "Name of this pod, used to select the elected leader for webhook traffic. Defaults to POD_NAME or the hostname.")
+	fs.BoolVar(&cfg.leaderElectionEnabled, "leader-election.enabled", false, "Enable Lease leader election. Requires Lease access and pod patch permissions, and a webhook Service selecting the leader label.")
+	fs.StringVar(&cfg.leaderElectionLeaseName, "leader-election.lease-name", "rollout-operator", "Name of the Lease used to ensure only one rollout-operator is active in the namespace.")
+	fs.DurationVar(&cfg.leaderElectionLeaseDuration, "leader-election.lease-duration", 15*time.Second, "Duration that non-leaders wait before attempting to acquire an unrenewed leader election Lease.")
+	fs.DurationVar(&cfg.leaderElectionRenewDeadline, "leader-election.renew-deadline", 10*time.Second, "Duration that the leader retries refreshing its Lease before giving up leadership.")
+	fs.DurationVar(&cfg.leaderElectionRetryPeriod, "leader-election.retry-period", 2*time.Second, "Interval between attempts to acquire or renew the leader election Lease.")
 
 	fs.BoolVar(&cfg.serverTLSEnabled, "server-tls.enabled", false, "Enable TLS server for webhook connections.")
 	fs.IntVar(&cfg.serverTLSPort, "server-tls.port", 8443, "Port to use for exposing TLS server for webhook connections (if enabled).")
@@ -149,6 +168,27 @@ func (cfg config) validate() error {
 	}
 	if cfg.kubeClientQPS > 0 && cfg.kubeClientBurst < 1 {
 		return errors.New("-kubernetes.client-burst must be at least 1 when -kubernetes.client-qps is greater than 0, since each request consumes one token")
+	}
+	if cfg.leaderElectionEnabled {
+		if cfg.leaderElectionLeaseName == "" {
+			return errors.New("-leader-election.lease-name cannot be an empty string")
+		}
+		if cfg.leaderElectionLeaseDuration < time.Second {
+			return errors.New("-leader-election.lease-duration must be at least one second")
+		}
+		if cfg.leaderElectionRenewDeadline <= 0 {
+			return errors.New("-leader-election.renew-deadline must be positive")
+		}
+		if cfg.leaderElectionRetryPeriod <= 0 {
+			return errors.New("-leader-election.retry-period must be positive")
+		}
+		serializedLeaseDuration := cfg.leaderElectionLeaseDuration.Truncate(time.Second)
+		if serializedLeaseDuration <= cfg.leaderElectionRenewDeadline {
+			return errors.New("-leader-election.lease-duration, truncated to whole seconds by Kubernetes, must be greater than -leader-election.renew-deadline")
+		}
+		if cfg.leaderElectionRenewDeadline <= time.Duration(leaderelection.JitterFactor*float64(cfg.leaderElectionRetryPeriod)) {
+			return errors.New("-leader-election.renew-deadline must be greater than -leader-election.retry-period multiplied by the client-go jitter factor")
+		}
 	}
 	if cfg.serverTLSRequestTimeout <= 0 {
 		return errors.New("-server-tls.request-timeout must be positive")
@@ -289,8 +329,53 @@ func main() {
 		fatal(fmt.Errorf("failed to init dynamicClient: %w", err))
 	}
 
+	var identity string
+	if cfg.leaderElectionEnabled {
+		hostname, err := os.Hostname()
+		if err != nil {
+			fatal(fmt.Errorf("failed to determine leader election identity: %w", err))
+		}
+		if cfg.kubePodName == "" {
+			cfg.kubePodName = hostname
+		}
+		identity = fmt.Sprintf("%s_%s", cfg.kubePodName, uuid.NewString())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		waitForSignalOrRestart(logger, restart)
+		cancel()
+	}()
+
+	err = runWithLeaderElection(ctx, coreKubeClient, cfg, identity, logger, ready, func(leaderCtx context.Context) {
+		runOperator(leaderCtx, cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, dynamicClient, restMapper, scaleClient, restart, reg, metrics, zpdbMetrics, ready, statusReader)
+	})
+	if err != nil {
+		fatal(err)
+	}
+}
+
+func runOperator(
+	ctx context.Context,
+	cfg config,
+	wireComponentConfig func(string) *rest.Config,
+	podHTTPClient *instrumentation.PodHTTPClient,
+	logger log.Logger,
+	coreKubeClient *kubernetes.Clientset,
+	dynamicClient dynamic.Interface,
+	restMapper meta.RESTMapper,
+	scaleClient scale.ScalesGetter,
+	restart chan string,
+	reg *prometheus.Registry,
+	metrics *metrics,
+	zpdbMetrics *zpdb.Metrics,
+	ready *atomic.Bool,
+	statusReader *status.Holder,
+) {
 	// watches for validating webhooks being added - this is only started if the TLS server is started
 	webhookObserver := tlscert.NewWebhookObserver(coreKubeClient, cfg.kubeNamespace, logger)
+	defer stopOnCancel(ctx, webhookObserver.Stop)()
 
 	// The single pod informer for the namespace, shared by the eviction controller and the core controller.
 	podsFactory := controller.NewPodInformerFactory(coreKubeClient, cfg.kubeNamespace)
@@ -308,19 +393,35 @@ func main() {
 		fatal(fmt.Errorf("failed to create pod eviction Kubernetes client: %w", err))
 	}
 	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, podsFactory, logger, zpdbMetrics)
-	check(evictionController.Start())
+	defer stopOnCancel(ctx, evictionController.Stop)()
+	if err := evictionController.Start(); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		fatal(err)
+	}
 
-	maybeStartTLSServer(cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver)
+	if err := maybeStartTLSServer(ctx, cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		fatal(err)
+	}
 
 	// Monitors the validating and mutating webhook configurations and provides a metric
 	// which tracks the configured FailurePolicy
 	var webhookCollector *webhooks.WebhookCollector
 	if cfg.serverTLSEnabled {
 		webhookCollector = webhooks.NewWebhookCollector(coreKubeClient, cfg.kubeNamespace, logger)
+		defer stopOnCancel(ctx, webhookCollector.Stop)()
 		if err := webhookCollector.Start(); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			fatal(fmt.Errorf("failed to start webhook collector: %w", err))
 		}
 		check(reg.Register(webhookCollector))
+		defer reg.Unregister(webhookCollector)
 	}
 
 	// Init the controller
@@ -328,28 +429,132 @@ func main() {
 	if cfg.watchReplicaTemplates {
 		c.WatchReplicaTemplates()
 	}
+	defer stopOnCancel(ctx, c.Stop)()
 	if err := c.Init(); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
 	statusReader.Set(c)
 
-	// Listen to sigterm, as well as for restart (like for certificate renewal).
-	go func() {
-		waitForSignalOrRestart(logger, restart)
-		c.Stop()
-		evictionController.Stop()
-		webhookObserver.Stop()
-		if webhookCollector != nil {
-			reg.Unregister(webhookCollector)
-			webhookCollector.Stop()
-		}
-	}()
+	defer stopOnCancel(ctx, func() {
+		ready.Store(false)
+		statusReader.Set(nil)
+	})()
 
-	// The operator is ready once the controller successfully initialised.
+	// Publish the leader only after its admission caches and TLS listener are initialized.
+	if err := setLeaderLabel(ctx, coreKubeClient, cfg, true); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		fatal(fmt.Errorf("failed to publish leader pod: %w", err))
+	}
 	ready.Store(true)
 
 	// Run and block until stopped.
 	c.Run()
+	if ctx.Err() == nil {
+		fatal(errors.New("rollout controller stopped unexpectedly"))
+	}
+}
+
+// Register shutdown before initialization so cancellation interrupts informer cache sync.
+func stopOnCancel(ctx context.Context, stop func()) func() {
+	done := make(chan struct{})
+	cancel := context.AfterFunc(ctx, func() {
+		stop()
+		close(done)
+	})
+	return func() {
+		if cancel() {
+			stop()
+		} else {
+			<-done
+		}
+	}
+}
+
+func runWithLeaderElection(
+	ctx context.Context,
+	client kubernetes.Interface,
+	cfg config,
+	identity string,
+	logger log.Logger,
+	ready *atomic.Bool,
+	run func(context.Context),
+) error {
+	if !cfg.leaderElectionEnabled {
+		run(ctx)
+		return nil
+	}
+
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:      cfg.leaderElectionLeaseName,
+			Namespace: cfg.kubeNamespace,
+		},
+		Client: client.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: identity,
+		},
+	}
+
+	elector, err := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
+		Lock:          lock,
+		LeaseDuration: cfg.leaderElectionLeaseDuration,
+		RenewDeadline: cfg.leaderElectionRenewDeadline,
+		RetryPeriod:   cfg.leaderElectionRetryPeriod,
+		// OnStartedLeading runs asynchronously, so waiting for expiration prevents a replacement
+		// from taking over before all leader-only controllers and webhooks have stopped.
+		ReleaseOnCancel: false,
+		Name:            "rollout-operator",
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(leaderCtx context.Context) {
+				ready.Store(false)
+				level.Info(logger).Log("msg", "acquired leader election lease", "lease", cfg.leaderElectionLeaseName, "identity", identity)
+				run(leaderCtx)
+			},
+			OnStoppedLeading: func() {
+				// Leadership loss makes this process unavailable until it exits.
+				ready.Store(false)
+			},
+			OnNewLeader: func(newIdentity string) {
+				if newIdentity != identity {
+					level.Info(logger).Log("msg", "new leader elected", "lease", cfg.leaderElectionLeaseName, "identity", newIdentity)
+				}
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to configure leader election: %w", err)
+	}
+
+	// A restarted pod must not retain the routing label from its previous process.
+	if err := setLeaderLabel(ctx, client, cfg, false); err != nil {
+		return fmt.Errorf("failed to clear leader pod label: %w", err)
+	}
+	defer func() {
+		ready.Store(false)
+		// Do not delay process exit with API requests after a lost Lease.
+		if ctx.Err() == nil {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := setLeaderLabel(cleanupCtx, client, cfg, false); err != nil {
+			level.Warn(logger).Log("msg", "failed to clear leader pod label", "err", err)
+		}
+	}()
+
+	// Standbys are available to their Deployment while the Service selects only the leader.
+	ready.Store(true)
+	elector.Run(ctx)
+	ready.Store(false)
+	if ctx.Err() != nil {
+		return nil
+	}
+	return errors.New("leader election lease lost")
 }
 
 func waitForSignalOrRestart(logger log.Logger, restart chan string) {
@@ -363,10 +568,10 @@ func waitForSignalOrRestart(logger log.Logger, restart chan string) {
 	}
 }
 
-func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) *rest.Config, podHTTPClient *instrumentation.PodHTTPClient, logger log.Logger, coreKubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) {
+func maybeStartTLSServer(ctx context.Context, cfg config, wireComponentConfig func(component string) *rest.Config, podHTTPClient *instrumentation.PodHTTPClient, logger log.Logger, coreKubeClient *kubernetes.Clientset, restart chan string, metrics *metrics, evictionController *zpdb.EvictionController, webhookObserver *tlscert.WebhookObserver) error {
 	if !cfg.serverTLSEnabled {
 		level.Info(logger).Log("msg", "tls server is not enabled")
-		return
+		return nil
 	}
 
 	var certProvider tlscert.Provider
@@ -386,9 +591,9 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 		fatal(errors.New("either self-signed certificate should be enabled or path to the certificate and key should be provided"))
 	}
 
-	cert, err := certProvider.Certificate(context.Background())
+	cert, err := certProvider.Certificate(ctx)
 	if err != nil {
-		fatal(fmt.Errorf("failed to get certificate: %w", err))
+		return fmt.Errorf("failed to get certificate: %w", err)
 	}
 
 	checkAndWatchCertificate(cert, logger, restart)
@@ -408,7 +613,13 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 		}
 
 		// Start monitoring for validating webhook configurations and patch if required
-		check(webhookObserver.Init(webHookListener))
+		if err := webhookObserver.Init(webHookListener); err != nil {
+			return err
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	prepDownscaleAdmitFunc := func(ctx context.Context, logger log.Logger, ar v1.AdmissionReview, api *kubernetes.Clientset) *v1.AdmissionResponse {
@@ -455,6 +666,7 @@ func maybeStartTLSServer(cfg config, wireComponentConfig func(component string) 
 	if err := tlsSrv.Start(); err != nil {
 		fatal(fmt.Errorf("failed to start tls server: %w", err))
 	}
+	return nil
 }
 
 func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, restart chan string) {

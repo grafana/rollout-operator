@@ -13,6 +13,7 @@ rules:
       - get
       - watch
       - delete
+      - patch
   - apiGroups:
       - apps
     resources:
@@ -27,6 +28,14 @@ rules:
     resources:
       - statefulsets/status
     verbs:
+      - update
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - create
       - update
   - apiGroups:
       - rollout-operator.grafana.com

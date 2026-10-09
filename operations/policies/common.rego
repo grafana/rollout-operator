@@ -171,3 +171,8 @@ is_zpdb_validation_webhook(obj) if {
     obj.kind == "ValidatingWebhookConfiguration"
     startswith(obj.metadata.name, "zpdb-validation-")
 }
+has_leader_election if {
+    obj := input[_].contents
+    is_deployment(obj)
+    obj.spec.template.spec.containers[_].args[_] == "-leader-election.enabled=true"
+}
