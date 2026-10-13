@@ -202,8 +202,8 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 
 	// An empty cache during bootstrap must not classify protected pods as out of scope.
 	if !c.initialized.Load() {
-		c.metrics.EvictionRequests.WithLabelValues("initializing", fmt.Sprintf("%d", http.StatusServiceUnavailable)).Inc()
-		return request.denyWithReason("ZPDB controller is initializing", http.StatusServiceUnavailable)
+		c.metrics.EvictionRequests.WithLabelValues("initializing", fmt.Sprintf("%d", http.StatusTooManyRequests)).Inc()
+		return request.denyWithReason("ZPDB controller is initializing", http.StatusTooManyRequests)
 	}
 
 	// Before making any Kubernetes API calls, check whether this pod is in zpdb scope at all according to the
