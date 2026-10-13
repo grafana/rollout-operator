@@ -998,7 +998,7 @@ func TestEvictionControllerDeniesRequestsUntilInitialized(t *testing.T) {
 		response := c.HandlePodEvictionRequest(context.Background(), request, NewMaxUnavailableZeroOverrideNone())
 		require.False(t, response.Allowed)
 		require.Equal(t, request.Request.UID, response.UID)
-		require.Equal(t, int32(http.StatusServiceUnavailable), response.Result.Code)
+		require.Equal(t, int32(http.StatusTooManyRequests), response.Result.Code)
 		require.Equal(t, "ZPDB controller is initializing", response.Result.Message)
 	}
 	assertInitializing()
@@ -1040,7 +1040,7 @@ func TestEvictionControllerRecoversWhenCRDBecomesAvailable(t *testing.T) {
 	request := createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace)
 	response := c.HandlePodEvictionRequest(context.Background(), request, NewMaxUnavailableZeroOverrideNone())
 	require.False(t, response.Allowed)
-	require.Equal(t, int32(http.StatusServiceUnavailable), response.Result.Code)
+	require.Equal(t, int32(http.StatusTooManyRequests), response.Result.Code)
 	close(available)
 	select {
 	case err := <-started:
