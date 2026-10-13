@@ -8,12 +8,14 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -109,4 +111,75 @@ func TestReplicaTemplateWatchStartsWithoutCRDAndRecovers(t *testing.T) {
 	installed.Store(true)
 	require.Eventually(t, c.replicaTemplatesInformer.HasSynced, 10*time.Second, 10*time.Millisecond)
 	require.Eventually(t, c.shouldReconcile.Load, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestReplicaTemplateWatchReadinessRecoversFromPermissionErrors(t *testing.T) {
+	for _, verb := range []string{"list", "watch"} {
+		t.Run(verb, func(t *testing.T) {
+			kube := fake.NewSimpleClientset()
+			kube.Resources = []*metav1.APIResourceList{{GroupVersion: replicaTemplateGVR.GroupVersion().String(), APIResources: []metav1.APIResource{{Name: "replicatemplates"}, {Name: "replicatemplates/scale"}}}}
+			dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{replicaTemplateGVR: "ReplicaTemplateList"})
+			var denied atomic.Bool
+			denied.Store(true)
+			var attempts atomic.Int32
+			permissionError := apierrors.NewForbidden(replicaTemplateGVR.GroupResource(), "", nil)
+			if verb == "list" {
+				dyn.PrependReactor("list", replicaTemplateGVR.Resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+					attempts.Add(1)
+					if denied.Load() {
+						return true, nil, permissionError
+					}
+					return false, nil, nil
+				})
+			} else {
+				dyn.PrependWatchReactor(replicaTemplateGVR.Resource, func(k8stesting.Action) (bool, watch.Interface, error) {
+					attempts.Add(1)
+					if denied.Load() {
+						return true, nil, permissionError
+					}
+					return false, nil, nil
+				})
+			}
+			c := NewRolloutController(kube, kube.Discovery(), nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+			c.WatchReplicaTemplates()
+			t.Cleanup(c.Stop)
+			require.NoError(t, c.Init())
+			require.Eventually(t, func() bool {
+				c.replicaTemplateObserverMu.Lock()
+				defer c.replicaTemplateObserverMu.Unlock()
+				return c.replicaTemplateAvailable && attempts.Load() > 0
+			}, 5*time.Second, 10*time.Millisecond)
+			require.Equal(t, float64(0), testutil.ToFloat64(c.replicaTemplateReady))
+			denied.Store(false)
+			require.Eventually(t, func() bool { return testutil.ToFloat64(c.replicaTemplateReady) == 1 }, 10*time.Second, 10*time.Millisecond)
+		})
+	}
+}
+
+func TestReplicaTemplateReadinessDropsAfterWatchError(t *testing.T) {
+	kube := fake.NewSimpleClientset()
+	kube.Resources = []*metav1.APIResourceList{{GroupVersion: replicaTemplateGVR.GroupVersion().String(), APIResources: []metav1.APIResource{{Name: "replicatemplates"}, {Name: "replicatemplates/scale"}}}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{replicaTemplateGVR: "ReplicaTemplateList"})
+	initialWatch := watch.NewRaceFreeFake()
+	var attempts atomic.Int32
+	var denied atomic.Bool
+	dyn.PrependWatchReactor(replicaTemplateGVR.Resource, func(k8stesting.Action) (bool, watch.Interface, error) {
+		if attempts.Add(1) == 1 {
+			return true, initialWatch, nil
+		}
+		if denied.Load() {
+			return true, nil, apierrors.NewForbidden(replicaTemplateGVR.GroupResource(), "", nil)
+		}
+		return false, nil, nil
+	})
+	c := NewRolloutController(kube, kube.Discovery(), nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+	c.WatchReplicaTemplates()
+	t.Cleanup(c.Stop)
+	require.NoError(t, c.Init())
+	require.Eventually(t, func() bool { return testutil.ToFloat64(c.replicaTemplateReady) == 1 }, 5*time.Second, 10*time.Millisecond)
+	denied.Store(true)
+	initialWatch.Error(&metav1.Status{Status: metav1.StatusFailure, Code: 403, Reason: metav1.StatusReasonForbidden})
+	require.Eventually(t, func() bool { return testutil.ToFloat64(c.replicaTemplateReady) == 0 }, 5*time.Second, 10*time.Millisecond)
+	denied.Store(false)
+	require.Eventually(t, func() bool { return testutil.ToFloat64(c.replicaTemplateReady) == 1 }, 10*time.Second, 10*time.Millisecond)
 }
