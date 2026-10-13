@@ -161,7 +161,7 @@ How to **investigate**:
 
 ### rollout-operatorReplicaTemplateObserverNotReady
 
-This alert fires when `rollout_operator_replica_template_observer_ready` remains `0` for 5 minutes.
+This alert fires when `rollout_operator_replica_template_observer_ready` remains `0` for 5 minutes. When ReplicaTemplate watches are enabled, readiness also requires initial cache synchronization and successful list/watch requests. Check namespace list/watch permissions and informer errors in the operator logs.
 
 The operator cannot discover the ReplicaTemplate resource and its `/scale` subresource. StatefulSets referencing ReplicaTemplates may be unable to mirror their replica counts; pod rollouts continue.
 
@@ -171,7 +171,7 @@ How to **investigate**:
   `kubectl get crd replicatemplates.rollout-operator.grafana.com -o yaml`
 - Check Kubernetes API discovery access and availability. For replica mirroring failures, also check the operator logs and the service account's access to ReplicaTemplate scale/status subresources.
 - Apply the CRD and referenced ReplicaTemplate objects in the namespace managed by the operator. Discovery is checked every 30 seconds; discovering the resource triggers reconciliation without a restart.
-- Verify that the readiness metric returns to `1` and replica mirroring resumes. This metric reports resource discovery, not the existence or accessibility of a particular ReplicaTemplate object.
+- Verify that the readiness metric returns to `1` and replica mirroring resumes. This metric reports discovery and enabled watch health; it does not guarantee that a referenced ReplicaTemplate exists or that its scale/status subresources are accessible.
 
 ## Metrics
 

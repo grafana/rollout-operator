@@ -63,6 +63,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		expectedPatchedResources          map[string][]string
 		expectedErr                       string
 		expectedFailureMetric             bool
+		expectedScalingRetry              bool
 		zpdbErrors                        []error
 		zpdbPartitionMode                 bool
 	}{
@@ -694,6 +695,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 				})),
 			},
 			expectedErr:           "", // reconciliation continues if scaling fails
+			expectedScalingRetry:  true,
 			expectedFailureMetric: true,
 		},
 		"should not fail if scaling based on custom resource fails due to scale subresource not being available": {
@@ -706,6 +708,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			getScaleErr:           fmt.Errorf("cannot get scale subresource"),
 			expectedErr:           "", // reconciliation continues if scaling fails
+			expectedScalingRetry:  true,
 			expectedFailureMetric: true,
 		},
 		"all statefulsets are considered": {
@@ -913,7 +916,11 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			defer c.Stop()
 
 			// Run a reconcile.
+			c.shouldReconcile.Store(false)
 			err := c.reconcile(context.Background())
+			if testData.expectedScalingRetry {
+				require.True(t, c.shouldReconcile.Load())
+			}
 			if testData.expectedErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), testData.expectedErr)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -24,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listersv1 "k8s.io/client-go/listers/apps/v1"
@@ -74,7 +74,6 @@ type RolloutController struct {
 	podHTTPClient        *instrumentation.PodHTTPClient
 	logger               log.Logger
 
-	replicaTemplatesFactory  dynamicinformer.DynamicSharedInformerFactory
 	replicaTemplatesInformer cache.SharedIndexInformer
 
 	zpdbController ZPDBEvictionController
@@ -86,12 +85,14 @@ type RolloutController struct {
 	stopCh chan struct{}
 
 	// Metrics.
-	groupReconcileTotal       *prometheus.CounterVec
-	groupReconcileFailed      *prometheus.CounterVec
-	groupReconcileDuration    *prometheus.HistogramVec
-	groupReconcileLastSuccess *prometheus.GaugeVec
-	replicaTemplateReady      prometheus.Gauge
-	replicaTemplateAvailable  atomic.Bool
+	groupReconcileTotal         *prometheus.CounterVec
+	groupReconcileFailed        *prometheus.CounterVec
+	groupReconcileDuration      *prometheus.HistogramVec
+	groupReconcileLastSuccess   *prometheus.GaugeVec
+	replicaTemplateReady        prometheus.Gauge
+	replicaTemplateAvailable    bool
+	replicaTemplateWatchHealthy bool
+	replicaTemplateObserverMu   sync.Mutex
 
 	// Keep track of discovered rollout groups. We use this information to delete metrics
 	// related to rollout groups that have been decommissioned.
@@ -159,7 +160,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, discoveryClient disco
 		}, []string{"rollout_group"}),
 		replicaTemplateReady: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Name: "rollout_operator_replica_template_observer_ready",
-			Help: "Whether the ReplicaTemplate resource is discoverable by the rollout controller.",
+			Help: "Whether ReplicaTemplate discovery and the enabled informer are ready.",
 		}),
 	}
 	c.replicaTemplateReady.Set(0)
@@ -200,7 +201,14 @@ func (c *RolloutController) Init() error {
 		if err != nil {
 			return err
 		}
-		c.replicaTemplatesFactory.Start(c.stopCh)
+		go c.replicaTemplatesInformer.Run(c.stopCh)
+		go func() {
+			if cache.WaitForCacheSync(c.stopCh, c.replicaTemplatesInformer.HasSynced) {
+				c.replicaTemplateObserverMu.Lock()
+				c.updateReplicaTemplateReadinessLocked()
+				c.replicaTemplateObserverMu.Unlock()
+			}
+		}()
 	}
 
 	// Start informers. Start only starts informers the shared factory has not started yet, so whichever of
@@ -239,12 +247,12 @@ func (c *RolloutController) observeReplicaTemplate() {
 			}
 		}
 		available := resourceAvailable && scaleAvailable
-		if available {
-			c.replicaTemplateReady.Set(1)
-		} else {
-			c.replicaTemplateReady.Set(0)
-		}
-		if !c.replicaTemplateAvailable.Swap(available) && available {
+		c.replicaTemplateObserverMu.Lock()
+		wasAvailable := c.replicaTemplateAvailable
+		c.replicaTemplateAvailable = available
+		c.updateReplicaTemplateReadinessLocked()
+		c.replicaTemplateObserverMu.Unlock()
+		if !wasAvailable && available {
 			c.enqueueReconcile()
 		}
 	}
@@ -399,6 +407,8 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	updated, err := c.adjustStatefulSetsGroupReplicas(ctx, groupName, sets)
 	if err != nil {
 		scalingFailed = true
+		// Retry scaling without holding back independent pod rollouts.
+		c.enqueueReconcile()
 		level.Warn(c.logger).Log("msg", "unable to adjust desired replicas of StatefulSet", "group", groupName, "err", err)
 	}
 	if err == nil && updated {
