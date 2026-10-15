@@ -2,11 +2,14 @@
 
 ## main / unreleased
 
+## v0.41.0
+
 * [ENHANCEMENT] Add ability to watch ReplicaTemplates so replica changes trigger scaling reconciliation without waiting for the informer re-sync. Enable with -replica-templates.watch-enabled=true. #503
 * [ENHANCEMENT] Reuse the related StatefulSet list to resolve a pod's owner during ZPDB eviction, avoiding a redundant Kubernetes API GET on the common path. #516
-* [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods.
+* [BUGFIX] Preserve the readiness gate for paused StatefulSets so other zones cannot roll out while a paused zone has not-Ready pods. #515
 * [FEATURE] Add a read-only `/ui/status` HTML page for StatefulSet rollout group progress (phase, ready replicas, revisions, updated pods). #473
 * [FEATURE] Added Kubernetes Lease leader election to allow the rollout-operator to function in high availability mode. Enable with -leader-election.enabled=true. #472
+* [ENHANCEMENT] Updated dependencies to resolve CVEs. #523
 
 ## v0.40.0
 
