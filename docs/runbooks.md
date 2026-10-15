@@ -148,7 +148,7 @@ How to **investigate**:
 
 This alert fires when `rollout_operator_zpdb_config_observer_ready` remains `0` for 5 minutes.
 
-The observer cannot access the ZPDB resource or has not synchronized its configuration. If the operator started with `-kubernetes.allow-missing-crds=true` without the ZPDB CRD, ZPDB enforcement is inactive and evictions are allowed without ZPDB checks. Other Kubernetes admission checks and PodDisruptionBudgets still apply.
+The observer cannot access the ZPDB resource, has not synchronized its configuration, or operator controller initialization has not completed. Check pod and StatefulSet informer errors and API permissions when configuration discovery succeeds. If the operator started with `-kubernetes.allow-missing-crds=true` without the ZPDB CRD, ZPDB enforcement is inactive and evictions are allowed without ZPDB checks. Other Kubernetes admission checks and PodDisruptionBudgets still apply.
 
 How to **investigate**:
 
