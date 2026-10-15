@@ -29,6 +29,7 @@ type configObserver struct {
 	allowMissingCRDs bool
 	pdbFactory       dynamicinformer.DynamicSharedInformerFactory
 	pdbInformer      k8cache.SharedIndexInformer
+	pdbHandler       k8cache.ResourceEventHandlerRegistration
 	pdbCache         *configCache
 	metrics          *Metrics
 
@@ -69,7 +70,7 @@ func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 }
 
 func (c *configObserver) start() error {
-	_, err := c.pdbInformer.AddEventHandler(k8cache.ResourceEventHandlerFuncs{
+	handler, err := c.pdbInformer.AddEventHandler(k8cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onPdbAdded,
 		UpdateFunc: c.onPdbUpdated,
 		DeleteFunc: c.onPdbDeleted,
@@ -77,6 +78,7 @@ func (c *configObserver) start() error {
 	if err != nil {
 		return err
 	}
+	c.pdbHandler = handler
 	if err := c.pdbInformer.SetWatchErrorHandler(func(_ *k8cache.Reflector, err error) {
 		level.Warn(c.logger).Log("msg", "zpdb config observer watch failed", "err", err)
 	}); err != nil {
@@ -111,10 +113,10 @@ func (c *configObserver) start() error {
 
 func (c *configObserver) waitForCacheSync() bool {
 	level.Info(c.logger).Log("msg", "zpdb config informer caches are syncing")
-	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbInformer.HasSynced); !ok {
+	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbHandler.HasSynced); !ok {
 		return false
 	}
-	c.metrics.ConfigObserverReady.Set(1)
+	c.metrics.setConfigObserverReady(true)
 	level.Info(c.logger).Log("msg", "zpdb config informer caches have synced")
 	return true
 }
@@ -135,10 +137,10 @@ func (c *configObserver) observeReadiness() {
 
 func (c *configObserver) updateReadiness() {
 	_, err := c.pdbResource.List(context.Background(), metav1.ListOptions{Limit: 1})
-	if err == nil && c.pdbInformer.HasSynced() {
-		c.metrics.ConfigObserverReady.Set(1)
+	if err == nil && c.pdbHandler.HasSynced() {
+		c.metrics.setConfigObserverReady(true)
 	} else {
-		c.metrics.ConfigObserverReady.Set(0)
+		c.metrics.setConfigObserverReady(false)
 	}
 }
 

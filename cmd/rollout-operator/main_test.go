@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -14,16 +16,20 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	admissionv1 "k8s.io/api/admission/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 
+	"github.com/grafana/rollout-operator/pkg/admission"
 	"github.com/grafana/rollout-operator/pkg/status"
 	"github.com/grafana/rollout-operator/pkg/zpdb"
 )
@@ -330,13 +336,14 @@ func TestOperatorCancellationDuringStartup(t *testing.T) {
 			require.NoError(t, err)
 			cfg := newValidConfig(t)
 			reg := prometheus.NewRegistry()
+			zpdbMetrics := zpdb.NewMetrics(reg)
 			ready := atomic.NewBool(false)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			done := make(chan error, 1)
 			go func() {
 				done <- runWithLeaderElection(ctx, client, cfg, "", log.NewNopLogger(), ready, func(ctx context.Context) {
-					runOperator(ctx, cfg, func(string) *rest.Config { return clientConfig }, nil, log.NewNopLogger(), client, dynamicClient, nil, nil, nil, reg, nil, zpdb.NewMetrics(reg), ready, &status.Holder{})
+					runOperator(ctx, cfg, func(string) *rest.Config { return clientConfig }, nil, log.NewNopLogger(), client, dynamicClient, nil, nil, nil, reg, nil, zpdbMetrics, ready, &status.Holder{})
 				})
 			}()
 
@@ -345,6 +352,7 @@ func TestOperatorCancellationDuringStartup(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("startup did not reach the blocked informer")
 			}
+			require.Equal(t, float64(0), testutil.ToFloat64(zpdbMetrics.ConfigObserverReady), "readiness must expose blocked controller initialization")
 			cancel()
 			select {
 			case err := <-done:
@@ -365,4 +373,114 @@ func TestMissingCRDStartupIsOptIn(t *testing.T) {
 	require.False(t, cfg.allowMissingCRDs)
 	require.NoError(t, fs.Parse([]string{"-kubernetes.allow-missing-crds=true"}))
 	require.True(t, cfg.allowMissingCRDs)
+}
+
+func TestAdmissionServedWhileControllersInitialize(t *testing.T) {
+	ready := atomic.NewBool(false)
+	mux := http.NewServeMux()
+	mux.Handle("/ready", readyHandler(ready))
+	mux.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(func(ctx context.Context, logger log.Logger, ar admissionv1.AdmissionReview, _ *kubernetes.Clientset) *admissionv1.AdmissionResponse {
+		return admission.ZoneAwarePdbValidatingWebhookHandler(ctx, logger, ar)
+	}, log.NewNopLogger(), nil, time.Second))
+
+	initializing := make(chan struct{})
+	resume := make(chan struct{})
+	done := make(chan error, 1)
+	var server *httptest.Server
+	go func() {
+		done <- startAdmissionAndControllers(true, ready, func() error {
+			server = httptest.NewServer(mux)
+			return nil
+		}, func() error {
+			close(initializing)
+			<-resume
+			return nil
+		}, func() error { return nil })
+	}()
+	<-initializing
+	t.Cleanup(func() {
+		close(resume)
+		require.NoError(t, <-done)
+		server.Close()
+	})
+
+	response, err := server.Client().Get(server.URL + "/ready")
+	require.NoError(t, err)
+	response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	for _, tc := range []struct {
+		name           string
+		maxUnavailable int
+		allowed        bool
+	}{
+		{name: "valid", maxUnavailable: 1, allowed: true},
+		{name: "invalid", maxUnavailable: -1, allowed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			obj, err := json.Marshal(map[string]interface{}{
+				"apiVersion": "rollout-operator.grafana.com/v1",
+				"kind":       "ZoneAwarePodDisruptionBudget",
+				"spec": map[string]interface{}{
+					"maxUnavailable": tc.maxUnavailable,
+					"selector":       map[string]interface{}{"matchLabels": map[string]string{"rollout-group": "ingester"}},
+				},
+			})
+			require.NoError(t, err)
+			body, err := json.Marshal(admissionv1.AdmissionReview{
+				TypeMeta: metav1.TypeMeta{APIVersion: "admission.k8s.io/v1", Kind: "AdmissionReview"},
+				Request:  &admissionv1.AdmissionRequest{UID: "bootstrap", Namespace: "test", Object: runtime.RawExtension{Raw: obj}},
+			})
+			require.NoError(t, err)
+			response, err := server.Client().Post(server.URL+admission.ZpdbValidatorWebhookPath, "application/json", bytes.NewReader(body))
+			require.NoError(t, err)
+			defer response.Body.Close()
+			require.Equal(t, http.StatusOK, response.StatusCode)
+			var review admissionv1.AdmissionReview
+			require.NoError(t, json.NewDecoder(response.Body).Decode(&review))
+			require.NotNil(t, review.Response)
+			require.Equal(t, tc.allowed, review.Response.Allowed)
+			require.Equal(t, "bootstrap", string(review.Response.UID))
+		})
+	}
+}
+
+func TestStartAdmissionAndControllersReadiness(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			for _, failure := range []string{"", "admission", "eviction", "rollout"} {
+				t.Run(failure, func(t *testing.T) {
+					ready := atomic.NewBool(false)
+					admissionStarted := false
+					err := startAdmissionAndControllers(enabled, ready, func() error {
+						admissionStarted = true
+						if failure == "admission" {
+							return errors.New("admission failed")
+						}
+						return nil
+					}, func() error {
+						require.Equal(t, enabled, admissionStarted)
+						require.Equal(t, enabled, ready.Load())
+						if failure == "eviction" {
+							return errors.New("eviction failed")
+						}
+						return nil
+					}, func() error {
+						require.True(t, admissionStarted)
+						require.Equal(t, enabled, ready.Load())
+						if failure == "rollout" {
+							return errors.New("rollout failed")
+						}
+						return nil
+					})
+					if failure == "" {
+						require.NoError(t, err)
+					} else {
+						require.Error(t, err)
+					}
+					require.Equal(t, failure == "", ready.Load())
+				})
+			}
+		})
+	}
 }
