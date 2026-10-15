@@ -28,6 +28,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // Required to get the GCP auth provider working.
@@ -56,6 +57,21 @@ var (
 	defaultClusterValidationExcludePaths = []string{"admission/no-downscale", "admission/prepare-downscale", "ui"}
 )
 
+type replicaTemplateResourceMapper struct {
+	delegate scale.PreferredResourceMapper
+}
+
+func (m replicaTemplateResourceMapper) ResourceFor(resource schema.GroupVersionResource) (schema.GroupVersionResource, error) {
+	if resource.Group == "rollout-operator.grafana.com" && resource.Resource == "replicatemplates" {
+		return schema.GroupVersionResource{
+			Group:    resource.Group,
+			Version:  "v1",
+			Resource: resource.Resource,
+		}, nil
+	}
+	return m.delegate.ResourceFor(resource)
+}
+
 type config struct {
 	logFormat string
 	logLevel  string
@@ -73,6 +89,7 @@ type config struct {
 	clusterValidationCfg clusterutil.ClusterValidationProtocolConfigForHTTP
 
 	watchReplicaTemplates bool
+	allowMissingCRDs      bool
 
 	kubePodName                 string
 	leaderElectionEnabled       bool
@@ -114,6 +131,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&cfg.kubeClusterDomain, "kubernetes.cluster-domain", "cluster.local.", "The Kubernetes cluster domain.")
 	fs.StringVar(&cfg.kubeNamespace, "kubernetes.namespace", "", "The Kubernetes namespace for which this operator is running.")
 	fs.DurationVar(&cfg.reconcileInterval, "reconcile.interval", 5*time.Second, "The minimum interval of reconciliation.")
+	fs.BoolVar(&cfg.allowMissingCRDs, "kubernetes.allow-missing-crds", false, "Allow startup without the ZPDB CRD or an enabled ReplicaTemplate watch. ZPDB protection is inactive until its CRD is available.")
 	fs.BoolVar(&cfg.watchReplicaTemplates, "replica-templates.watch-enabled", false, "Watch ReplicaTemplates for desired replica changes. Requires the CRD and namespace list/watch permissions.")
 	cfg.clusterValidationCfg.RegisterFlagsWithPrefix("server.cluster-validation.http.", fs)
 
@@ -319,7 +337,7 @@ func main() {
 	// we don't use cached discovery because DiscoveryScaleKindResolver does its own caching,
 	// so we want to re-fetch every time when we actually ask for it
 	scaleKindResolver := scale.NewDiscoveryScaleKindResolver(coreKubeClient.Discovery())
-	scaleClient, err := scale.NewForConfig(coreConfig, restMapper, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
+	scaleClient, err := scale.NewForConfig(coreConfig, replicaTemplateResourceMapper{delegate: restMapper}, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
 	if err != nil {
 		fatal(fmt.Errorf("failed to init scaleClient: %w", err))
 	}
@@ -393,6 +411,9 @@ func runOperator(
 		fatal(fmt.Errorf("failed to create pod eviction Kubernetes client: %w", err))
 	}
 	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, podsFactory, logger, zpdbMetrics)
+	if cfg.allowMissingCRDs {
+		evictionController.AllowMissingCRDs()
+	}
 	defer stopOnCancel(ctx, evictionController.Stop)()
 	if err := evictionController.Start(); err != nil {
 		if ctx.Err() != nil {
@@ -425,7 +446,10 @@ func runOperator(
 	}
 
 	// Init the controller
-	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
+	c := controller.NewRolloutController(coreKubeClient, coreKubeClient.Discovery(), restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
+	if cfg.allowMissingCRDs {
+		c.AllowMissingCRDs()
+	}
 	if cfg.watchReplicaTemplates {
 		c.WatchReplicaTemplates()
 	}

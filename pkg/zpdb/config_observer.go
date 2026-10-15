@@ -1,12 +1,15 @@
 package zpdb
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -16,17 +19,21 @@ import (
 
 const (
 	// How frequently informers should resync
-	informerSyncInterval = 5 * time.Minute
+	informerSyncInterval        = 5 * time.Minute
+	initialResourceCheckTimeout = 10 * time.Second
+	readinessCheckInterval      = 30 * time.Second
 )
 
 // An configObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the configCache.
 type configObserver struct {
-	pdbFactory  dynamicinformer.DynamicSharedInformerFactory
-	pdbInformer k8cache.SharedIndexInformer
-	pdbCache    *configCache
-	metrics     *Metrics
+	allowMissingCRDs bool
+	pdbFactory       dynamicinformer.DynamicSharedInformerFactory
+	pdbInformer      k8cache.SharedIndexInformer
+	pdbCache         *configCache
+	metrics          *Metrics
 
 	dynamicClient dynamic.Interface
+	pdbResource   dynamic.ResourceInterface
 	logger        log.Logger
 
 	// Used to signal when the controller should stop.
@@ -52,6 +59,7 @@ func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 		pdbInformer:   pdbInformer.Informer(),
 		pdbCache:      newConfigCache(),
 		dynamicClient: dynamic,
+		pdbResource:   dynamic.Resource(gvr).Namespace(namespace),
 		metrics:       metrics,
 		logger:        logger,
 		stopCh:        make(chan struct{}),
@@ -69,17 +77,69 @@ func (c *configObserver) start() error {
 	if err != nil {
 		return err
 	}
+	if err := c.pdbInformer.SetWatchErrorHandler(func(_ *k8cache.Reflector, err error) {
+		level.Warn(c.logger).Log("msg", "zpdb config observer watch failed", "err", err)
+	}); err != nil {
+		return err
+	}
+
+	var listErr error
+	if c.allowMissingCRDs {
+		ctx, cancel := context.WithTimeout(context.Background(), initialResourceCheckTimeout)
+		_, listErr = c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
+		cancel()
+		if listErr != nil && !apierrors.IsNotFound(listErr) {
+			level.Warn(c.logger).Log("msg", "zpdb resource check failed; waiting for informer cache sync", "err", listErr)
+		}
+	}
 
 	go c.pdbFactory.Start(c.stopCh)
+	go c.observeReadiness()
 
-	// Wait until all informer caches have been synced.
-	level.Info(c.logger).Log("msg", "zpdb config informer caches are syncing")
-	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbInformer.HasSynced); !ok {
+	if apierrors.IsNotFound(listErr) {
+		level.Warn(c.logger).Log("msg", "zpdb custom resource is unavailable; informer will retry", "err", listErr)
+		go c.waitForCacheSync()
+		return nil
+	}
+
+	if !c.waitForCacheSync() {
 		return errors.New("zpdb config informer caches failed to sync")
 	}
-	level.Info(c.logger).Log("msg", "zpdb config informer caches have synced")
 
 	return nil
+}
+
+func (c *configObserver) waitForCacheSync() bool {
+	level.Info(c.logger).Log("msg", "zpdb config informer caches are syncing")
+	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbInformer.HasSynced); !ok {
+		return false
+	}
+	c.metrics.ConfigObserverReady.Set(1)
+	level.Info(c.logger).Log("msg", "zpdb config informer caches have synced")
+	return true
+}
+
+func (c *configObserver) observeReadiness() {
+	c.updateReadiness()
+	ticker := time.NewTicker(readinessCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case <-ticker.C:
+			c.updateReadiness()
+		}
+	}
+}
+
+func (c *configObserver) updateReadiness() {
+	_, err := c.pdbResource.List(context.Background(), metav1.ListOptions{Limit: 1})
+	if err == nil && c.pdbInformer.HasSynced() {
+		c.metrics.ConfigObserverReady.Set(1)
+	} else {
+		c.metrics.ConfigObserverReady.Set(0)
+	}
 }
 
 func (c *configObserver) addOrUpdate(obj *unstructured.Unstructured) {

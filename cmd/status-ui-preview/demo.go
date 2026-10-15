@@ -49,6 +49,7 @@ func newDemoController() (*controller.RolloutController, error) {
 		nil,
 		nil,
 		nil,
+		nil,
 		demoClusterDomain,
 		demoNamespace,
 		controller.NewPodInformerFactory(kubeClient, demoNamespace),

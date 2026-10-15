@@ -50,3 +50,19 @@ groups:
           for: 10m
           labels:
             severity: warning
+        - alert: rollout-operatorZpdbConfigObserverNotReady
+          annotations:
+            message: The rollout-operator pod {{ $labels.pod }} cannot access the ZPDB resource or has not synchronized its configuration. ZPDB protection may be inactive.
+            runbook_url: https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#rollout-operatorzpdbconfigobservernotready
+          expr: rollout_operator_zpdb_config_observer_ready == 0
+          for: 5m
+          labels:
+            severity: warning
+        - alert: rollout-operatorReplicaTemplateObserverNotReady
+          annotations:
+            message: The rollout-operator pod {{ $labels.pod }} cannot discover the ReplicaTemplate resource and its scale subresource. ReplicaTemplate replica mirroring may be unavailable.
+            runbook_url: https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#rollout-operatorreplicatemplateobservernotready
+          expr: rollout_operator_replica_template_observer_ready == 0
+          for: 5m
+          labels:
+            severity: warning
