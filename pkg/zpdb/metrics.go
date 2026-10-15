@@ -1,11 +1,16 @@
 package zpdb
 
 import (
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 type Metrics struct {
+	readinessMu            sync.Mutex
+	observerReady          bool
+	controllersInitialized bool
 	ConfigurationsObserved *prometheus.CounterVec
 	EvictionRequests       *prometheus.CounterVec
 	InFlightRequests       *prometheus.GaugeVec
@@ -28,9 +33,32 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}, []string{}),
 		ConfigObserverReady: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Name: "rollout_operator_zpdb_config_observer_ready",
-			Help: "Whether the ZPDB configuration observer has synchronized with the Kubernetes API.",
+			Help: "Whether ZPDB configuration has synchronized and operator controllers have initialized.",
 		}),
 	}
 	metrics.ConfigObserverReady.Set(0)
 	return metrics
+}
+
+// SetControllersInitialized keeps observer readiness false while operator startup is blocked.
+func (m *Metrics) SetControllersInitialized(initialized bool) {
+	m.readinessMu.Lock()
+	defer m.readinessMu.Unlock()
+	m.controllersInitialized = initialized
+	m.updateReadinessLocked()
+}
+
+func (m *Metrics) setConfigObserverReady(ready bool) {
+	m.readinessMu.Lock()
+	defer m.readinessMu.Unlock()
+	m.observerReady = ready
+	m.updateReadinessLocked()
+}
+
+func (m *Metrics) updateReadinessLocked() {
+	if m.observerReady && m.controllersInitialized {
+		m.ConfigObserverReady.Set(1)
+	} else {
+		m.ConfigObserverReady.Set(0)
+	}
 }

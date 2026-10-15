@@ -375,6 +375,7 @@ func runOperator(
 	ready *atomic.Bool,
 	statusReader *status.Holder,
 ) {
+	defer zpdbMetrics.SetControllersInitialized(false)
 	// watches for validating webhooks being added - this is only started if the TLS server is started
 	webhookObserver := tlscert.NewWebhookObserver(coreKubeClient, cfg.kubeNamespace, logger)
 	defer stopOnCancel(ctx, webhookObserver.Stop)()
@@ -410,13 +411,14 @@ func runOperator(
 	defer stopOnCancel(ctx, func() {
 		ready.Store(false)
 		statusReader.Set(nil)
+		zpdbMetrics.SetControllersInitialized(false)
 	})()
-	if err := startAdmissionAndControllers(cfg.serverTLSEnabled, ready, func() error {
+	if err := startAdmissionAndControllers(cfg.serverTLSEnabled && cfg.allowMissingCRDs, ready, func() error {
 		if err := maybeStartTLSServer(ctx, cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver); err != nil {
 			return err
 		}
 		// Route bootstrap validation to the elected leader once its TLS listener is available.
-		if cfg.serverTLSEnabled {
+		if cfg.serverTLSEnabled && cfg.allowMissingCRDs {
 			return setLeaderLabel(ctx, coreKubeClient, cfg, true)
 		}
 		return nil
@@ -450,6 +452,7 @@ func runOperator(
 		}
 		fatal(fmt.Errorf("failed to publish leader pod: %w", err))
 	}
+	zpdbMetrics.SetControllersInitialized(true)
 	ready.Store(true)
 
 	// Run and block until stopped.
@@ -557,18 +560,29 @@ func runWithLeaderElection(
 	return errors.New("leader election lease lost")
 }
 
-func startAdmissionAndControllers(webhooksEnabled bool, ready *atomic.Bool, startAdmission func() error, startEviction, initController func() error) error {
-	if err := startAdmission(); err != nil {
-		ready.Store(false)
-		return fmt.Errorf("failed to start admission server: %w", err)
+func startAdmissionAndControllers(earlyAdmission bool, ready *atomic.Bool, startAdmission func() error, startEviction, initController func() error) error {
+	start := func() error {
+		if err := startAdmission(); err != nil {
+			ready.Store(false)
+			return fmt.Errorf("failed to start admission server: %w", err)
+		}
+		return nil
 	}
-	// Service endpoints must serve stateless validation while informer dependencies converge.
-	if webhooksEnabled {
+	if earlyAdmission {
+		if err := start(); err != nil {
+			return err
+		}
+		// Bootstrap validation must be reachable while informer dependencies converge.
 		ready.Store(true)
 	}
 	if err := startEviction(); err != nil {
 		ready.Store(false)
 		return fmt.Errorf("failed to start eviction controller: %w", err)
+	}
+	if !earlyAdmission {
+		if err := start(); err != nil {
+			return err
+		}
 	}
 	if err := initController(); err != nil {
 		ready.Store(false)

@@ -52,6 +52,7 @@ func newFakeDynamicClient() *fake.FakeDynamicClient {
 func newConfigObserverTestCase() (*fake.FakeDynamicClient, *configObserver) {
 	dynamicClient := newFakeDynamicClient()
 	zpdbMetrics := NewMetrics(prometheus.NewRegistry())
+	zpdbMetrics.SetControllersInitialized(true)
 
 	observer := newConfigObserver(dynamicClient, testNamespace, log.NewNopLogger(), zpdbMetrics)
 	return dynamicClient, observer

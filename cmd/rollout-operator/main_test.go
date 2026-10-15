@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -335,13 +336,14 @@ func TestOperatorCancellationDuringStartup(t *testing.T) {
 			require.NoError(t, err)
 			cfg := newValidConfig(t)
 			reg := prometheus.NewRegistry()
+			zpdbMetrics := zpdb.NewMetrics(reg)
 			ready := atomic.NewBool(false)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			done := make(chan error, 1)
 			go func() {
 				done <- runWithLeaderElection(ctx, client, cfg, "", log.NewNopLogger(), ready, func(ctx context.Context) {
-					runOperator(ctx, cfg, func(string) *rest.Config { return clientConfig }, nil, log.NewNopLogger(), client, dynamicClient, nil, nil, nil, reg, nil, zpdb.NewMetrics(reg), ready, &status.Holder{})
+					runOperator(ctx, cfg, func(string) *rest.Config { return clientConfig }, nil, log.NewNopLogger(), client, dynamicClient, nil, nil, nil, reg, nil, zpdbMetrics, ready, &status.Holder{})
 				})
 			}()
 
@@ -350,6 +352,7 @@ func TestOperatorCancellationDuringStartup(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("startup did not reach the blocked informer")
 			}
+			require.Equal(t, float64(0), testutil.ToFloat64(zpdbMetrics.ConfigObserverReady), "readiness must expose blocked controller initialization")
 			cancel()
 			select {
 			case err := <-done:
@@ -456,13 +459,14 @@ func TestStartAdmissionAndControllersReadiness(t *testing.T) {
 						}
 						return nil
 					}, func() error {
-						require.True(t, admissionStarted)
+						require.Equal(t, enabled, admissionStarted)
 						require.Equal(t, enabled, ready.Load())
 						if failure == "eviction" {
 							return errors.New("eviction failed")
 						}
 						return nil
 					}, func() error {
+						require.True(t, admissionStarted)
 						require.Equal(t, enabled, ready.Load())
 						if failure == "rollout" {
 							return errors.New("rollout failed")

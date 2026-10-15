@@ -122,7 +122,7 @@ func (c *configObserver) waitForCacheSync() bool {
 	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbHandler.HasSynced); !ok {
 		return false
 	}
-	c.metrics.ConfigObserverReady.Set(1)
+	c.metrics.setConfigObserverReady(true)
 	level.Info(c.logger).Log("msg", "zpdb config informer caches have synced")
 	return true
 }
@@ -146,9 +146,9 @@ func (c *configObserver) updateReadiness() {
 	defer cancel()
 	_, err := c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
 	if err == nil && c.pdbHandler.HasSynced() {
-		c.metrics.ConfigObserverReady.Set(1)
+		c.metrics.setConfigObserverReady(true)
 	} else {
-		c.metrics.ConfigObserverReady.Set(0)
+		c.metrics.setConfigObserverReady(false)
 	}
 }
 
