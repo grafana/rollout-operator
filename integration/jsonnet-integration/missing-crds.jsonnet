@@ -1,6 +1,9 @@
 local rollout_operator = import 'rollout-operator/rollout-operator.libsonnet';
 
 rollout_operator {
+  rollout_operator_args+:: {
+    'kubernetes.allow-missing-crds': true,
+  },
   _config+:: {
     namespace: 'default',
     rollout_operator_webhooks_enabled: true,

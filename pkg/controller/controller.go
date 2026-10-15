@@ -57,6 +57,7 @@ type ZPDBEvictionController interface {
 }
 
 type RolloutController struct {
+	allowMissingCRDs     bool
 	kubeClient           kubernetes.Interface
 	discoveryClient      discovery.DiscoveryInterface
 	clusterDomain        string
@@ -168,6 +169,11 @@ func NewRolloutController(kubeClient kubernetes.Interface, discoveryClient disco
 	return c
 }
 
+// AllowMissingCRDs lets optional watches recover after startup. Call before Init.
+func (c *RolloutController) AllowMissingCRDs() {
+	c.allowMissingCRDs = true
+}
+
 // Init the controller.
 func (c *RolloutController) Init() error {
 	// We enqueue a reconcile request each time any of the observed StatefulSets are updated. The UpdateFunc
@@ -221,9 +227,11 @@ func (c *RolloutController) Init() error {
 	}
 
 	level.Info(c.logger).Log("msg", "informer caches are syncing")
-	// ReplicaTemplate watches only enqueue reconciliation; scaling reads the API directly,
-	// so their cache must not block startup when the CRD is installed later.
-	if ok := cache.WaitForCacheSync(c.stopCh, c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced); !ok {
+	synced := []cache.InformerSynced{c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced}
+	if c.replicaTemplatesInformer != nil && !c.allowMissingCRDs {
+		synced = append(synced, c.replicaTemplatesInformer.HasSynced)
+	}
+	if ok := cache.WaitForCacheSync(c.stopCh, synced...); !ok {
 		return errors.New("informer caches failed to sync")
 	}
 	level.Info(c.logger).Log("msg", "informer caches have synced")

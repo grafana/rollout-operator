@@ -95,6 +95,7 @@ func TestObserver_NewPdbObserver(t *testing.T) {
 
 func TestObserver_StartWithoutCRD(t *testing.T) {
 	dynamicClient, observer := newConfigObserverTestCase()
+	observer.allowMissingCRDs = true
 	dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewNotFound(schema.GroupResource{
 			Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
@@ -124,6 +125,7 @@ func TestObserver_StartRetriesTransientErrors(t *testing.T) {
 	} {
 		t.Run(probeErr.Error(), func(t *testing.T) {
 			dynamicClient, observer := newConfigObserverTestCase()
+			observer.allowMissingCRDs = true
 			defer observer.stop()
 			var recovered atomic.Bool
 			dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -303,4 +305,35 @@ func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("deleted")))
 	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("ignored")))
 	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigurationsObserved.WithLabelValues("delete-ignored")))
+}
+
+func TestObserver_WaitsForMissingCRDByDefault(t *testing.T) {
+	dyn, observer := newConfigObserverTestCase()
+	listed := make(chan struct{}, 1)
+	dyn.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
+		select {
+		case listed <- struct{}{}:
+		default:
+		}
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: ZoneAwarePodDisruptionBudgetsSpecGroup, Resource: ZoneAwarePodDisruptionBudgetsNamePlural}, "")
+	})
+	done := make(chan error, 1)
+	go func() { done <- observer.start() }()
+	select {
+	case <-listed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("informer did not list")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("startup bypassed missing CRD: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	observer.stop()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup did not stop")
+	}
 }
