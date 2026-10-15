@@ -26,10 +26,11 @@ const (
 
 // An configObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the configCache.
 type configObserver struct {
-	pdbFactory  dynamicinformer.DynamicSharedInformerFactory
-	pdbInformer k8cache.SharedIndexInformer
-	pdbCache    *configCache
-	metrics     *Metrics
+	allowMissingCRDs bool
+	pdbFactory       dynamicinformer.DynamicSharedInformerFactory
+	pdbInformer      k8cache.SharedIndexInformer
+	pdbCache         *configCache
+	metrics          *Metrics
 
 	dynamicClient dynamic.Interface
 	pdbResource   dynamic.ResourceInterface
@@ -82,11 +83,14 @@ func (c *configObserver) start() error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), initialResourceCheckTimeout)
-	_, listErr := c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
-	cancel()
-	if listErr != nil && !apierrors.IsNotFound(listErr) {
-		level.Warn(c.logger).Log("msg", "zpdb resource check failed; waiting for informer cache sync", "err", listErr)
+	var listErr error
+	if c.allowMissingCRDs {
+		ctx, cancel := context.WithTimeout(context.Background(), initialResourceCheckTimeout)
+		_, listErr = c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
+		cancel()
+		if listErr != nil && !apierrors.IsNotFound(listErr) {
+			level.Warn(c.logger).Log("msg", "zpdb resource check failed; waiting for informer cache sync", "err", listErr)
+		}
 	}
 
 	go c.pdbFactory.Start(c.stopCh)

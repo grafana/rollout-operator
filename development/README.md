@@ -20,7 +20,7 @@ You can use the StatefulSets to exercise the operator across a multi-zone `test-
 
 # Running with CRDs
 
-The development `apply.sh` script installs both CRDs before deploying the operator. The operator can also start before either CRD is installed.
+The development `apply.sh` script installs both CRDs before deploying the operator. Startup waits for ZPDB cache synchronization and any enabled ReplicaTemplate watch by default. Set `-kubernetes.allow-missing-crds=true` to opt into startup before CRDs are installed.
 
 Without the ReplicaTemplate CRD, StatefulSets referencing ReplicaTemplates cannot mirror their replica counts. Pod rollouts continue, and replica mirroring recovers automatically once the CRD and referenced resources are available.
 
