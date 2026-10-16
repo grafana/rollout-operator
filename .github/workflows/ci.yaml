@@ -85,7 +85,7 @@ jobs:
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.13.1
+          version: v2.14.0
           args: --timeout=5m
 
   push-image:
@@ -114,13 +114,13 @@ jobs:
       # copies the images to docker.io/grafana. See
       # https://github.com/grafana/deployment_tools/blob/master/docs/platform/gar-image-mirror.md
       - name: Log in to GAR
-        uses: grafana/shared-workflows/actions/login-to-gar@1f541877ceb22c7be7667d8a8df04984aeac9f9d # login-to-gar/v1.0.3
+        uses: grafana/shared-workflows/actions/login-to-gar@afad5c7621e788905e6417f05b492972685ab1eb # login-to-gar/v1.0.4
         with:
           registry: us-docker.pkg.dev
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build and push images
         run: make publish-images
         env:
