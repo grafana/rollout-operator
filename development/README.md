@@ -28,7 +28,7 @@ Without the ZoneAwarePodDisruptionBudget CRD, ZPDB enforcement is inactive: the 
 
 CRDs and custom resources can be applied later without restarting the operator. Recovery is asynchronous; informer retries and discovery checks can delay activation, and Kubernetes API failures can extend that delay. Verify observer readiness and configuration before relying on ZPDB protection. For installations requiring continuous ZPDB protection, install the CRD and valid ZPDB configuration before starting the operator.
 
-The mixin includes alerts for unavailable observers, enabled by default. See the [observer alert runbooks](../docs/runbooks.md#rollout-operatorzpdbconfigobservernotready) for investigation, and the [mixin README](../operations/rollout-operator-mixin/README.md#observer-alerts) to disable alerts for intentionally unused CRDs.
+The mixin enables the ZPDB observer alert by default. Enable the ReplicaTemplate observer alert where ReplicaTemplates are used. See the [observer alert runbooks](../docs/runbooks.md#rollout-operatorzpdbconfigobservernotready) for investigation, and the [mixin README](../operations/rollout-operator-mixin/README.md#observer-alerts) for alert configuration.
 
 # ZoneAwarePodDisruptionBudget (ZPDB)
 

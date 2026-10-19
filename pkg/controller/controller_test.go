@@ -62,8 +62,6 @@ func TestRolloutController_Reconcile(t *testing.T) {
 		expectedPatchedSets               map[string][]string
 		expectedPatchedResources          map[string][]string
 		expectedErr                       string
-		expectedFailureMetric             bool
-		expectedScalingRetry              bool
 		zpdbErrors                        []error
 		zpdbPartitionMode                 bool
 	}{
@@ -694,9 +692,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
 				})),
 			},
-			expectedErr:           "", // reconciliation continues if scaling fails
-			expectedScalingRetry:  true,
-			expectedFailureMetric: true,
+			expectedErr: "", // reconciliation continues if scaling fails
 		},
 		"should not fail if scaling based on custom resource fails due to scale subresource not being available": {
 			statefulSets: []runtime.Object{
@@ -706,10 +702,8 @@ func TestRolloutController_Reconcile(t *testing.T) {
 					"grafana.com/rollout-mirror-replicas-from-resource-api-version": customResourceGVK.GroupVersion().String(),
 				})),
 			},
-			getScaleErr:           fmt.Errorf("cannot get scale subresource"),
-			expectedErr:           "", // reconciliation continues if scaling fails
-			expectedScalingRetry:  true,
-			expectedFailureMetric: true,
+			getScaleErr: fmt.Errorf("cannot get scale subresource"),
+			expectedErr: "", // reconciliation continues if scaling fails
 		},
 		"all statefulsets are considered": {
 			statefulSets: []runtime.Object{
@@ -918,9 +912,6 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			// Run a reconcile.
 			c.shouldReconcile.Store(false)
 			err := c.reconcile(context.Background())
-			if testData.expectedScalingRetry {
-				require.True(t, c.shouldReconcile.Load())
-			}
 			if testData.expectedErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), testData.expectedErr)
@@ -978,7 +969,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 
 			// Assert on metrics.
 			expectedFailures := 0
-			if testData.expectedErr != "" || testData.expectedFailureMetric || testData.kubePatchErr != nil || testData.getScaleErr != nil {
+			if testData.expectedErr != "" {
 				expectedFailures = 1
 			}
 

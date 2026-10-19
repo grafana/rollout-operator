@@ -58,11 +58,3 @@ groups:
           for: 5m
           labels:
             severity: warning
-        - alert: rollout-operatorReplicaTemplateObserverNotReady
-          annotations:
-            message: The rollout-operator pod {{ $labels.pod }} cannot discover the ReplicaTemplate resource and its scale subresource. ReplicaTemplate replica mirroring may be unavailable.
-            runbook_url: https://github.com/grafana/rollout-operator/tree/main/docs/runbooks.md#rollout-operatorreplicatemplateobservernotready
-          expr: rollout_operator_replica_template_observer_ready == 0
-          for: 5m
-          labels:
-            severity: warning

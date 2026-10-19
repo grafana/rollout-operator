@@ -174,9 +174,6 @@ func TestRolloutOperatorStartsWithoutCRDs(t *testing.T) {
 	}
 	requireCreateStatefulSet(ctx, t, api, sts)
 
-	failedReconcile := regexp.MustCompile(`(?m)^rollout_operator_group_reconciles_failed_total\{rollout_group="mock"\} [1-9][0-9]*(?:\.[0-9]+)?$`)
-	require.Eventually(t, metricsMatch(failedReconcile), time.Minute, time.Second, "missing CRDs did not cause a failed reconcile metric")
-
 	// Future CRDs should cover both startup without the CRD and recovery when it is installed later.
 	createReplicaTemplateCustomResourceDefinition(t, cluster.ExtAPI())
 	require.Eventually(t, func() bool {

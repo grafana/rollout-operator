@@ -52,9 +52,9 @@
     alert_extra_labels: {},
     alert_extra_annotations: {},
 
-    // Disable these where the corresponding CRD is intentionally unused.
+    // Enable ReplicaTemplate alerting only where that CRD is used.
     rollout_operator_zpdb_config_observer_alert_enabled: true,
-    rollout_operator_replica_template_observer_alert_enabled: true,
+    rollout_operator_replica_template_observer_alert_enabled: false,
 
     rollout_operator_resources_panel_queries: {
       cpu_usage: 'sum by(%(instanceLabel)s) (rate(container_cpu_usage_seconds_total{%(namespace)s,container=~"%(containerName)s"}[$__rate_interval]))',

@@ -4,12 +4,12 @@ The mixin provides Prometheus alerts and Grafana dashboards for rollout-operator
 
 ## Observer alerts
 
-Both observer alerts are enabled by default in the mixin. For deployments that intentionally do not use one or both CRDs, disable the corresponding alert:
+The ZPDB observer alert is enabled by default. Disable it where the ZPDB CRD is intentionally unused. The ReplicaTemplate observer alert is disabled by default; enable it where ReplicaTemplates are used:
 
 ```jsonnet
 _config+:: {
     rollout_operator_zpdb_config_observer_alert_enabled: false,
-    rollout_operator_replica_template_observer_alert_enabled: false,
+    rollout_operator_replica_template_observer_alert_enabled: true,
 }
 ```
 

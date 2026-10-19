@@ -20,7 +20,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
@@ -46,18 +45,12 @@ const (
 
 var tracer = otel.Tracer("pkg/controller")
 
-var replicaTemplateGroupKind = schema.GroupKind{
-	Group: "rollout-operator.grafana.com",
-	Kind:  "ReplicaTemplate",
-}
-
 type ZPDBEvictionController interface {
 	MarkPodAsDeleted(ctx context.Context, namespace string, podName string, source string, override zpdb.MaxUnavailableZeroOverride) error
 	HasPartitionAwarePdb(pod *corev1.Pod) (bool, error)
 }
 
 type RolloutController struct {
-	allowMissingCRDs     bool
 	kubeClient           kubernetes.Interface
 	discoveryClient      discovery.DiscoveryInterface
 	clusterDomain        string
@@ -75,7 +68,9 @@ type RolloutController struct {
 	podHTTPClient        *instrumentation.PodHTTPClient
 	logger               log.Logger
 
-	replicaTemplatesInformer cache.SharedIndexInformer
+	replicaTemplatesInformer     cache.SharedIndexInformer
+	replicaTemplateStartupSynced cache.InformerSynced
+	onReplicaTemplateDiscovered  func()
 
 	zpdbController ZPDBEvictionController
 
@@ -164,14 +159,13 @@ func NewRolloutController(kubeClient kubernetes.Interface, discoveryClient disco
 			Help: "Whether ReplicaTemplate discovery and the enabled informer are ready.",
 		}),
 	}
+	c.replicaTemplateStartupSynced = func() bool {
+		return c.replicaTemplatesInformer == nil || c.replicaTemplatesInformer.HasSynced()
+	}
+	c.onReplicaTemplateDiscovered = func() {}
 	c.replicaTemplateReady.Set(0)
 
 	return c
-}
-
-// AllowMissingCRDs lets optional watches recover after startup. Call before Init.
-func (c *RolloutController) AllowMissingCRDs() {
-	c.allowMissingCRDs = true
 }
 
 // Init the controller.
@@ -227,10 +221,7 @@ func (c *RolloutController) Init() error {
 	}
 
 	level.Info(c.logger).Log("msg", "informer caches are syncing")
-	synced := []cache.InformerSynced{c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced}
-	if c.replicaTemplatesInformer != nil && !c.allowMissingCRDs {
-		synced = append(synced, c.replicaTemplatesInformer.HasSynced)
-	}
+	synced := []cache.InformerSynced{c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced, c.replicaTemplateStartupSynced}
 	if ok := cache.WaitForCacheSync(c.stopCh, synced...); !ok {
 		return errors.New("informer caches failed to sync")
 	}
@@ -240,32 +231,7 @@ func (c *RolloutController) Init() error {
 }
 
 func (c *RolloutController) observeReplicaTemplate() {
-	update := func() {
-		resourceAvailable := false
-		scaleAvailable := false
-		resources, err := c.discoveryClient.ServerResourcesForGroupVersion(replicaTemplateGVR.GroupVersion().String())
-		if err == nil {
-			for _, resource := range resources.APIResources {
-				switch resource.Name {
-				case replicaTemplateGVR.Resource:
-					resourceAvailable = true
-				case replicaTemplateGVR.Resource + "/scale":
-					scaleAvailable = true
-				}
-			}
-		}
-		available := resourceAvailable && scaleAvailable
-		c.replicaTemplateObserverMu.Lock()
-		wasAvailable := c.replicaTemplateAvailable
-		c.replicaTemplateAvailable = available
-		c.updateReplicaTemplateReadinessLocked()
-		c.replicaTemplateObserverMu.Unlock()
-		if !wasAvailable && available {
-			c.enqueueReconcile()
-		}
-	}
-
-	update()
+	c.updateReplicaTemplateDiscovery()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -273,8 +239,32 @@ func (c *RolloutController) observeReplicaTemplate() {
 		case <-c.stopCh:
 			return
 		case <-ticker.C:
-			update()
+			c.updateReplicaTemplateDiscovery()
 		}
+	}
+}
+
+func (c *RolloutController) updateReplicaTemplateDiscovery() {
+	resourceAvailable := false
+	scaleAvailable := false
+	resources, err := c.discoveryClient.ServerResourcesForGroupVersion(replicaTemplateGVR.GroupVersion().String())
+	if err == nil {
+		for _, resource := range resources.APIResources {
+			switch resource.Name {
+			case replicaTemplateGVR.Resource:
+				resourceAvailable = true
+			case replicaTemplateGVR.Resource + "/scale":
+				scaleAvailable = true
+			}
+		}
+	}
+	available := resourceAvailable && scaleAvailable
+	c.replicaTemplateObserverMu.Lock()
+	c.replicaTemplateAvailable = available
+	c.updateReplicaTemplateReadinessLocked()
+	c.replicaTemplateObserverMu.Unlock()
+	if available {
+		c.onReplicaTemplateDiscovered()
 	}
 }
 
@@ -396,10 +386,9 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	durationTimer := prometheus.NewTimer(c.groupReconcileDuration.WithLabelValues(groupName))
 	failed := c.groupReconcileFailed.WithLabelValues(groupName)
 	lastSuccess := c.groupReconcileLastSuccess.WithLabelValues(groupName)
-	scalingFailed := false
 	defer func() {
 		durationTimer.ObserveDuration()
-		if returnErr != nil || scalingFailed {
+		if returnErr != nil {
 			failed.Inc()
 		} else {
 			lastSuccess.SetToCurrentTime()
@@ -414,9 +403,6 @@ func (c *RolloutController) reconcileStatefulSetsGroup(ctx context.Context, grou
 	// up-to-date.
 	updated, err := c.adjustStatefulSetsGroupReplicas(ctx, groupName, sets)
 	if err != nil {
-		scalingFailed = true
-		// Retry scaling without holding back independent pod rollouts.
-		c.enqueueReconcile()
 		level.Warn(c.logger).Log("msg", "unable to adjust desired replicas of StatefulSet", "group", groupName, "err", err)
 	}
 	if err == nil && updated {

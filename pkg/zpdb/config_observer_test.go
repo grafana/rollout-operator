@@ -3,6 +3,8 @@ package zpdb
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,7 +18,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 	k8cache "k8s.io/client-go/tools/cache"
 
@@ -95,7 +99,7 @@ func TestObserver_NewPdbObserver(t *testing.T) {
 
 func TestObserver_StartWithoutCRD(t *testing.T) {
 	dynamicClient, observer := newConfigObserverTestCase()
-	observer.allowMissingCRDs = true
+	observer.startCaches = observer.startAllowMissingCRDs
 	dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewNotFound(schema.GroupResource{
 			Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
@@ -125,7 +129,7 @@ func TestObserver_StartRetriesTransientErrors(t *testing.T) {
 	} {
 		t.Run(probeErr.Error(), func(t *testing.T) {
 			dynamicClient, observer := newConfigObserverTestCase()
-			observer.allowMissingCRDs = true
+			observer.startCaches = observer.startAllowMissingCRDs
 			defer observer.stop()
 			var recovered atomic.Bool
 			dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -198,7 +202,7 @@ func TestObserver_ReadinessRecoversWithoutObjects(t *testing.T) {
 	})
 
 	require.NoError(t, observer.start())
-	observer.stop()
+	defer observer.stop()
 
 	unavailable.Store(true)
 	observer.updateReadiness()
@@ -270,6 +274,8 @@ func TestObserver_ZPDBEvents_AddValidZPDB(t *testing.T) {
 	require.NoError(t, err)
 
 	task = func() bool {
+		observer.pdbCache.lock.RLock()
+		defer observer.pdbCache.lock.RUnlock()
 		return observer.pdbCache.entries["test-zpdb"].generation == int64(3)
 	}
 	require.Eventually(t, task, time.Second*5, time.Millisecond*10, "zpdb config configCache has not been updated")
@@ -335,5 +341,30 @@ func TestObserver_WaitsForMissingCRDByDefault(t *testing.T) {
 		require.Error(t, err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("startup did not stop")
+	}
+}
+
+func TestObserver_StopCancelsReadinessProbe(t *testing.T) {
+	requested := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(requested)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	require.NoError(t, err)
+	observer := newConfigObserver(client, testNamespace, log.NewNopLogger(), NewMetrics(prometheus.NewRegistry()))
+	done := make(chan struct{})
+	go func() { observer.updateReadiness(); close(done) }()
+	select {
+	case <-requested:
+	case <-time.After(5 * time.Second):
+		t.Fatal("readiness probe did not start")
+	}
+	observer.stop()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("readiness probe did not stop")
 	}
 }

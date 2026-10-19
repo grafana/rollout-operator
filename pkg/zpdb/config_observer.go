@@ -26,11 +26,13 @@ const (
 
 // An configObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the configCache.
 type configObserver struct {
-	allowMissingCRDs bool
-	pdbFactory       dynamicinformer.DynamicSharedInformerFactory
-	pdbInformer      k8cache.SharedIndexInformer
-	pdbCache         *configCache
-	metrics          *Metrics
+	ctx         context.Context
+	cancel      context.CancelFunc
+	startCaches func() error
+	pdbFactory  dynamicinformer.DynamicSharedInformerFactory
+	pdbInformer k8cache.SharedIndexInformer
+	pdbCache    *configCache
+	metrics     *Metrics
 
 	dynamicClient dynamic.Interface
 	pdbResource   dynamic.ResourceInterface
@@ -54,7 +56,10 @@ func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 	)
 	pdbInformer := pdbFactory.ForResource(gvr)
 
+	ctx, cancel := context.WithCancel(context.Background())
 	c := &configObserver{
+		ctx:           ctx,
+		cancel:        cancel,
 		pdbFactory:    pdbFactory,
 		pdbInformer:   pdbInformer.Informer(),
 		pdbCache:      newConfigCache(),
@@ -65,6 +70,7 @@ func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 		stopCh:        make(chan struct{}),
 	}
 
+	c.startCaches = c.startAndWaitForCacheSync
 	return c
 }
 
@@ -83,29 +89,29 @@ func (c *configObserver) start() error {
 		return err
 	}
 
-	var listErr error
-	if c.allowMissingCRDs {
-		ctx, cancel := context.WithTimeout(context.Background(), initialResourceCheckTimeout)
-		_, listErr = c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
-		cancel()
-		if listErr != nil && !apierrors.IsNotFound(listErr) {
-			level.Warn(c.logger).Log("msg", "zpdb resource check failed; waiting for informer cache sync", "err", listErr)
-		}
-	}
+	return c.startCaches()
+}
 
+func (c *configObserver) startAndWaitForCacheSync() error {
 	go c.pdbFactory.Start(c.stopCh)
 	go c.observeReadiness()
-
-	if apierrors.IsNotFound(listErr) {
-		level.Warn(c.logger).Log("msg", "zpdb custom resource is unavailable; informer will retry", "err", listErr)
-		go c.waitForCacheSync()
-		return nil
-	}
-
 	if !c.waitForCacheSync() {
 		return errors.New("zpdb config informer caches failed to sync")
 	}
+	return nil
+}
 
+func (c *configObserver) startAllowMissingCRDs() error {
+	ctx, cancel := context.WithTimeout(c.ctx, initialResourceCheckTimeout)
+	_, err := c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
+	cancel()
+	if !apierrors.IsNotFound(err) {
+		return c.startAndWaitForCacheSync()
+	}
+	level.Warn(c.logger).Log("msg", "zpdb custom resource is unavailable; informer will retry", "err", err)
+	go c.pdbFactory.Start(c.stopCh)
+	go c.observeReadiness()
+	go c.waitForCacheSync()
 	return nil
 }
 
@@ -134,7 +140,9 @@ func (c *configObserver) observeReadiness() {
 }
 
 func (c *configObserver) updateReadiness() {
-	_, err := c.pdbResource.List(context.Background(), metav1.ListOptions{Limit: 1})
+	ctx, cancel := context.WithTimeout(c.ctx, initialResourceCheckTimeout)
+	defer cancel()
+	_, err := c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
 	if err == nil && c.pdbInformer.HasSynced() {
 		c.metrics.ConfigObserverReady.Set(1)
 	} else {
@@ -198,5 +206,6 @@ func (c *configObserver) onPdbDeleted(obj interface{}) {
 }
 
 func (c *configObserver) stop() {
+	c.cancel()
 	close(c.stopCh)
 }
