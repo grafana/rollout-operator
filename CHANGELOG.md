@@ -6,7 +6,7 @@
 
 * [ENHANCEMENT] Add `rollout_operator_zpdb_config_observer_ready` metric and `ZpdbConfigObserverNotReady` alert, reporting whether the ZPDB config observer can access ZPDBs and has synced. The alert is disabled by default; enable it with the mixin option `rollout_operator_zpdb_config_observer_alert_enabled: true`. #530
 
-* [ENHANCEMENT] Add `rollout_operator_replica_template_observer_ready` metric and opt-in `ReplicaTemplateObserverNotReady` alert, reporting whether the ReplicaTemplate resource and its scale subresource are discoverable and, when enabled, whether the ReplicaTemplate watch is healthy. #531
+* [ENHANCEMENT] Add `rollout_operator_replica_template_observer_ready` metric and `ReplicaTemplateObserverNotReady` alert, reporting whether the ReplicaTemplate CRD and its scale subresource are discoverable and, with `-replica-templates.watch-enabled=true`, whether the ReplicaTemplate watch is healthy. The alert is disabled by default; enable it with the mixin option `rollout_operator_replica_template_observer_alert_enabled: true`. #531
 
 ## v0.41.1
 
