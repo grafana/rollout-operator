@@ -30,7 +30,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		// a standby must not report not-ready.
 		ConfigObserverReady: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
 			Name: "rollout_operator_zpdb_config_observer_ready",
-			Help: "Whether the ZPDB configuration observer has synchronized with the Kubernetes API.",
+			Help: "Whether the ZPDB configuration observer has synchronized and can list and watch the Kubernetes API.",
 		}, []string{}),
 	}
 }

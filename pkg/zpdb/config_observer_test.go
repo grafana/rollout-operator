@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/rest"
@@ -108,7 +110,7 @@ func (i *watchErrorCapturingInformer) SetWatchErrorHandler(handler k8cache.Watch
 	return i.SharedIndexInformer.SetWatchErrorHandler(handler)
 }
 
-func TestObserver_WatchErrorsPreserveReadiness(t *testing.T) {
+func TestObserver_WatchErrorsInvalidateReadiness(t *testing.T) {
 	_, observer := newConfigObserverTestCase()
 	informer := &watchErrorCapturingInformer{SharedIndexInformer: observer.pdbInformer}
 	observer.pdbInformer = informer
@@ -123,7 +125,8 @@ func TestObserver_WatchErrorsPreserveReadiness(t *testing.T) {
 	} {
 		informer.handler(nil, watchErr)
 		require.True(t, observer.pdbInformer.HasSynced())
-		require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
+		observer.updateReadiness()
+		require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
 	}
 }
 
@@ -306,4 +309,67 @@ func TestObserver_StopCancelsReadinessProbe(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("readiness probe did not stop")
 	}
+}
+
+func TestObserver_ReadinessPollingStartsAfterInitialHandlers(t *testing.T) {
+	client, observer := newConfigObserverTestCase()
+	pdb := newPDB("initial-budget")
+	pdb.SetNamespace(testNamespace)
+	require.NoError(t, client.Tracker().Add(pdb))
+	var probes atomic.Int32
+	client.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.(k8stesting.ListActionImpl).GetListOptions().Limit == 1 {
+			probes.Add(1)
+		}
+		return false, nil, nil
+	})
+	observer.pdbCache.lock.Lock()
+	unlock := sync.OnceFunc(observer.pdbCache.lock.Unlock)
+	t.Cleanup(func() { unlock(); observer.stop() })
+	started := make(chan error, 1)
+	go func() { started <- observer.start() }()
+	require.Eventually(t, observer.pdbInformer.HasSynced, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
+	require.Never(t, func() bool { return probes.Load() > 0 }, 100*time.Millisecond, 10*time.Millisecond)
+	select {
+	case err := <-started:
+		t.Fatalf("startup returned before config handlers completed: %v", err)
+	default:
+	}
+	unlock()
+	select {
+	case err := <-started:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup did not complete")
+	}
+	require.Eventually(t, func() bool { return probes.Load() > 0 }, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestObserver_ReadinessDetectsWatchPermissionLossAndRecovery(t *testing.T) {
+	client, observer := newConfigObserverTestCase()
+	w := watch.NewRaceFreeFake()
+	var attempts atomic.Int32
+	var denied atomic.Bool
+	client.PrependWatchReactor(ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, watch.Interface, error) {
+		if attempts.Add(1) == 1 {
+			return true, w, nil
+		}
+		if denied.Load() {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: ZoneAwarePodDisruptionBudgetsSpecGroup, Resource: ZoneAwarePodDisruptionBudgetsNamePlural}, "", nil)
+		}
+		return false, nil, nil
+	})
+	require.NoError(t, observer.start())
+	defer observer.stop()
+	denied.Store(true)
+	w.Error(&metav1.Status{Status: metav1.StatusFailure, Code: 403, Reason: metav1.StatusReasonForbidden})
+	require.Eventually(t, func() bool { return attempts.Load() > 1 }, 5*time.Second, 10*time.Millisecond)
+	observer.updateReadiness()
+	require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
+	previousAttempts := attempts.Load()
+	denied.Store(false)
+	require.Eventually(t, func() bool { return attempts.Load() > previousAttempts }, 10*time.Second, 10*time.Millisecond)
+	observer.updateReadiness()
+	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
 }
