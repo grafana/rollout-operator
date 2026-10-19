@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -21,8 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listersv1 "k8s.io/client-go/listers/apps/v1"
@@ -51,6 +52,7 @@ type ZPDBEvictionController interface {
 
 type RolloutController struct {
 	kubeClient           kubernetes.Interface
+	discoveryClient      discovery.DiscoveryInterface
 	clusterDomain        string
 	namespace            string
 	reconcileInterval    time.Duration
@@ -66,7 +68,6 @@ type RolloutController struct {
 	podHTTPClient        *instrumentation.PodHTTPClient
 	logger               log.Logger
 
-	replicaTemplatesFactory  dynamicinformer.DynamicSharedInformerFactory
 	replicaTemplatesInformer cache.SharedIndexInformer
 
 	zpdbController ZPDBEvictionController
@@ -78,10 +79,14 @@ type RolloutController struct {
 	stopCh chan struct{}
 
 	// Metrics.
-	groupReconcileTotal       *prometheus.CounterVec
-	groupReconcileFailed      *prometheus.CounterVec
-	groupReconcileDuration    *prometheus.HistogramVec
-	groupReconcileLastSuccess *prometheus.GaugeVec
+	groupReconcileTotal         *prometheus.CounterVec
+	groupReconcileFailed        *prometheus.CounterVec
+	groupReconcileDuration      *prometheus.HistogramVec
+	groupReconcileLastSuccess   *prometheus.GaugeVec
+	replicaTemplateReady        prometheus.Gauge
+	replicaTemplateAvailable    bool
+	replicaTemplateWatchHealthy bool
+	replicaTemplateObserverMu   sync.Mutex
 
 	// Keep track of discovered rollout groups. We use this information to delete metrics
 	// related to rollout groups that have been decommissioned.
@@ -96,7 +101,7 @@ func NewPodInformerFactory(kubeClient kubernetes.Interface, namespace string) in
 	return informers.NewSharedInformerFactoryWithOptions(kubeClient, informerSyncInterval, informers.WithNamespace(namespace))
 }
 
-func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, podsFactory informers.SharedInformerFactory, podHTTPClient *instrumentation.PodHTTPClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController ZPDBEvictionController) *RolloutController {
+func NewRolloutController(kubeClient kubernetes.Interface, discoveryClient discovery.DiscoveryInterface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, dynamic dynamic.Interface, clusterDomain string, namespace string, podsFactory informers.SharedInformerFactory, podHTTPClient *instrumentation.PodHTTPClient, reconcileInterval time.Duration, reg prometheus.Registerer, logger log.Logger, zpdbController ZPDBEvictionController) *RolloutController {
 	namespaceOpt := informers.WithNamespace(namespace)
 
 	// Initialise the StatefulSet informer to restrict the returned StatefulSets to only the ones
@@ -112,6 +117,7 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 
 	c := &RolloutController{
 		kubeClient:           kubeClient,
+		discoveryClient:      discoveryClient,
 		clusterDomain:        clusterDomain,
 		namespace:            namespace,
 		reconcileInterval:    reconcileInterval,
@@ -146,7 +152,12 @@ func NewRolloutController(kubeClient kubernetes.Interface, restMapper meta.RESTM
 			Name: "rollout_operator_last_successful_group_reconcile_timestamp_seconds",
 			Help: "Timestamp of the last successful reconcile for a specific rollout group.",
 		}, []string{"rollout_group"}),
+		replicaTemplateReady: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "rollout_operator_replica_template_observer_ready",
+			Help: "Whether ReplicaTemplate discovery and the enabled informer are ready.",
+		}),
 	}
+	c.replicaTemplateReady.Set(0)
 
 	return c
 }
@@ -184,7 +195,14 @@ func (c *RolloutController) Init() error {
 		if err != nil {
 			return err
 		}
-		c.replicaTemplatesFactory.Start(c.stopCh)
+		go c.replicaTemplatesInformer.Run(c.stopCh)
+		go func() {
+			if cache.WaitForCacheSync(c.stopCh, c.replicaTemplatesInformer.HasSynced) {
+				c.replicaTemplateObserverMu.Lock()
+				c.updateReplicaTemplateReadinessLocked()
+				c.replicaTemplateObserverMu.Unlock()
+			}
+		}()
 	}
 
 	// Start informers. Start only starts informers the shared factory has not started yet, so whichever of
@@ -192,6 +210,9 @@ func (c *RolloutController) Init() error {
 	// and the other call is a no-op.
 	go c.statefulSetsFactory.Start(c.stopCh)
 	go c.podsFactory.Start(c.stopCh)
+	if c.discoveryClient != nil {
+		go c.observeReplicaTemplate()
+	}
 
 	// Wait until all informer caches have been synced.
 	level.Info(c.logger).Log("msg", "informer caches are syncing")
@@ -205,6 +226,40 @@ func (c *RolloutController) Init() error {
 	level.Info(c.logger).Log("msg", "informer caches have synced")
 
 	return nil
+}
+
+func (c *RolloutController) observeReplicaTemplate() {
+	c.updateReplicaTemplateDiscovery()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case <-ticker.C:
+			c.updateReplicaTemplateDiscovery()
+		}
+	}
+}
+
+func (c *RolloutController) updateReplicaTemplateDiscovery() {
+	resourceAvailable := false
+	scaleAvailable := false
+	resources, err := c.discoveryClient.ServerResourcesForGroupVersion(replicaTemplateGVR.GroupVersion().String())
+	if err == nil {
+		for _, resource := range resources.APIResources {
+			switch resource.Name {
+			case replicaTemplateGVR.Resource:
+				resourceAvailable = true
+			case replicaTemplateGVR.Resource + "/scale":
+				scaleAvailable = true
+			}
+		}
+	}
+	c.replicaTemplateObserverMu.Lock()
+	c.replicaTemplateAvailable = resourceAvailable && scaleAvailable
+	c.updateReplicaTemplateReadinessLocked()
+	c.replicaTemplateObserverMu.Unlock()
 }
 
 func (c *RolloutController) onAdded(obj interface{}) {
