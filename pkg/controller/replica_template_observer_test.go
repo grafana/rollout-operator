@@ -2,6 +2,11 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,8 +21,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/discovery"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	restfake "k8s.io/client-go/rest/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -101,7 +110,7 @@ func TestReplicaTemplateWatchReadinessRecoversFromPermissionErrors(t *testing.T)
 					return false, nil, nil
 				})
 			}
-			c := NewRolloutController(kube, kube.Discovery(), nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+			c := NewRolloutController(kube, newReplicaTemplateTestDiscovery(kube), nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
 			c.WatchReplicaTemplates()
 			t.Cleanup(c.Stop)
 			// Init blocks until the informer syncs, which a denied list prevents.
@@ -134,7 +143,7 @@ func TestReplicaTemplateReadinessDropsAfterWatchError(t *testing.T) {
 		}
 		return false, nil, nil
 	})
-	c := NewRolloutController(kube, kube.Discovery(), nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+	c := NewRolloutController(kube, newReplicaTemplateTestDiscovery(kube), nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
 	c.WatchReplicaTemplates()
 	t.Cleanup(c.Stop)
 	require.NoError(t, c.Init())
@@ -182,7 +191,7 @@ func TestReplicaTemplateWatchWaitsForCRDByDefault(t *testing.T) {
 
 func TestReplicaTemplateDiscoveryReadiness(t *testing.T) {
 	kube := fake.NewSimpleClientset()
-	c := NewRolloutController(kube, kube.Discovery(), nil, nil, nil, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+	c := NewRolloutController(kube, newReplicaTemplateTestDiscovery(kube), nil, nil, nil, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
 	c.updateReplicaTemplateDiscovery()
 	require.Equal(t, float64(0), testutil.ToFloat64(c.replicaTemplateReady))
 
@@ -193,4 +202,69 @@ func TestReplicaTemplateDiscoveryReadiness(t *testing.T) {
 	kube.Resources[0].APIResources = append(kube.Resources[0].APIResources, metav1.APIResource{Name: "replicatemplates/scale"})
 	c.updateReplicaTemplateDiscovery()
 	require.Equal(t, float64(1), testutil.ToFloat64(c.replicaTemplateReady))
+}
+
+type replicaTemplateTestDiscovery struct {
+	discovery.DiscoveryInterface
+	client rest.Interface
+}
+
+func (d replicaTemplateTestDiscovery) RESTClient() rest.Interface { return d.client }
+
+func newReplicaTemplateTestDiscovery(kube *fake.Clientset) discovery.DiscoveryInterface {
+	client := &restfake.RESTClient{
+		NegotiatedSerializer: scheme.Codecs.WithoutConversion(),
+		GroupVersion:         schema.GroupVersion{Version: "v1"},
+		Client: restfake.CreateHTTPClient(func(r *http.Request) (*http.Response, error) {
+			resources, err := kube.Discovery().ServerResourcesForGroupVersion(replicaTemplateGVR.GroupVersion().String())
+			code := http.StatusOK
+			var obj interface{}
+			if err != nil {
+				code = http.StatusNotFound
+				obj = &metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"}, Status: metav1.StatusFailure, Code: int32(code), Message: err.Error()}
+			} else {
+				resources = resources.DeepCopy()
+				resources.TypeMeta = metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}
+				obj = resources
+			}
+			body, err := json.Marshal(obj)
+			if err != nil {
+				return nil, err
+			}
+			return &http.Response{StatusCode: code, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+		}),
+	}
+	return replicaTemplateTestDiscovery{DiscoveryInterface: kube.Discovery(), client: client}
+}
+
+func TestReplicaTemplateDiscoveryStopsWithController(t *testing.T) {
+	requested := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(requested)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(&rest.Config{Host: server.URL})
+	require.NoError(t, err)
+	kube := fake.NewSimpleClientset()
+	c := NewRolloutController(kube, discoveryClient, nil, nil, nil, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+	done := make(chan struct{})
+	go func() { c.updateReplicaTemplateDiscovery(); close(done) }()
+	select {
+	case <-requested:
+	case <-time.After(5 * time.Second):
+		t.Fatal("discovery request did not start")
+	}
+	c.Stop()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("discovery request was not canceled")
+	}
+	require.Equal(t, float64(0), testutil.ToFloat64(c.replicaTemplateReady))
 }

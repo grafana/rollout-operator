@@ -53,6 +53,8 @@ type ZPDBEvictionController interface {
 type RolloutController struct {
 	kubeClient           kubernetes.Interface
 	discoveryClient      discovery.DiscoveryInterface
+	observerCtx          context.Context
+	cancelObserver       context.CancelFunc
 	clusterDomain        string
 	namespace            string
 	reconcileInterval    time.Duration
@@ -115,7 +117,10 @@ func NewRolloutController(kubeClient kubernetes.Interface, discoveryClient disco
 	statefulSetsInformer := statefulSetsFactory.Apps().V1().StatefulSets()
 	podsInformer := podsFactory.Core().V1().Pods()
 
+	observerCtx, cancelObserver := context.WithCancel(context.Background())
 	c := &RolloutController{
+		observerCtx:          observerCtx,
+		cancelObserver:       cancelObserver,
 		kubeClient:           kubeClient,
 		discoveryClient:      discoveryClient,
 		clusterDomain:        clusterDomain,
@@ -245,7 +250,10 @@ func (c *RolloutController) observeReplicaTemplate() {
 func (c *RolloutController) updateReplicaTemplateDiscovery() {
 	resourceAvailable := false
 	scaleAvailable := false
-	resources, err := c.discoveryClient.ServerResourcesForGroupVersion(replicaTemplateGVR.GroupVersion().String())
+	ctx, cancel := context.WithTimeout(c.observerCtx, 10*time.Second)
+	defer cancel()
+	resources := &metav1.APIResourceList{}
+	err := c.discoveryClient.RESTClient().Get().AbsPath("/apis/" + replicaTemplateGVR.GroupVersion().String()).Do(ctx).Into(resources)
 	if err == nil {
 		for _, resource := range resources.APIResources {
 			switch resource.Name {
@@ -334,6 +342,7 @@ func (c *RolloutController) Run() {
 
 // Stop the controller.
 func (c *RolloutController) Stop() {
+	c.cancelObserver()
 	close(c.stopCh)
 }
 
