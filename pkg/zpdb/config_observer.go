@@ -27,13 +27,14 @@ const (
 
 // An configObserver facilitates listening for ZoneAwarePodDisruptionBudget changes, parsing and storing these into the configCache.
 type configObserver struct {
-	ctx          context.Context
-	cancel       context.CancelFunc
-	pdbInformer  k8cache.SharedIndexInformer
-	pdbHandler   k8cache.ResourceEventHandlerRegistration
-	watchHealthy atomic.Bool
-	pdbCache     *configCache
-	metrics      *Metrics
+	ctx              context.Context
+	cancel           context.CancelFunc
+	pdbInformer      k8cache.SharedIndexInformer
+	pdbHandler       k8cache.ResourceEventHandlerRegistration
+	watchHealthy     atomic.Bool
+	readinessChanged chan struct{}
+	pdbCache         *configCache
+	metrics          *Metrics
 
 	dynamicClient dynamic.Interface
 	pdbResource   dynamic.ResourceInterface
@@ -51,14 +52,15 @@ func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &configObserver{
-		ctx:           ctx,
-		cancel:        cancel,
-		pdbCache:      newConfigCache(),
-		dynamicClient: dynamic,
-		pdbResource:   dynamic.Resource(gvr).Namespace(namespace),
-		metrics:       metrics,
-		logger:        logger,
-		stopCh:        make(chan struct{}),
+		ctx:              ctx,
+		cancel:           cancel,
+		pdbCache:         newConfigCache(),
+		dynamicClient:    dynamic,
+		pdbResource:      dynamic.Resource(gvr).Namespace(namespace),
+		metrics:          metrics,
+		logger:           logger,
+		stopCh:           make(chan struct{}),
+		readinessChanged: make(chan struct{}, 1),
 	}
 
 	c.pdbInformer = k8cache.NewSharedIndexInformer(k8cache.ToListWatcherWithWatchListSemantics(&k8cache.ListWatch{
@@ -67,7 +69,7 @@ func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 		},
 		WatchFuncWithContext: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 			w, err := c.pdbResource.Watch(ctx, opts)
-			c.watchHealthy.Store(err == nil)
+			c.setWatchHealthy(err == nil)
 			return w, err
 		},
 	}, dynamic), &unstructured.Unstructured{}, informerSyncInterval, k8cache.Indexers{k8cache.NamespaceIndex: k8cache.MetaNamespaceIndexFunc})
@@ -86,7 +88,7 @@ func (c *configObserver) start() error {
 	}
 	c.pdbHandler = handler
 	if err := c.pdbInformer.SetWatchErrorHandler(func(_ *k8cache.Reflector, err error) {
-		c.watchHealthy.Store(false)
+		c.setWatchHealthy(false)
 		level.Warn(c.logger).Log("msg", "zpdb config observer watch failed", "err", err)
 	}); err != nil {
 		return err
@@ -100,9 +102,7 @@ func (c *configObserver) start() error {
 	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbHandler.HasSynced); !ok {
 		return errors.New("zpdb config informer caches failed to sync")
 	}
-	c.metrics.ConfigObserverReady.WithLabelValues().Set(1)
 	level.Info(c.logger).Log("msg", "zpdb config informer caches have synced")
-	// Startup publishes its initial state before polling can update it.
 	go c.observeReadiness()
 
 	return nil
@@ -118,6 +118,18 @@ func (c *configObserver) observeReadiness() {
 			return
 		case <-ticker.C:
 			c.updateReadiness()
+		case <-c.readinessChanged:
+			c.updateReadiness()
+		}
+	}
+}
+
+func (c *configObserver) setWatchHealthy(healthy bool) {
+	if c.watchHealthy.Swap(healthy) != healthy {
+		// Recheck promptly after a watch opens or fails instead of waiting for the periodic probe.
+		select {
+		case c.readinessChanged <- struct{}{}:
+		default:
 		}
 	}
 }

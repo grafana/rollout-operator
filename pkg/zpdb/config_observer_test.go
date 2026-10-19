@@ -82,7 +82,9 @@ func TestObserver_NewPdbObserver(t *testing.T) {
 	_, observer := newConfigObserverTestCase()
 	require.Equal(t, 0, testutil.CollectAndCount(observer.metrics.ConfigObserverReady))
 	require.NoError(t, observer.start())
-	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()) == 1
+	}, time.Second, time.Millisecond)
 
 	select {
 	case <-observer.stopCh:
@@ -117,7 +119,9 @@ func TestObserver_WatchErrorsInvalidateReadiness(t *testing.T) {
 	require.NoError(t, observer.start())
 	defer observer.stop()
 	require.True(t, observer.pdbInformer.HasSynced())
-	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()) == 1
+	}, time.Second, time.Millisecond)
 
 	for _, watchErr := range []error{
 		apierrors.NewResourceExpired("resource version expired"),
@@ -372,4 +376,41 @@ func TestObserver_ReadinessDetectsWatchPermissionLossAndRecovery(t *testing.T) {
 	require.Eventually(t, func() bool { return attempts.Load() > previousAttempts }, 10*time.Second, 10*time.Millisecond)
 	observer.updateReadiness()
 	require.Equal(t, float64(1), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
+}
+
+type delayedWatchResource struct {
+	dynamic.ResourceInterface
+	release <-chan struct{}
+}
+
+func (r delayedWatchResource) Watch(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return r.ResourceInterface.Watch(ctx, options)
+}
+
+func TestObserver_ReadinessUpdatesWhenInitialWatchOpens(t *testing.T) {
+	client, observer := newConfigObserverTestCase()
+	releaseWatch := make(chan struct{})
+	var probes atomic.Int32
+	observer.pdbResource = delayedWatchResource{ResourceInterface: observer.pdbResource, release: releaseWatch}
+	client.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.(k8stesting.ListActionImpl).GetListOptions().Limit == 1 {
+			probes.Add(1)
+		}
+		return false, nil, nil
+	})
+	t.Cleanup(observer.stop)
+	require.NoError(t, observer.start())
+	require.Eventually(t, func() bool { return probes.Load() > 0 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()) == 0
+	}, time.Second, time.Millisecond)
+	close(releaseWatch)
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()) == 1
+	}, time.Second, time.Millisecond)
 }
