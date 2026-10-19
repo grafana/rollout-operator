@@ -146,7 +146,7 @@ How to **investigate**:
 
 ### rollout-operatorZpdbConfigObserverNotReady
 
-This alert fires when `rollout_operator_zpdb_config_observer_ready` remains `0` for 5 minutes. Only the leader exports this metric.
+This alert fires when `rollout_operator_zpdb_config_observer_ready` remains `0` for 5 minutes. Only the leader exports this metric. It is disabled by default; enable it with `rollout_operator_zpdb_config_observer_alert_enabled` where ZPDBs are used.
 
 The observer cannot access the ZPDB resource or has not synchronized its configuration, so ZPDB configuration changes may not be applied to eviction decisions.
 

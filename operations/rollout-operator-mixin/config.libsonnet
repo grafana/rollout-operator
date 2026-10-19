@@ -52,8 +52,8 @@
     alert_extra_labels: {},
     alert_extra_annotations: {},
 
-    // Disable where the ZPDB CRD is intentionally unused.
-    rollout_operator_zpdb_config_observer_alert_enabled: true,
+    // Enable only where ZPDBs are used.
+    rollout_operator_zpdb_config_observer_alert_enabled: false,
 
     rollout_operator_resources_panel_queries: {
       cpu_usage: 'sum by(%(instanceLabel)s) (rate(container_cpu_usage_seconds_total{%(namespace)s,container=~"%(containerName)s"}[$__rate_interval]))',
