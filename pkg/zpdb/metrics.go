@@ -9,6 +9,7 @@ type Metrics struct {
 	ConfigurationsObserved *prometheus.CounterVec
 	EvictionRequests       *prometheus.CounterVec
 	InFlightRequests       *prometheus.GaugeVec
+	ConfigObserverReady    *prometheus.GaugeVec
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -24,6 +25,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		InFlightRequests: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
 			Name: "rollout_operator_zpdb_inflight_eviction_requests",
 			Help: "Number of zpdb eviction requests which are currently in-flight.",
+		}, []string{}),
+		// Unlabelled vec so that only the leader, which runs the observer, exports a series;
+		// a standby must not report not-ready.
+		ConfigObserverReady: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
+			Name: "rollout_operator_zpdb_config_observer_ready",
+			Help: "Whether the ZPDB configuration observer has synchronized with the Kubernetes API.",
 		}, []string{}),
 	}
 }
