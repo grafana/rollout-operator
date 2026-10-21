@@ -33,7 +33,7 @@ const (
 type demoEvictionController struct{}
 
 func (demoEvictionController) MarkPodAsDeleted(context.Context, string, string, string, zpdb.MaxUnavailableZeroOverride) error {
-	return nil
+	return fmt.Errorf("demo: another zone has a pending eviction")
 }
 
 func (demoEvictionController) HasPartitionAwarePdb(*corev1.Pod) (bool, error) {
@@ -86,10 +86,12 @@ func demoObjects() []runtime.Object {
 				sts.Annotations[config.RolloutPausedAnnotationKey] = config.RolloutPausedAnnotationValue
 			},
 		),
-		demoStatefulSet("store-gateway-zone-b", "store-gateway", 2, 2, demoStoreGatewayOldRev, demoStoreGatewayNewRev),
+		demoStatefulSet("store-gateway-zone-b", "store-gateway", 2, 2, demoStoreGatewayOldRev, demoStoreGatewayNewRev,
+			func(sts *appsv1.StatefulSet) { sts.Annotations[config.RolloutMaxUnavailableAnnotationKey] = "2" },
+		),
 		demoPod("store-gateway-zone-a-0", demoStoreGatewayOldRev),
 		demoPod("store-gateway-zone-a-1", demoStoreGatewayOldRev),
-		demoPod("store-gateway-zone-b-0", demoStoreGatewayOldRev),
+		demoTerminatingPod("store-gateway-zone-b-0", demoStoreGatewayOldRev),
 		demoPod("store-gateway-zone-b-1", demoStoreGatewayOldRev),
 
 		// Compactor: fully rolled out.
@@ -160,4 +162,11 @@ func demoPod(name, revision string) *corev1.Pod {
 			}},
 		},
 	}
+}
+
+func demoTerminatingPod(name, revision string) *corev1.Pod {
+	pod := demoPod(name, revision)
+	now := metav1.Now()
+	pod.DeletionTimestamp = &now
+	return pod
 }
