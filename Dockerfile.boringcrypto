@@ -7,7 +7,7 @@ COPY . /src/rollout-operator
 WORKDIR /src/rollout-operator
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make rollout-operator-boringcrypto
 
-FROM gcr.io/distroless/base-nossl-debian13:nonroot
+FROM gcr.io/distroless/base-nossl-debian13:nonroot@sha256:83df5862465415c1d5f3ade85adc4d58a922db94e0b4d26c83a1bf96d5adf72d
 
 COPY --from=build /src/rollout-operator/rollout-operator /usr/bin/rollout-operator
 ENTRYPOINT [ "/usr/bin/rollout-operator" ]
