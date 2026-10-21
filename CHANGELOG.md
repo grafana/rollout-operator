@@ -4,7 +4,7 @@
 
 ## v0.41.1
 
-* [ENHANCEMENT] Update Go to `1.27.3`, including the standard and boringcrypto Docker builders. #532
+* [ENHANCEMENT] Update the standard and boringcrypto Docker builder images to Go `1.27.3`. #532
 * [ENHANCEMENT] Pin the standard and boringcrypto distroless runtime images to their latest digests. #532
 
 ## v0.41.0
