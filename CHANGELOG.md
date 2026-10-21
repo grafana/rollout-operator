@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+## v0.41.1
+
+* [ENHANCEMENT] Rebuild v0.41.0 with updated Go and distroless images.
+
 ## v0.41.0
 
 * [ENHANCEMENT] Add ability to watch ReplicaTemplates so replica changes trigger scaling reconciliation without waiting for the informer re-sync. Enable with -replica-templates.watch-enabled=true. #503
