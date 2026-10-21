@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+## v0.28.12
+
+* [ENHANCEMENT] Rebuild v0.28.11 with updated Go and distroless images.
+
 ## v0.28.11
 
 * [ENHANCEMENT] Updated dependencies to resolve CVEs. #527
