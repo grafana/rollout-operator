@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [BUGFIX] Count pods that a StatefulSet has not (re)created yet as not-Ready. Previously, if the replacement pods couldn't be created (for example, rejected at admission or blocked by a quota), the operator kept deleting pods beyond `rollout-max-unavailable` and could also move on to the next StatefulSet in the rollout group. #537
+
 ## v0.41.1
 
 * [ENHANCEMENT] Rebuild v0.41.0 with updated Go and distroless images.
