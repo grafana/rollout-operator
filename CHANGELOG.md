@@ -2,6 +2,10 @@
 
 ## main / unreleased
 
+## v0.28.12
+
+* [ENHANCEMENT] Update Go to `1.27.3`, including the standard and boringcrypto Docker builders.
+
 ## v0.28.11
 
 * [ENHANCEMENT] Updated dependencies to resolve CVEs. #527
