@@ -2,7 +2,10 @@
 
 ## main / unreleased
 
+## v0.42.0
+
 * [ENHANCEMENT] Update Go to `1.27.3`, including the standard and boringcrypto Docker builders. #532
+* [ENHANCEMENT] Pin the standard and boringcrypto distroless runtime images to their latest digests. #532
 
 ## v0.41.0
 
