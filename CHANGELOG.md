@@ -4,6 +4,8 @@
 
 * [BUGFIX] Count pods that a StatefulSet has not (re)created yet as not-Ready. Previously, if the replacement pods couldn't be created (for example, rejected at admission or blocked by a quota), the operator kept deleting pods beyond `rollout-max-unavailable` and could also move on to the next StatefulSet in the rollout group. #537
 
+* [ENHANCEMENT] Add `rollout_operator_zpdb_config_observer_ready` metric and `ZpdbConfigObserverNotReady` alert, reporting whether the ZPDB config observer can access ZPDBs and has synced. The alert is disabled by default; enable it with the mixin option `rollout_operator_zpdb_config_observer_alert_enabled: true`. #530
+
 ## v0.41.1
 
 * [ENHANCEMENT] Rebuild v0.41.0 with updated Go and distroless images.
