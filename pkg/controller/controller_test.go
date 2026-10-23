@@ -151,6 +151,134 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			},
 			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
 		},
+		// Pods deleted by the operator whose replacements can't be created (e.g. rejected at
+		// admission) disappear from both status.replicas and status.readyReplicas. They must still
+		// count against max unavailable, otherwise the operator keeps deleting the rest of the zone.
+		"should not delete more pods when deleted pods have not been recreated": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withMissingReplicas(3, 1, 1)),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: nil,
+		},
+		"should only delete up to max unavailable minus missing pods": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), withMissingReplicas(4, 3, 3), func(sts *v1.StatefulSet) {
+					sts.Annotations[config.RolloutMaxUnavailableAnnotationKey] = "2"
+				}),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-3", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-a-1"},
+		},
+		"should not move to the next StatefulSet while some pods of an updated StatefulSet are missing": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withMissingReplicas(3, 2, 2)),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: nil,
+		},
+		"should honor max unavailable using the current status while scaling down": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), func(sts *v1.StatefulSet) {
+					replicas := int32(2)
+					sts.Spec.Replicas = &replicas
+					sts.Status.Replicas = 3
+					sts.Status.ReadyReplicas = 3
+				}),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-a-0", "ingester-zone-a-1"},
+		},
+		// A scale up raises Spec.Replicas before the StatefulSet controller creates the new pods.
+		// The missing pods count as not-Ready, so zone-a blocks the rollout of zone-b.
+		"should not roll out the next StatefulSet while another StatefulSet in the group has a pending scale up": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withMissingReplicas(5, 3, 3)),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: nil,
+		},
+		// A scale down lowers Spec.Replicas before the StatefulSet controller deletes the extra pods.
+		"should roll out the next StatefulSet while another StatefulSet in the group has a pending scale down": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) {
+					replicas := int32(3)
+					sts.Spec.Replicas = &replicas
+					sts.Status.Replicas = 5
+					sts.Status.ReadyReplicas = 5
+				}),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-3", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-4", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: []string{"ingester-zone-b-0", "ingester-zone-b-1"},
+		},
+		"should count not-Ready pods against max unavailable while scaling down": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withPrevRevision(), func(sts *v1.StatefulSet) {
+					replicas := int32(2)
+					sts.Spec.Replicas = &replicas
+					sts.Status.Replicas = 3
+					sts.Status.ReadyReplicas = 2
+				}),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testPrevRevisionHash, withNotReady()),
+			},
+			expectedDeletedPods: []string{"ingester-zone-a-0"},
+		},
+		"should not roll out other StatefulSets while a paused StatefulSet in the group has a pending scale up": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withMissingReplicas(5, 3, 3), withAnnotations(map[string]string{
+					config.RolloutPausedAnnotationKey: config.RolloutPausedAnnotationValue,
+				})),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-2", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			expectedDeletedPods: nil,
+		},
 		"should delete pods that needs to be updated - zpdb allows first delete but denies the second": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a"),
@@ -1652,6 +1780,16 @@ func withReplicas(totalReplicas, readyReplicas int32) func(sts *v1.StatefulSet) 
 	return func(sts *v1.StatefulSet) {
 		sts.Spec.Replicas = &totalReplicas
 		sts.Status.Replicas = totalReplicas
+		sts.Status.ReadyReplicas = readyReplicas
+	}
+}
+
+// withMissingReplicas sets the desired replicas to totalReplicas, but only createdReplicas pods
+// exist (e.g. the StatefulSet controller couldn't create the rest).
+func withMissingReplicas(totalReplicas, createdReplicas, readyReplicas int32) func(sts *v1.StatefulSet) {
+	return func(sts *v1.StatefulSet) {
+		sts.Spec.Replicas = &totalReplicas
+		sts.Status.Replicas = createdReplicas
 		sts.Status.ReadyReplicas = readyReplicas
 	}
 }

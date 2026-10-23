@@ -494,11 +494,25 @@ func (c *RolloutController) listStatefulSetsWithRolloutGroup() ([]*v1.StatefulSe
 	return deepCopy, nil
 }
 
+// expectedReplicas returns the number of pods the StatefulSet should have.
+//
+// Status.Replicas only counts pods that exist. If the StatefulSet controller can't create
+// a pod (e.g. the pod spec is rejected at admission or a quota is exceeded) that pod is
+// missing from both Status.Replicas and Status.ReadyReplicas, so it would never be counted
+// as unavailable. We take the max of spec and status, like the ZPDB eviction logic does,
+// so missing pods count as not-ready while a scale down still uses the current status.
+func expectedReplicas(sts *v1.StatefulSet) int32 {
+	if sts.Spec.Replicas == nil {
+		return sts.Status.Replicas
+	}
+	return max(*sts.Spec.Replicas, sts.Status.Replicas)
+}
+
 func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (bool, error) {
 	// We can quickly check the number of ready replicas reported by the StatefulSet.
-	// If they don't match the total number of replicas, then we're sure there are some
-	// not ready pods.
-	if sts.Status.Replicas != sts.Status.ReadyReplicas {
+	// If they don't match the expected number of replicas, then we're sure there are some
+	// not ready (or missing) pods.
+	if expectedReplicas(sts) != sts.Status.ReadyReplicas {
 		return true, nil
 	}
 
@@ -510,11 +524,11 @@ func (c *RolloutController) hasStatefulSetNotReadyPods(sts *v1.StatefulSet) (boo
 		return false, err
 	}
 
-	if len(pods) < int(sts.Status.Replicas) {
+	if len(pods) < int(expectedReplicas(sts)) {
 		level.Info(c.logger).Log(
 			"msg", "StatefulSet status is reporting all pods ready, but the rollout operator found less pods than expected",
 			"statefulset", sts.Name,
-			"expected_replicas", sts.Status.Replicas,
+			"expected_replicas", expectedReplicas(sts),
 			"found_pods", len(pods),
 		)
 		return true, nil
@@ -589,7 +603,9 @@ func (c *RolloutController) updateStatefulSetPods(ctx context.Context, sts *v1.S
 
 	if len(podsToUpdate) > 0 {
 		maxUnavailable := getMaxUnavailableForStatefulSet(sts, c.logger)
-		numNotReady := int(sts.Status.Replicas - sts.Status.ReadyReplicas)
+		// Pods that haven't been (re)created yet count as not-Ready, otherwise we would keep
+		// deleting pods while their replacements can't be created.
+		numNotReady := int(expectedReplicas(sts) - sts.Status.ReadyReplicas)
 
 		// Compute the number of pods we should update, honoring the configured maxUnavailable.
 		numPods := max(0, min(

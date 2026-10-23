@@ -196,10 +196,10 @@ func (c *RolloutController) memberStatus(sts *v1.StatefulSet) (status.Member, er
 
 // statefulSetHasNotReadyPods mirrors hasStatefulSetNotReadyPods without emitting Info logs.
 func statefulSetHasNotReadyPods(sts *v1.StatefulSet, pods []*corev1.Pod) bool {
-	if sts.Status.Replicas != sts.Status.ReadyReplicas {
+	if expectedReplicas(sts) != sts.Status.ReadyReplicas {
 		return true
 	}
-	if len(pods) < int(sts.Status.Replicas) {
+	if len(pods) < int(expectedReplicas(sts)) {
 		return true
 	}
 	return len(notRunningAndReady(pods)) > 0

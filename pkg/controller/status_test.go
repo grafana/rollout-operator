@@ -441,6 +441,39 @@ func TestRolloutController_Snapshot(t *testing.T) {
 				},
 			}},
 		},
+		"missing pods in an updated zone block the next zone": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-a", withMissingReplicas(3, 2, 2)),
+				mockStatefulSet("ingester-zone-b", withPrevRevision()),
+			},
+			pods: []runtime.Object{
+				mockStatefulSetPod("ingester-zone-a-0", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-a-1", testLastRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-0", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-1", testPrevRevisionHash),
+				mockStatefulSetPod("ingester-zone-b-2", testPrevRevisionHash),
+			},
+			wantGroups: []status.Group{{
+				Name:   "ingester",
+				Phase:  status.PhaseWaiting,
+				Reason: "waiting for pods to become Ready",
+				Members: []status.Member{
+					{
+						Name: "ingester-zone-a", DesiredReplicas: 3, ReadyReplicas: 2,
+						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 2, TotalPods: 2, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseWaiting, Reason: "waiting for pods to become Ready",
+					},
+					{
+						Name: "ingester-zone-b", DesiredReplicas: 3, ReadyReplicas: 3,
+						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
+						UpdatedPods: 0, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase: status.PhaseWaiting, Reason: "waiting for ingester-zone-a",
+					},
+				},
+			}},
+		},
 		"not-ready later zone blocks earlier zone needing update": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withPrevRevision()),
@@ -499,10 +532,10 @@ func TestRolloutController_Snapshot(t *testing.T) {
 				},
 			}},
 		},
-		"multi-zone scale-up with matching revisions is waiting without a rollout block": {
+		"multi-zone scale-up with matching revisions waits for the missing pods": {
 			statefulSets: []runtime.Object{
-				// Status.Replicas still at old size while Spec desires more: reconcile does not
-				// treat this as not-ready (it compares Status.Replicas to ReadyReplicas).
+				// Status.Replicas still at old size while Spec desires more: reconcile counts the
+				// missing pods as not-ready (it compares max(Spec.Replicas, Status.Replicas) to ReadyReplicas).
 				mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) {
 					replicas := int32(5)
 					sts.Spec.Replicas = &replicas
@@ -527,24 +560,26 @@ func TestRolloutController_Snapshot(t *testing.T) {
 			wantGroups: []status.Group{{
 				Name:   "ingester",
 				Phase:  status.PhaseWaiting,
-				Reason: "waiting for replicas to reach the desired count",
+				Reason: multipleNotReadyReason,
 				Members: []status.Member{
 					{
 						Name: "ingester-zone-a", DesiredReplicas: 5, ReadyReplicas: 3,
 						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
-						UpdatedPods: 3, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
-						Phase: status.PhaseWaiting, Reason: "waiting for replicas to reach the desired count",
+						UpdatedPods: 3, TotalPods: 3, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseWaiting, Reason: "waiting for pods to become Ready",
 					},
 					{
 						Name: "ingester-zone-b", DesiredReplicas: 5, ReadyReplicas: 3,
 						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
-						UpdatedPods: 3, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
-						Phase: status.PhaseWaiting, Reason: "waiting for replicas to reach the desired count",
+						UpdatedPods: 3, TotalPods: 3, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseWaiting, Reason: "waiting for pods to become Ready",
 					},
 				},
 			}},
 		},
-		"scale-up pending does not block another zone's revision rollout": {
+		"scale-up pending blocks another zone's revision rollout": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", func(sts *v1.StatefulSet) {
 					replicas := int32(5)
@@ -564,20 +599,21 @@ func TestRolloutController_Snapshot(t *testing.T) {
 			},
 			wantGroups: []status.Group{{
 				Name:   "ingester",
-				Phase:  status.PhaseProgressing,
-				Reason: "0 of 3 pods updated",
+				Phase:  status.PhaseWaiting,
+				Reason: "waiting for pods to become Ready",
 				Members: []status.Member{
 					{
 						Name: "ingester-zone-a", DesiredReplicas: 5, ReadyReplicas: 3,
 						CurrentRevision: testLastRevisionHash, UpdateRevision: testLastRevisionHash,
-						UpdatedPods: 3, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
-						Phase: status.PhaseWaiting, Reason: "waiting for replicas to reach the desired count",
+						UpdatedPods: 3, TotalPods: 3, NotReady: true,
+						UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
+						Phase:          status.PhaseWaiting, Reason: "waiting for pods to become Ready",
 					},
 					{
 						Name: "ingester-zone-b", DesiredReplicas: 3, ReadyReplicas: 3,
 						CurrentRevision: testPrevRevisionHash, UpdateRevision: testLastRevisionHash,
 						UpdatedPods: 0, TotalPods: 3, UpdateStrategy: string(v1.OnDeleteStatefulSetStrategyType),
-						Phase: status.PhaseProgressing, Reason: "0 of 3 pods updated",
+						Phase: status.PhaseWaiting, Reason: "waiting for ingester-zone-a",
 					},
 				},
 			}},
