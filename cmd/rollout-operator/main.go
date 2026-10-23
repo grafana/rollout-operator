@@ -425,7 +425,7 @@ func runOperator(
 	}
 
 	// Init the controller
-	c := controller.NewRolloutController(coreKubeClient, restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
+	c := controller.NewRolloutController(coreKubeClient, coreKubeClient.Discovery(), restMapper, scaleClient, dynamicClient, cfg.kubeClusterDomain, cfg.kubeNamespace, podsFactory, podHTTPClient, cfg.reconcileInterval, reg, logger, evictionController)
 	if cfg.watchReplicaTemplates {
 		c.WatchReplicaTemplates()
 	}
