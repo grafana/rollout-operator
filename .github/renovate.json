@@ -77,12 +77,6 @@
     "rebaseWhen": "behind-base-branch",
     "packageRules": [
         {
-            "description": "Disable updates for indirect go dependencies",
-            "matchManagers": ["gomod"],
-            "matchDepTypes": ["indirect"],
-            "enabled": false
-        },
-        {
             "description": "Group all go dependencies together to reduce noise",
             "matchDatasources": [
                 "go"
@@ -109,6 +103,15 @@
                 "dockerfile"
             ],
             "enabled": false
+        },
+        {
+            "description": "Disable updates for indirect go dependencies. The parent configuration may override enabled:false, so also pin versions and never schedule digests. Keep this rule last.",
+            "matchManagers": ["gomod"],
+            "matchDepTypes": ["indirect"],
+            "enabled": false,
+            "allowedVersions": "{{currentVersion}}",
+            "schedule": ["* * 30 2 *"],
+            "groupName": null
         }
     ],
     "separateMajorMinor": false,
