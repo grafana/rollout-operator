@@ -1038,6 +1038,7 @@ func TestRolloutController_Reconcile(t *testing.T) {
 			defer c.Stop()
 
 			// Run a reconcile.
+			c.shouldReconcile.Store(false)
 			err := c.reconcile(context.Background())
 			if testData.expectedErr != "" {
 				require.Error(t, err)

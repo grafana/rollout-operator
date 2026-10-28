@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -267,4 +269,87 @@ func TestReplicaTemplateDiscoveryStopsWithController(t *testing.T) {
 		t.Fatal("discovery request was not canceled")
 	}
 	require.Equal(t, float64(0), testutil.ToFloat64(c.replicaTemplateReady))
+}
+
+func TestReplicaTemplateWatchStartsWithoutCRDAndRecovers(t *testing.T) {
+	kube := fake.NewSimpleClientset()
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{replicaTemplateGVR: "ReplicaTemplateList"})
+	var installed atomic.Bool
+	var listAttempts atomic.Int32
+	dyn.PrependReactor("list", replicaTemplateGVR.Resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+		listAttempts.Add(1)
+		if !installed.Load() {
+			return true, nil, apierrors.NewNotFound(replicaTemplateGVR.GroupResource(), "")
+		}
+		return false, nil, nil
+	})
+	c := NewRolloutController(kube, nil, nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+	c.AllowMissingCRDs()
+	c.WatchReplicaTemplates()
+	t.Cleanup(c.Stop)
+
+	initialized := make(chan error, 1)
+	go func() { initialized <- c.Init() }()
+	select {
+	case err := <-initialized:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("initialization blocked on the missing ReplicaTemplate CRD")
+	}
+	require.Eventually(t, func() bool { return listAttempts.Load() > 0 }, 5*time.Second, 10*time.Millisecond)
+	require.False(t, c.replicaTemplatesInformer.HasSynced())
+	c.shouldReconcile.Store(false)
+
+	_, err := dyn.Resource(replicaTemplateGVR).Namespace(testNamespace).Create(context.Background(), &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "rollout-operator.grafana.com/v1", "kind": "ReplicaTemplate",
+		"metadata": map[string]interface{}{"name": "ingester", "namespace": testNamespace, "generation": int64(1)},
+		"spec":     map[string]interface{}{"replicas": int64(1)},
+	}}, metav1.CreateOptions{})
+	require.NoError(t, err)
+	installed.Store(true)
+	require.Eventually(t, c.replicaTemplatesInformer.HasSynced, 10*time.Second, 10*time.Millisecond)
+	require.Eventually(t, c.shouldReconcile.Load, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestReplicaTemplateDiscoveryRecoveryIsOptIn(t *testing.T) {
+	for _, optional := range []bool{false, true} {
+		kube := fake.NewSimpleClientset()
+		kube.Resources = []*metav1.APIResourceList{{GroupVersion: replicaTemplateGVR.GroupVersion().String(), APIResources: []metav1.APIResource{{Name: "replicatemplates"}, {Name: "replicatemplates/scale"}}}}
+		c := NewRolloutController(kube, newReplicaTemplateTestDiscovery(kube), nil, nil, nil, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+		if optional {
+			c.AllowMissingCRDs()
+		}
+		for i := 0; i < 2; i++ {
+			c.shouldReconcile.Store(false)
+			c.updateReplicaTemplateDiscovery()
+			require.Equal(t, optional, c.shouldReconcile.Load())
+			require.Equal(t, float64(1), testutil.ToFloat64(c.replicaTemplateReady))
+		}
+	}
+}
+
+func TestReplicaTemplateScaleDiscoveryFallbackIsOptIn(t *testing.T) {
+	kube := fake.NewSimpleClientset()
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{replicaTemplateGVR: "ReplicaTemplateList"})
+	dyn.PrependReactor("get", replicaTemplateGVR.Resource, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		require.Equal(t, "scale", action.GetSubresource())
+		return true, &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "autoscaling/v1", "kind": "Scale", "spec": map[string]interface{}{"replicas": int64(5)},
+		}}, nil
+	})
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{replicaTemplateGVR.GroupVersion()})
+	scales := createFakeScaleClient(0, 0, errors.New("cached discovery has no ReplicaTemplate mapping"))
+	c := NewRolloutController(kube, nil, mapper, scales, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+	sts := mockStatefulSet("ingester-zone-a", withMirrorReplicasAnnotations("template", replicaTemplateGVR.GroupVersion().WithKind("ReplicaTemplate")))
+	_, _, _, err := getCustomScaleResourceForStatefulset(t.Context(), sts, c.restMapper, c.scaleClient)
+	require.Error(t, err)
+	require.Empty(t, scales.Actions())
+	require.Empty(t, dyn.Actions())
+	c.AllowMissingCRDs()
+	scale, gvr, name, err := getCustomScaleResourceForStatefulset(t.Context(), sts, c.restMapper, c.scaleClient)
+	require.NoError(t, err)
+	require.Equal(t, int32(5), scale.Spec.Replicas)
+	require.Equal(t, replicaTemplateGVR, gvr)
+	require.Equal(t, "template", name)
+	require.Len(t, dyn.Actions(), 1)
 }

@@ -70,7 +70,9 @@ type RolloutController struct {
 	podHTTPClient        *instrumentation.PodHTTPClient
 	logger               log.Logger
 
-	replicaTemplatesInformer cache.SharedIndexInformer
+	replicaTemplatesInformer     cache.SharedIndexInformer
+	replicaTemplateStartupSynced cache.InformerSynced
+	onReplicaTemplateDiscovered  func()
 
 	zpdbController ZPDBEvictionController
 
@@ -162,6 +164,10 @@ func NewRolloutController(kubeClient kubernetes.Interface, discoveryClient disco
 			Help: "Whether ReplicaTemplate discovery and the enabled informer are ready.",
 		}),
 	}
+	c.replicaTemplateStartupSynced = func() bool {
+		return c.replicaTemplatesInformer == nil || c.replicaTemplatesInformer.HasSynced()
+	}
+	c.onReplicaTemplateDiscovered = func() {}
 	c.replicaTemplateReady.Set(0)
 
 	return c
@@ -219,12 +225,8 @@ func (c *RolloutController) Init() error {
 		go c.observeReplicaTemplate()
 	}
 
-	// Wait until all informer caches have been synced.
 	level.Info(c.logger).Log("msg", "informer caches are syncing")
-	synced := []cache.InformerSynced{c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced}
-	if c.replicaTemplatesInformer != nil {
-		synced = append(synced, c.replicaTemplatesInformer.HasSynced)
-	}
+	synced := []cache.InformerSynced{c.statefulSetsInformer.HasSynced, c.podsInformer.HasSynced, c.replicaTemplateStartupSynced}
 	if ok := cache.WaitForCacheSync(c.stopCh, synced...); !ok {
 		return errors.New("informer caches failed to sync")
 	}
@@ -265,9 +267,13 @@ func (c *RolloutController) updateReplicaTemplateDiscovery() {
 		}
 	}
 	c.replicaTemplateObserverMu.Lock()
-	c.replicaTemplateAvailable = resourceAvailable && scaleAvailable
+	available := resourceAvailable && scaleAvailable
+	c.replicaTemplateAvailable = available
 	c.updateReplicaTemplateReadinessLocked()
 	c.replicaTemplateObserverMu.Unlock()
+	if available {
+		c.onReplicaTemplateDiscovered()
+	}
 }
 
 func (c *RolloutController) onAdded(obj interface{}) {

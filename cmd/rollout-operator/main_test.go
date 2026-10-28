@@ -356,3 +356,13 @@ func TestOperatorCancellationDuringStartup(t *testing.T) {
 		})
 	}
 }
+
+func TestMissingCRDStartupIsOptIn(t *testing.T) {
+	var cfg config
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	cfg.register(fs)
+	require.NoError(t, fs.Parse(nil))
+	require.False(t, cfg.allowMissingCRDs)
+	require.NoError(t, fs.Parse([]string{"-kubernetes.allow-missing-crds=true"}))
+	require.True(t, cfg.allowMissingCRDs)
+}

@@ -148,13 +148,14 @@ How to **investigate**:
 
 This alert fires when `rollout_operator_zpdb_config_observer_ready` remains `0` for 5 minutes. Only the leader exports this metric. It is disabled by default; enable it with `rollout_operator_zpdb_config_observer_alert_enabled` where ZPDBs are used.
 
-The observer cannot access the ZPDB resource or has not synchronized its configuration, so ZPDB configuration changes may not be applied to eviction decisions.
+The observer cannot access the ZPDB resource or has not synchronized its configuration, so ZPDB configuration changes may not be applied to eviction decisions. If the operator started with `-kubernetes.allow-missing-crds=true` without the ZPDB CRD, ZPDB protection is inactive and evictions are allowed without ZPDB checks. Other Kubernetes admission checks and PodDisruptionBudgets still apply.
 
 How to **investigate**:
 
 - Verify that `zoneawarepoddisruptionbudgets.rollout-operator.grafana.com` is installed and established:
   `kubectl get crd zoneawarepoddisruptionbudgets.rollout-operator.grafana.com`
 - Check operator logs for `zpdb config observer watch failed`. Check Kubernetes API availability and the service account's list/watch permissions for ZPDB resources.
+- Apply the CRD and required ZPDB objects in the namespace managed by the operator. Recovery is automatic and requires no restart.
 - Wait for the readiness metric to return to `1`. Observer readiness alone does not guarantee that a matching, valid ZPDB exists.
 - Avoid voluntary disruptions requiring ZPDB protection until recovery has been verified.
 
@@ -169,6 +170,7 @@ How to **investigate**:
 - Verify that `replicatemplates.rollout-operator.grafana.com` is installed and established, and that the CRD exposes its scale subresource:
   `kubectl get crd replicatemplates.rollout-operator.grafana.com -o yaml`
 - Check Kubernetes API discovery access and availability. With watches enabled, check namespace list/watch permissions and `ReplicaTemplate watch failed` in the operator logs.
+- With `-kubernetes.allow-missing-crds=true`, apply the CRD and referenced ReplicaTemplates in the namespace managed by the operator; discovery triggers reconciliation without a restart.
 - Discovery is checked every 30 seconds. Verify that the readiness metric returns to `1` and replica mirroring resumes. This metric does not guarantee that a referenced ReplicaTemplate exists or that its scale/status subresources are accessible.
 
 ## Metrics

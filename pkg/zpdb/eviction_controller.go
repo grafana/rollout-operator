@@ -80,6 +80,11 @@ func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynami
 	}
 }
 
+// AllowMissingCRDs permits bootstrap before ZPDB protection is installed. Call before Start.
+func (c *EvictionController) AllowMissingCRDs() {
+	c.cfgObserver.startCaches = c.cfgObserver.startAllowMissingCRDs
+}
+
 func (c *EvictionController) Start() error {
 	if err := c.cfgObserver.start(); err != nil {
 		return fmt.Errorf("failed to start zpdb config observer: %w", err)

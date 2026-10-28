@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Add opt-in `-kubernetes.allow-missing-crds=true` startup before CRDs are installed, with automatic recovery after installation. ZPDB protection is inactive while its CRD is absent; startup still waits for existing ZPDB configurations when the CRD is installed. #544
+
 * [BUGFIX] Count pods that a StatefulSet has not (re)created yet as not-Ready. Previously, if the replacement pods couldn't be created (for example, rejected at admission or blocked by a quota), the operator kept deleting pods beyond `rollout-max-unavailable` and could also move on to the next StatefulSet in the rollout group. #537
 
 * [ENHANCEMENT] Add `rollout_operator_zpdb_config_observer_ready` metric and `ZpdbConfigObserverNotReady` alert, reporting whether the ZPDB config observer can access ZPDBs and has synced. The alert is disabled by default; enable it with the mixin option `rollout_operator_zpdb_config_observer_alert_enabled: true`. #530
