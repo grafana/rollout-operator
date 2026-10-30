@@ -129,8 +129,8 @@ If the number is too high, the HorizontalPodAutoscaler can ignore a necessary sc
 
 To exclude the replicas pending delayed downscale from `status.replicas`, set the `grafana.com/rollout-delayed-downscale-exclude-from-status-replicas` annotation to `true` on the target statefulset.
 The annotation is off by default.
-If a `POST` request to a pod fails, rollout-operator does not know if the delayed downscale started.
-In this case, `status.replicas` includes all the replicas of the target statefulset.
+If `POST` requests fail on some pods, rollout-operator does not know if the delayed downscale started on these pods.
+In this case, `status.replicas` includes each pod with a `POST` request that did not succeed.
 
 How is this different from `grafana.com/prepare-downscale` label used by `/admission/prepare-downscale` webhook? That webhook calls the "prepare-downscale" endpoint called _just_ before the downscale is done, and pods are shutdown right after. On the other hand delayed downscale can take many hours. Delayed downscale and "prepare downscale" features can be used together.
 

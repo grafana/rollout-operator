@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 
@@ -54,7 +53,17 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		// We're going to change number of replicas on the statefulset.
 		// If there is delayed downscale configured on the statefulset, we will first handle delay part, and only if that succeeds,
 		// continue with downscaling or upscaling.
-		desiredReplicas, err := checkScalingDelay(ctx, c.logger, sts, c.clusterDomain, client, currentReplicas, referenceResourceDesiredReplicas)
+		desiredReplicas, preparedReplicas, err := checkScalingDelay(ctx, c.logger, sts, c.clusterDomain, client, currentReplicas, referenceResourceDesiredReplicas)
+
+		// The reference resource does not include the replicas pending delayed downscale.
+		// If the annotation is enabled, status.replicas does not include them either, because an HPA with AverageValue metrics divides its metric by status.replicas.
+		statusReplicas := func(stsReplicas int32) int32 {
+			if excludeFromStatusReplicas {
+				return stsReplicas - preparedReplicas
+			}
+			return stsReplicas
+		}
+
 		if err != nil {
 			level.Warn(c.logger).Log("msg", "not scaling statefulset due to failed scaling delay check",
 				"group", groupName,
@@ -64,14 +73,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 				"err", err,
 			)
 
-			// The reference resource does not include the replicas pending delayed downscale.
-			// If the annotation is enabled, status.replicas does not include them either, because an HPA with AverageValue metrics divides its metric by status.replicas.
-			// For other errors, we do not know if the delayed downscale started, so status.replicas includes all the replicas.
-			statusReplicas := currentReplicas
-			if excludeFromStatusReplicas && errors.Is(err, errDownscaleDelayNotReached) {
-				statusReplicas = referenceResourceDesiredReplicas
-			}
-			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, statusReplicas)
+			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, statusReplicas(currentReplicas))
 			// If delay has not been reached, we can check next statefulset.
 			continue
 		}
@@ -96,12 +98,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 			return false, err
 		}
 
-		statusReplicas := desiredReplicas
-		if excludeFromStatusReplicas {
-			// After a partial downscale, the replicas in [referenceResourceDesiredReplicas, desiredReplicas) are still pending delayed downscale.
-			statusReplicas = min(desiredReplicas, referenceResourceDesiredReplicas)
-		}
-		updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, statusReplicas)
+		updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, statusReplicas(desiredReplicas))
 		return true, nil
 	}
 
