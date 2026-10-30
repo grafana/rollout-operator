@@ -41,24 +41,25 @@ func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, 
 // Checks if downscale delay has been reached on replicas in [desiredReplicas, currentReplicas) range.
 // If there is a range of replicas at the end of statefulset for which delay has been reached, this function
 // returns updated desired replicas that statefulset can be scaled to.
-func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, clusterDomain string, httpClient *instrumentation.PodHTTPClient, currentReplicas, desiredReplicas int32) (updatedDesiredReplicas int32, _ error) {
+// It also returns the number of replicas below updatedDesiredReplicas that are prepared for downscale, which are the replicas pending delayed downscale.
+func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulSet, clusterDomain string, httpClient *instrumentation.PodHTTPClient, currentReplicas, desiredReplicas int32) (updatedDesiredReplicas, preparedReplicas int32, _ error) {
 	if currentReplicas == desiredReplicas {
 		// should not happen
-		return currentReplicas, nil
+		return currentReplicas, 0, nil
 	}
 
 	delay, prepareURL, err := parseDelayedDownscaleAnnotations(sts.GetAnnotations())
 	if err != nil {
-		return currentReplicas, err
+		return currentReplicas, 0, err
 	}
 	if delay == 0 || prepareURL == nil {
-		return desiredReplicas, err
+		return desiredReplicas, 0, err
 	}
 
 	if desiredReplicas >= currentReplicas {
 		callCancelDelayedDownscale(ctx, logger, httpClient, createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, clusterDomain, 0, int(currentReplicas), prepareURL))
 		// Proceed even if calling cancel of delayed downscale fails. We call cancellation repeatedly, so it will happen during next reconcile.
-		return desiredReplicas, nil
+		return desiredReplicas, 0, nil
 	}
 
 	{
@@ -71,7 +72,9 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	downscaleEndpoints := createPrepareDownscaleEndpoints(sts.Namespace, sts.GetName(), sts.Spec.ServiceName, clusterDomain, int(desiredReplicas), int(currentReplicas), prepareURL)
 	elapsedTimeSinceDownscaleInitiated, err := callPrepareDownscaleAndReturnElapsedDurationsSinceInitiatedDownscale(ctx, logger, httpClient, downscaleEndpoints)
 	if err != nil {
-		return currentReplicas, fmt.Errorf("failed prepare pods for delayed downscale: %v", err)
+		// Only the replicas that returned a timestamp are prepared for downscale.
+		// shortcut: when one request fails, the errgroup cancels the requests in progress, so this number can be lower than the real number.
+		return currentReplicas, int32(len(elapsedTimeSinceDownscaleInitiated)), fmt.Errorf("failed prepare pods for delayed downscale: %v", err)
 	}
 
 	// Find how many pods from the end of statefulset we can already scale down
@@ -91,12 +94,12 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	}
 
 	if allowedDesiredReplicas == currentReplicas {
-		return currentReplicas, fmt.Errorf("configured downscale delay %v has not been reached for any pods at the end of statefulset replicas range", delay)
+		return currentReplicas, currentReplicas - desiredReplicas, fmt.Errorf("configured downscale delay %v has not been reached for any pods at the end of statefulset replicas range", delay)
 	}
 
 	// We can proceed with downscale on at least one pod.
 	level.Info(logger).Log("msg", "downscale delay has been reached on some downscaled pods", "name", sts.GetName(), "delay", delay, "originalDesiredReplicas", desiredReplicas, "allowedDesiredReplicas", allowedDesiredReplicas)
-	return allowedDesiredReplicas, nil
+	return allowedDesiredReplicas, allowedDesiredReplicas - desiredReplicas, nil
 }
 
 func parseDelayedDownscaleAnnotations(annotations map[string]string) (time.Duration, *url.URL, error) {

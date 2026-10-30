@@ -26,6 +26,12 @@ func getForceReplicasOverride(sts *v1.StatefulSet) (int32, bool) {
 	return int32(value), true
 }
 
+// isExcludeFromStatusReplicasEnabled returns true if the exclude-from-status-replicas annotation is "true". Other values, including invalid values, disable it.
+func isExcludeFromStatusReplicasEnabled(sts *v1.StatefulSet) bool {
+	enabled, _ := strconv.ParseBool(sts.GetAnnotations()[config.RolloutDelayedDownscaleExcludeFromStatusReplicasAnnotationKey])
+	return enabled
+}
+
 // desiredStsReplicas returns desired replicas for statefulset based on leader-replicas, and minimum time between zone downscales.
 func desiredStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulSet, logger log.Logger) (int32, error) {
 	followerReplicas := *sts.Spec.Replicas

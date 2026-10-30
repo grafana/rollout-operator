@@ -116,6 +116,22 @@ Rollout operator has special requirements on the configured endpoint:
 
 Rollout-operator does NOT remember any state of "delayed scaledown" preparation. It relies on timestamps returned from the pod endpoints on `POST` method. When no delayed scaledown is taking place, rollout-operator still keeps calling `DELETE` method regularly, to make sure that there is all pods have cancelled any previous "preparation of delayed scaledown".
 
+### Exclude replicas pending delayed downscale from `status.replicas`
+
+During a delayed downscale, the target statefulset has more replicas than the reference resource.
+These extra replicas are pending delayed downscale.
+The reference resource does not include them anymore, but the target statefulset keeps them until the delay ends.
+
+By default, rollout-operator includes these replicas in the `status.replicas` of the reference resource.
+A HorizontalPodAutoscaler uses `status.replicas` as the current number of replicas for `AverageValue` metrics.
+It divides the metric by this number to check its tolerance.
+If the number is too high, the HorizontalPodAutoscaler can ignore a necessary scale up.
+
+To exclude the replicas pending delayed downscale from `status.replicas`, set the `grafana.com/rollout-delayed-downscale-exclude-from-status-replicas` annotation to `true` on the target statefulset.
+The annotation is off by default.
+If `POST` requests fail on some pods, rollout-operator does not know if the delayed downscale started on these pods.
+In this case, `status.replicas` includes each pod with a `POST` request that did not succeed.
+
 How is this different from `grafana.com/prepare-downscale` label used by `/admission/prepare-downscale` webhook? That webhook calls the "prepare-downscale" endpoint called _just_ before the downscale is done, and pods are shutdown right after. On the other hand delayed downscale can take many hours. Delayed downscale and "prepare downscale" features can be used together.
 
 ## Manual replica override

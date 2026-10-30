@@ -49,6 +49,10 @@ const (
 	// RolloutDelayedDownscalePrepareUrlAnnotationKey is a full URL to prepare-downscale endpoint. Hostname will be replaced with pod's fully qualified domain name.
 	RolloutDelayedDownscalePrepareUrlAnnotationKey = "grafana.com/rollout-prepare-delayed-downscale-url"
 
+	// RolloutDelayedDownscaleExcludeFromStatusReplicasAnnotationKey -- when set to "true", the status.replicas that rollout-operator writes to the reference resource
+	// does not include the replicas pending delayed downscale. The annotation is off by default.
+	RolloutDelayedDownscaleExcludeFromStatusReplicasAnnotationKey = "grafana.com/rollout-delayed-downscale-exclude-from-status-replicas"
+
 	// RolloutForceReplicasAnnotationKey overrides the operator's replica decisions.
 	// When set to a non-negative integer, the operator will scale the StatefulSet to that
 	// number of replicas, bypassing leader/follower and mirror-resource logic.

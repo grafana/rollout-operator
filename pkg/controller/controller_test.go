@@ -1120,22 +1120,30 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 	now := time.Now()
 
+	// Expected patch of status.replicas of the reference resource.
+	statusPatch := func(replicas int) map[string][]string {
+		return map[string][]string{"my.group/v1/customresources/test/status": {fmt.Sprintf(`{"status":{"replicas":%d}}`, replicas)}}
+	}
+
 	tests := map[string]struct {
 		statefulSets                      []runtime.Object
 		customResourceScaleSpecReplicas   int
 		customResourceScaleStatusReplicas int
+		excludeFromStatusReplicas         bool // Sets the exclude-from-status-replicas annotation on all statefulsets.
 		getScaleErr                       error
 		kubePatchErr                      error
 		kubeDeleteErr                     error
 		kubeUpdateErr                     error
 		expectedUpdatedSets               []string
 		expectedPatchedSets               map[string][]string
+		expectedPatchedResources          map[string][]string
 		expectedErr                       string
 		httpResponses                     map[string]httpResponse
 		expectedHttpRequests              []string
 	}{
 
 		"scale down is allowed, if all pods were prepared outside of delay": {
+			expectedPatchedResources: statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1160,6 +1168,9 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale down is not allowed if delay time was not reached yet on all pods": {
+			// status.replicas does not include the 2 replicas pending delayed downscale.
+			excludeFromStatusReplicas: true,
+			expectedPatchedResources:  statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1181,6 +1192,8 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale down is not allowed if delay time was not reached on one pod at the end of statefulset": {
+			excludeFromStatusReplicas: true,
+			expectedPatchedResources:  statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1202,6 +1215,9 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"limited scale down by 2 replicas is allowed if delay time was reached on some pods at the end of statefulset": {
+			// The statefulset goes from 5 to 3 replicas. Replicas 1 and 2 are still pending delayed downscale.
+			excludeFromStatusReplicas: true,
+			expectedPatchedResources:  statusPatch(1),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1267,6 +1283,28 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			},
 		},
 
+		"if POST fails on some pods, status.replicas includes the pods that are not prepared for downscale": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(3, 3),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
+			},
+			httpResponses: map[string]httpResponse{
+				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {err: fmt.Errorf("pod is unavailable")},
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+			},
+			customResourceScaleSpecReplicas:   1,
+			customResourceScaleStatusReplicas: 3,
+			excludeFromStatusReplicas:         true,
+			// Only replica 2 is prepared for downscale.
+			expectedPatchedResources: statusPatch(2),
+			expectedHttpRequests: []string{
+				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+		},
+
 		"scale down is not allowed, if response to POST request cannot be parsed": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
@@ -1288,7 +1326,56 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			},
 		},
 
+		"without the exclude-from-status-replicas annotation, status.replicas includes the replicas pending delayed downscale": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
+			},
+			httpResponses: map[string]httpResponse{
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+			},
+			customResourceScaleSpecReplicas:   3,
+			customResourceScaleStatusReplicas: 5,
+			expectedPatchedResources:          nil, // status.replicas is already 5, the same as the statefulset.
+			expectedHttpRequests: []string{
+				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+		},
+
+		"without the exclude-from-status-replicas annotation, status.replicas is the new statefulset size after a partial downscale": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
+			},
+			httpResponses: map[string]httpResponse{
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-75*time.Minute).Unix())},
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-30*time.Minute).Unix())},
+				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-75*time.Minute).Unix())},
+			},
+			customResourceScaleSpecReplicas:   1,
+			customResourceScaleStatusReplicas: 5,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":3}}`}},
+			expectedPatchedResources:          statusPatch(3),
+			expectedHttpRequests: []string{
+				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+		},
+
 		"scale down is not allowed for zone-a, but IS allowed for zone-b": {
+			// Only zone-b changes status.replicas. The POST requests fail on zone-a, so zone-a keeps status.replicas at 5.
+			expectedPatchedResources: statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1324,6 +1411,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale up is allowed immediately, cancel any possible previous downscale": {
+			expectedPatchedResources: statusPatch(5),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(2, 2),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1354,6 +1442,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale up succeeds even if DELETE returns 409 Conflict (i.e partition state locked)": {
+			expectedPatchedResources: statusPatch(5),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(2, 2),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1373,6 +1462,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"force-replicas overrides mirror-replicas and respects delayed downscale": {
+			expectedPatchedResources: statusPatch(2),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1400,6 +1490,9 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"force-replicas waits for delayed downscale when delay not elapsed": {
+			// All 3 replicas are pending delayed downscale, so status.replicas is 0.
+			excludeFromStatusReplicas: true,
+			expectedPatchedResources:  statusPatch(0),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1460,6 +1553,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"force-replicas=0 on one zone with 3 zones using mirror-replicas": {
+			expectedPatchedResources: statusPatch(0),
 			statefulSets: []runtime.Object{
 				// zone-a: has force-replicas=0, goes through mirror-replicas path with delayed downscale
 				mockStatefulSet("ingester-zone-a", withReplicas(5, 5),
@@ -1525,13 +1619,18 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			scheme.AddKnownTypeWithName(customResourceGVK, &dummy{})
 			restMapper := testrestmapper.TestOnlyStaticRESTMapper(scheme)
 
+			if testData.excludeFromStatusReplicas {
+				for _, obj := range testData.statefulSets {
+					withAnnotations(map[string]string{config.RolloutDelayedDownscaleExcludeFromStatusReplicasAnnotationKey: "true"})(obj.(*v1.StatefulSet))
+				}
+			}
 			kubeClient := fake.NewClientset(testData.statefulSets...)
 
 			// Inject a hook to track all patched StatefulSets or return mocked errors.
 			patchedStsNames := addPatchStatefulsetReactor(kubeClient, testData.kubePatchErr)
 			scaleClient := createFakeScaleClient(testData.customResourceScaleSpecReplicas, testData.customResourceScaleStatusReplicas, testData.getScaleErr)
 
-			dynamicClient, _ := createFakeDynamicClient()
+			dynamicClient, patchedResources := createFakeDynamicClient()
 			podClientRoundTripper := &fakeRoundTripper{
 				responses:       testData.httpResponses,
 				defaultResponse: internalErrorResponse,
@@ -1548,6 +1647,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 			// Assert patched StatefulSets.
 			assert.Equal(t, testData.expectedPatchedSets, convertEmptyMapToNil(patchedStsNames))
+			assert.Equal(t, testData.expectedPatchedResources, convertEmptyMapToNil(patchedResources))
 			assert.ElementsMatch(t, testData.expectedHttpRequests, podClientRoundTripper.requests())
 		})
 	}
