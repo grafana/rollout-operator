@@ -42,6 +42,9 @@ const (
 	RolloutMirrorReplicasFromResourceKindAnnotationKey       = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-kind"
 	RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-api-version" // optional
 	RolloutMirrorReplicasFromResourceWriteBackStatusReplicas = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-write-back"  // optional
+	// RolloutMirrorReplicasFromResourceStatusWritableOnlyAnnotationKey -- when set to "true", the status.replicas written back to the reference resource
+	// does not count the replicas that are prepared for a delayed downscale. Disabled by default.
+	RolloutMirrorReplicasFromResourceStatusWritableOnlyAnnotationKey = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-status-writable-only" // optional
 
 	// RolloutDelayedDownscaleAnnotationKey configures delay for downscaling. Prepare-url must be configured as well, and must support GET, POST and DELETE methods.
 	RolloutDelayedDownscaleAnnotationKey = "grafana.com/rollout-delayed-downscale"

@@ -76,12 +76,17 @@ Rollout-operator can use custom resource with `scale` and `status` subresources 
 - `grafana.com/rollout-mirror-replicas-from-resource-kind`
 - `grafana.com/rollout-mirror-replicas-from-resource-api-version`
 - `grafana.com/rollout-mirror-replicas-from-resource-write-back`
+- `grafana.com/rollout-mirror-replicas-from-resource-status-writable-only`
 
 These annotations must be set on StatefulSet that rollout-operator will scale (ie. target statefulset).
 Number of replicas in target statefulset will follow replicas in reference resource (from `scale` subresource).
 Reference resource's `status` subresource will be updated with current number of replicas in target statefulset,
-not counting the replicas that are prepared for a delayed downscale (see below), because they don't take writes anymore,
 unless explicitly disabled by setting `grafana.com/rollout-mirror-replicas-from-resource-write-back` annotation to `false`.
+
+By default, the number of replicas written to `status` includes the replicas that are prepared for a delayed downscale (see below).
+Those replicas don't take writes anymore, and an HorizontalPodAutoscaler with `AverageValue` metrics divides its metric by `status.replicas` when it checks its tolerance, so it can ignore a needed scale up.
+Set `grafana.com/rollout-mirror-replicas-from-resource-status-writable-only` annotation to `true` to not count the replicas prepared for downscale in `status`.
+If preparing a replica for downscale fails, it is still counted.
 
 This is similar to using `grafana.com/rollout-downscale-leader`, but reference resource can be any kind of resource, not just statefulset. Furthermore `grafana.com/min-time-between-zones-downscale` is not respected when using scaling based on reference resource.
 

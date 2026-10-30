@@ -36,6 +36,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		}
 
 		referenceResource := fmt.Sprintf("%s/%s", referenceGVR.Resource, referenceName)
+		statusWritableOnly := isStatusWritableOnlyEnabled(sts)
 
 		referenceResourceDesiredReplicas := scaleObj.Spec.Replicas
 		// If force-replicas annotation is set, use it as the desired replicas
@@ -63,11 +64,11 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 				"err", err,
 			)
 
-			// Replicas prepared for a delayed downscale don't take writes anymore, so we don't report them in status.replicas.
+			// If enabled, replicas prepared for a delayed downscale don't take writes anymore, so we don't report them in status.replicas.
 			// Otherwise an HPA with AverageValue metrics divides the metric by them when it checks its tolerance.
 			// If the preparation failed, those replicas may still take writes, so we report all of them.
 			statusReplicas := currentReplicas
-			if errors.Is(err, errDownscaleDelayNotReached) {
+			if statusWritableOnly && errors.Is(err, errDownscaleDelayNotReached) {
 				statusReplicas = referenceResourceDesiredReplicas
 			}
 			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, statusReplicas)
@@ -95,8 +96,12 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 			return false, err
 		}
 
-		// After a partial downscale, replicas in [referenceResourceDesiredReplicas, desiredReplicas) are still prepared for downscale.
-		updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, min(desiredReplicas, referenceResourceDesiredReplicas))
+		statusReplicas := desiredReplicas
+		if statusWritableOnly {
+			// After a partial downscale, replicas in [referenceResourceDesiredReplicas, desiredReplicas) are still prepared for downscale.
+			statusReplicas = min(desiredReplicas, referenceResourceDesiredReplicas)
+		}
+		updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, statusReplicas)
 		return true, nil
 	}
 

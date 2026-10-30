@@ -26,6 +26,12 @@ func getForceReplicasOverride(sts *v1.StatefulSet) (int32, bool) {
 	return int32(value), true
 }
 
+// isStatusWritableOnlyEnabled returns true if the status-writable-only annotation is set to "true". Any other value, including an invalid one, disables it.
+func isStatusWritableOnlyEnabled(sts *v1.StatefulSet) bool {
+	enabled, _ := strconv.ParseBool(sts.GetAnnotations()[config.RolloutMirrorReplicasFromResourceStatusWritableOnlyAnnotationKey])
+	return enabled
+}
+
 // desiredStsReplicas returns desired replicas for statefulset based on leader-replicas, and minimum time between zone downscales.
 func desiredStsReplicas(group string, sts *v1.StatefulSet, all []*v1.StatefulSet, logger log.Logger) (int32, error) {
 	followerReplicas := *sts.Spec.Replicas

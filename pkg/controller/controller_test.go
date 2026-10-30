@@ -1120,8 +1120,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 	now := time.Now()
 
-	// Replicas in status.replicas of the reference resource don't include the replicas prepared for downscale,
-	// because they don't take writes anymore, and HPA divides its metrics by status.replicas.
+	// Expected patch of status.replicas of the reference resource.
 	statusPatch := func(replicas int) map[string][]string {
 		return map[string][]string{"my.group/v1/customresources/test/status": {fmt.Sprintf(`{"status":{"replicas":%d}}`, replicas)}}
 	}
@@ -1130,6 +1129,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		statefulSets                      []runtime.Object
 		customResourceScaleSpecReplicas   int
 		customResourceScaleStatusReplicas int
+		statusWritableOnly                bool // Enables the status-writable-only annotation on all statefulsets.
 		getScaleErr                       error
 		kubePatchErr                      error
 		kubeDeleteErr                     error
@@ -1169,6 +1169,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 		"scale down is not allowed if delay time was not reached yet on all pods": {
 			// The 2 pods prepared for downscale are not reported as replicas.
+			statusWritableOnly:       true,
 			expectedPatchedResources: statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
@@ -1191,6 +1192,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale down is not allowed if delay time was not reached on one pod at the end of statefulset": {
+			statusWritableOnly:       true,
 			expectedPatchedResources: statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
@@ -1214,6 +1216,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 		"limited scale down by 2 replicas is allowed if delay time was reached on some pods at the end of statefulset": {
 			// The statefulset goes from 5 to 3 replicas, but the pods 1 and 2 are still prepared for downscale.
+			statusWritableOnly:       true,
 			expectedPatchedResources: statusPatch(1),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
@@ -1296,6 +1299,53 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+		},
+
+		"without the status-writable-only annotation, status.replicas includes the pods prepared for downscale (not reached yet on all pods)": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
+			},
+			httpResponses: map[string]httpResponse{
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Unix())},
+			},
+			customResourceScaleSpecReplicas:   3,
+			customResourceScaleStatusReplicas: 5,
+			expectedPatchedResources:          nil, // The status already says 5, like the statefulset.
+			expectedHttpRequests: []string{
+				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"DELETE http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+			},
+		},
+
+		"without the status-writable-only annotation, status.replicas is the new statefulset size after a partial downscale": {
+			statefulSets: []runtime.Object{
+				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
+					withMirrorReplicasAnnotations("test", customResourceGVK),
+					withDelayedDownscaleAnnotations(time.Hour, "http://pod/prepare-delayed-downscale")),
+			},
+			httpResponses: map[string]httpResponse{
+				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-70*time.Minute).Unix())},
+				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-75*time.Minute).Unix())},
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-30*time.Minute).Unix())},
+				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale": {statusCode: 200, body: fmt.Sprintf(`{"timestamp": %d}`, now.Add(-75*time.Minute).Unix())},
+			},
+			customResourceScaleSpecReplicas:   1,
+			customResourceScaleStatusReplicas: 5,
+			expectedPatchedSets:               map[string][]string{"ingester-zone-b": {`{"spec":{"replicas":3}}`}},
+			expectedPatchedResources:          statusPatch(3),
+			expectedHttpRequests: []string{
+				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
+				"POST http://ingester-zone-b-2.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 				"POST http://ingester-zone-b-3.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 				"POST http://ingester-zone-b-4.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 			},
@@ -1419,6 +1469,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 		"force-replicas waits for delayed downscale when delay not elapsed": {
 			// All 3 pods are prepared for downscale, so none of them is reported as a replica.
+			statusWritableOnly:       true,
 			expectedPatchedResources: statusPatch(0),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3),
@@ -1546,6 +1597,11 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			scheme.AddKnownTypeWithName(customResourceGVK, &dummy{})
 			restMapper := testrestmapper.TestOnlyStaticRESTMapper(scheme)
 
+			if testData.statusWritableOnly {
+				for _, obj := range testData.statefulSets {
+					withAnnotations(map[string]string{config.RolloutMirrorReplicasFromResourceStatusWritableOnlyAnnotationKey: "true"})(obj.(*v1.StatefulSet))
+				}
+			}
 			kubeClient := fake.NewClientset(testData.statefulSets...)
 
 			// Inject a hook to track all patched StatefulSets or return mocked errors.

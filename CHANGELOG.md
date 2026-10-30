@@ -4,7 +4,7 @@
 
 * [BUGFIX] Count pods that a StatefulSet has not (re)created yet as not-Ready. Previously, if the replacement pods couldn't be created (for example, rejected at admission or blocked by a quota), the operator kept deleting pods beyond `rollout-max-unavailable` and could also move on to the next StatefulSet in the rollout group. #537
 
-* [BUGFIX] Do not count the replicas that are prepared for a delayed downscale in the `status.replicas` of the reference resource when mirroring replicas. Those replicas don't take writes anymore, but they made an HPA with `AverageValue` metrics divide its metric by too many replicas when checking its tolerance, so it could ignore a needed scale up. #545
+* [ENHANCEMENT] Add the `grafana.com/rollout-mirror-replicas-from-resource-status-writable-only` annotation. When set to `true`, the `status.replicas` written to the reference resource when mirroring replicas does not count the replicas that are prepared for a delayed downscale. Those replicas don't take writes anymore, but they make an HPA with `AverageValue` metrics divide its metric by too many replicas when checking its tolerance, so it can ignore a needed scale up. Disabled by default. #545
 
 * [ENHANCEMENT] Add `rollout_operator_zpdb_config_observer_ready` metric and `ZpdbConfigObserverNotReady` alert, reporting whether the ZPDB config observer can access ZPDBs and has synced. The alert is disabled by default; enable it with the mixin option `rollout_operator_zpdb_config_observer_alert_enabled: true`. #530
 
