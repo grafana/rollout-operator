@@ -42,15 +42,16 @@ const (
 	RolloutMirrorReplicasFromResourceKindAnnotationKey       = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-kind"
 	RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-api-version" // optional
 	RolloutMirrorReplicasFromResourceWriteBackStatusReplicas = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-write-back"  // optional
-	// RolloutMirrorReplicasFromResourceStatusWritableOnlyAnnotationKey -- when set to "true", the status.replicas written back to the reference resource
-	// does not count the replicas that are prepared for a delayed downscale. Disabled by default.
-	RolloutMirrorReplicasFromResourceStatusWritableOnlyAnnotationKey = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-status-writable-only" // optional
 
 	// RolloutDelayedDownscaleAnnotationKey configures delay for downscaling. Prepare-url must be configured as well, and must support GET, POST and DELETE methods.
 	RolloutDelayedDownscaleAnnotationKey = "grafana.com/rollout-delayed-downscale"
 
 	// RolloutDelayedDownscalePrepareUrlAnnotationKey is a full URL to prepare-downscale endpoint. Hostname will be replaced with pod's fully qualified domain name.
 	RolloutDelayedDownscalePrepareUrlAnnotationKey = "grafana.com/rollout-prepare-delayed-downscale-url"
+
+	// RolloutDelayedDownscaleExcludeFromStatusReplicasAnnotationKey -- when set to "true", the status.replicas that rollout-operator writes to the reference resource
+	// does not include the replicas pending delayed downscale. The annotation is off by default.
+	RolloutDelayedDownscaleExcludeFromStatusReplicasAnnotationKey = "grafana.com/rollout-delayed-downscale-exclude-from-status-replicas"
 
 	// RolloutForceReplicasAnnotationKey overrides the operator's replica decisions.
 	// When set to a non-negative integer, the operator will scale the StatefulSet to that

@@ -1129,7 +1129,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		statefulSets                      []runtime.Object
 		customResourceScaleSpecReplicas   int
 		customResourceScaleStatusReplicas int
-		statusWritableOnly                bool // Enables the status-writable-only annotation on all statefulsets.
+		excludeFromStatusReplicas         bool // Sets the exclude-from-status-replicas annotation on all statefulsets.
 		getScaleErr                       error
 		kubePatchErr                      error
 		kubeDeleteErr                     error
@@ -1168,9 +1168,9 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale down is not allowed if delay time was not reached yet on all pods": {
-			// The 2 pods prepared for downscale are not reported as replicas.
-			statusWritableOnly:       true,
-			expectedPatchedResources: statusPatch(3),
+			// status.replicas does not include the 2 replicas pending delayed downscale.
+			excludeFromStatusReplicas: true,
+			expectedPatchedResources:  statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1192,8 +1192,8 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale down is not allowed if delay time was not reached on one pod at the end of statefulset": {
-			statusWritableOnly:       true,
-			expectedPatchedResources: statusPatch(3),
+			excludeFromStatusReplicas: true,
+			expectedPatchedResources:  statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1215,9 +1215,9 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"limited scale down by 2 replicas is allowed if delay time was reached on some pods at the end of statefulset": {
-			// The statefulset goes from 5 to 3 replicas, but the pods 1 and 2 are still prepared for downscale.
-			statusWritableOnly:       true,
-			expectedPatchedResources: statusPatch(1),
+			// The statefulset goes from 5 to 3 replicas. Replicas 1 and 2 are still pending delayed downscale.
+			excludeFromStatusReplicas: true,
+			expectedPatchedResources:  statusPatch(1),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1304,7 +1304,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			},
 		},
 
-		"without the status-writable-only annotation, status.replicas includes the pods prepared for downscale (not reached yet on all pods)": {
+		"without the exclude-from-status-replicas annotation, status.replicas includes the replicas pending delayed downscale": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1316,7 +1316,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			},
 			customResourceScaleSpecReplicas:   3,
 			customResourceScaleStatusReplicas: 5,
-			expectedPatchedResources:          nil, // The status already says 5, like the statefulset.
+			expectedPatchedResources:          nil, // status.replicas is already 5, the same as the statefulset.
 			expectedHttpRequests: []string{
 				"DELETE http://ingester-zone-b-0.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
 				"DELETE http://ingester-zone-b-1.ingester-zone-b.test.svc.cluster.local./prepare-delayed-downscale",
@@ -1326,7 +1326,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			},
 		},
 
-		"without the status-writable-only annotation, status.replicas is the new statefulset size after a partial downscale": {
+		"without the exclude-from-status-replicas annotation, status.replicas is the new statefulset size after a partial downscale": {
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1352,7 +1352,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale down is not allowed for zone-a, but IS allowed for zone-b": {
-			// Zone-a is not patched: its prepare requests fail, so it keeps reporting all its replicas.
+			// Only zone-b changes status.replicas. The POST requests fail on zone-a, so zone-a keeps status.replicas at 5.
 			expectedPatchedResources: statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withReplicas(5, 5),
@@ -1468,9 +1468,9 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"force-replicas waits for delayed downscale when delay not elapsed": {
-			// All 3 pods are prepared for downscale, so none of them is reported as a replica.
-			statusWritableOnly:       true,
-			expectedPatchedResources: statusPatch(0),
+			// All 3 replicas are pending delayed downscale, so status.replicas is 0.
+			excludeFromStatusReplicas: true,
+			expectedPatchedResources:  statusPatch(0),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1597,9 +1597,9 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			scheme.AddKnownTypeWithName(customResourceGVK, &dummy{})
 			restMapper := testrestmapper.TestOnlyStaticRESTMapper(scheme)
 
-			if testData.statusWritableOnly {
+			if testData.excludeFromStatusReplicas {
 				for _, obj := range testData.statefulSets {
-					withAnnotations(map[string]string{config.RolloutMirrorReplicasFromResourceStatusWritableOnlyAnnotationKey: "true"})(obj.(*v1.StatefulSet))
+					withAnnotations(map[string]string{config.RolloutDelayedDownscaleExcludeFromStatusReplicasAnnotationKey: "true"})(obj.(*v1.StatefulSet))
 				}
 			}
 			kubeClient := fake.NewClientset(testData.statefulSets...)

@@ -26,9 +26,9 @@ func getForceReplicasOverride(sts *v1.StatefulSet) (int32, bool) {
 	return int32(value), true
 }
 
-// isStatusWritableOnlyEnabled returns true if the status-writable-only annotation is set to "true". Any other value, including an invalid one, disables it.
-func isStatusWritableOnlyEnabled(sts *v1.StatefulSet) bool {
-	enabled, _ := strconv.ParseBool(sts.GetAnnotations()[config.RolloutMirrorReplicasFromResourceStatusWritableOnlyAnnotationKey])
+// isExcludeFromStatusReplicasEnabled returns true if the exclude-from-status-replicas annotation is "true". Other values, including invalid values, disable it.
+func isExcludeFromStatusReplicasEnabled(sts *v1.StatefulSet) bool {
+	enabled, _ := strconv.ParseBool(sts.GetAnnotations()[config.RolloutDelayedDownscaleExcludeFromStatusReplicasAnnotationKey])
 	return enabled
 }
 

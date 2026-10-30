@@ -36,7 +36,7 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		}
 
 		referenceResource := fmt.Sprintf("%s/%s", referenceGVR.Resource, referenceName)
-		statusWritableOnly := isStatusWritableOnlyEnabled(sts)
+		excludeFromStatusReplicas := isExcludeFromStatusReplicasEnabled(sts)
 
 		referenceResourceDesiredReplicas := scaleObj.Spec.Replicas
 		// If force-replicas annotation is set, use it as the desired replicas
@@ -64,11 +64,11 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 				"err", err,
 			)
 
-			// If enabled, replicas prepared for a delayed downscale don't take writes anymore, so we don't report them in status.replicas.
-			// Otherwise an HPA with AverageValue metrics divides the metric by them when it checks its tolerance.
-			// If the preparation failed, those replicas may still take writes, so we report all of them.
+			// The reference resource does not include the replicas pending delayed downscale.
+			// If the annotation is enabled, status.replicas does not include them either, because an HPA with AverageValue metrics divides its metric by status.replicas.
+			// For other errors, we do not know if the delayed downscale started, so status.replicas includes all the replicas.
 			statusReplicas := currentReplicas
-			if statusWritableOnly && errors.Is(err, errDownscaleDelayNotReached) {
+			if excludeFromStatusReplicas && errors.Is(err, errDownscaleDelayNotReached) {
 				statusReplicas = referenceResourceDesiredReplicas
 			}
 			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, statusReplicas)
@@ -97,8 +97,8 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 		}
 
 		statusReplicas := desiredReplicas
-		if statusWritableOnly {
-			// After a partial downscale, replicas in [referenceResourceDesiredReplicas, desiredReplicas) are still prepared for downscale.
+		if excludeFromStatusReplicas {
+			// After a partial downscale, the replicas in [referenceResourceDesiredReplicas, desiredReplicas) are still pending delayed downscale.
 			statusReplicas = min(desiredReplicas, referenceResourceDesiredReplicas)
 		}
 		updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, statusReplicas)

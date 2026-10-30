@@ -38,8 +38,8 @@ func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, 
 	callCancelDelayedDownscale(ctx, logger, httpClient, endpoints)
 }
 
-// errDownscaleDelayNotReached is returned by checkScalingDelay when all replicas in [desiredReplicas, currentReplicas)
-// have been prepared for downscale, but the delay hasn't been reached on any replica at the end of the statefulset.
+// checkScalingDelay returns errDownscaleDelayNotReached when the POST request succeeded on all replicas in [desiredReplicas, currentReplicas),
+// but the delay did not end yet for the last replica of the statefulset.
 var errDownscaleDelayNotReached = errors.New("downscale delay not reached")
 
 // Checks if downscale delay has been reached on replicas in [desiredReplicas, currentReplicas) range.

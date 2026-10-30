@@ -76,17 +76,11 @@ Rollout-operator can use custom resource with `scale` and `status` subresources 
 - `grafana.com/rollout-mirror-replicas-from-resource-kind`
 - `grafana.com/rollout-mirror-replicas-from-resource-api-version`
 - `grafana.com/rollout-mirror-replicas-from-resource-write-back`
-- `grafana.com/rollout-mirror-replicas-from-resource-status-writable-only`
 
 These annotations must be set on StatefulSet that rollout-operator will scale (ie. target statefulset).
 Number of replicas in target statefulset will follow replicas in reference resource (from `scale` subresource).
 Reference resource's `status` subresource will be updated with current number of replicas in target statefulset,
 unless explicitly disabled by setting `grafana.com/rollout-mirror-replicas-from-resource-write-back` annotation to `false`.
-
-By default, the number of replicas written to `status` includes the replicas that are prepared for a delayed downscale (see below).
-Those replicas don't take writes anymore, and an HorizontalPodAutoscaler with `AverageValue` metrics divides its metric by `status.replicas` when it checks its tolerance, so it can ignore a needed scale up.
-Set `grafana.com/rollout-mirror-replicas-from-resource-status-writable-only` annotation to `true` to not count the replicas prepared for downscale in `status`.
-If preparing a replica for downscale fails, it is still counted.
 
 This is similar to using `grafana.com/rollout-downscale-leader`, but reference resource can be any kind of resource, not just statefulset. Furthermore `grafana.com/min-time-between-zones-downscale` is not respected when using scaling based on reference resource.
 
@@ -121,6 +115,22 @@ Rollout operator has special requirements on the configured endpoint:
 - On `DELETE` method, pod should cancel the preparation for delayed downscale. If there's nothing to do, pod should ignore such `DELETE` request.
 
 Rollout-operator does NOT remember any state of "delayed scaledown" preparation. It relies on timestamps returned from the pod endpoints on `POST` method. When no delayed scaledown is taking place, rollout-operator still keeps calling `DELETE` method regularly, to make sure that there is all pods have cancelled any previous "preparation of delayed scaledown".
+
+### Exclude replicas pending delayed downscale from `status.replicas`
+
+During a delayed downscale, the target statefulset has more replicas than the reference resource.
+These extra replicas are pending delayed downscale.
+The reference resource does not include them anymore, but the target statefulset keeps them until the delay ends.
+
+By default, rollout-operator includes these replicas in the `status.replicas` of the reference resource.
+A HorizontalPodAutoscaler uses `status.replicas` as the current number of replicas for `AverageValue` metrics.
+It divides the metric by this number to check its tolerance.
+If the number is too high, the HorizontalPodAutoscaler can ignore a necessary scale up.
+
+To exclude the replicas pending delayed downscale from `status.replicas`, set the `grafana.com/rollout-delayed-downscale-exclude-from-status-replicas` annotation to `true` on the target statefulset.
+The annotation is off by default.
+If a `POST` request to a pod fails, rollout-operator does not know if the delayed downscale started.
+In this case, `status.replicas` includes all the replicas of the target statefulset.
 
 How is this different from `grafana.com/prepare-downscale` label used by `/admission/prepare-downscale` webhook? That webhook calls the "prepare-downscale" endpoint called _just_ before the downscale is done, and pods are shutdown right after. On the other hand delayed downscale can take many hours. Delayed downscale and "prepare downscale" features can be used together.
 
