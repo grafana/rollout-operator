@@ -38,6 +38,10 @@ func cancelDelayedDownscaleIfConfigured(ctx context.Context, logger log.Logger, 
 	callCancelDelayedDownscale(ctx, logger, httpClient, endpoints)
 }
 
+// errDownscaleDelayNotReached is returned by checkScalingDelay when all replicas in [desiredReplicas, currentReplicas)
+// have been prepared for downscale, but the delay hasn't been reached on any replica at the end of the statefulset.
+var errDownscaleDelayNotReached = errors.New("downscale delay not reached")
+
 // Checks if downscale delay has been reached on replicas in [desiredReplicas, currentReplicas) range.
 // If there is a range of replicas at the end of statefulset for which delay has been reached, this function
 // returns updated desired replicas that statefulset can be scaled to.
@@ -91,7 +95,7 @@ func checkScalingDelay(ctx context.Context, logger log.Logger, sts *v1.StatefulS
 	}
 
 	if allowedDesiredReplicas == currentReplicas {
-		return currentReplicas, fmt.Errorf("configured downscale delay %v has not been reached for any pods at the end of statefulset replicas range", delay)
+		return currentReplicas, fmt.Errorf("%w: configured downscale delay %v has not been reached for any pods at the end of statefulset replicas range", errDownscaleDelayNotReached, delay)
 	}
 
 	// We can proceed with downscale on at least one pod.

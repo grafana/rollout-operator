@@ -1120,6 +1120,12 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 	now := time.Now()
 
+	// Replicas in status.replicas of the reference resource don't include the replicas prepared for downscale,
+	// because they don't take writes anymore, and HPA divides its metrics by status.replicas.
+	statusPatch := func(replicas int) map[string][]string {
+		return map[string][]string{"my.group/v1/customresources/test/status": {fmt.Sprintf(`{"status":{"replicas":%d}}`, replicas)}}
+	}
+
 	tests := map[string]struct {
 		statefulSets                      []runtime.Object
 		customResourceScaleSpecReplicas   int
@@ -1130,12 +1136,14 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		kubeUpdateErr                     error
 		expectedUpdatedSets               []string
 		expectedPatchedSets               map[string][]string
+		expectedPatchedResources          map[string][]string
 		expectedErr                       string
 		httpResponses                     map[string]httpResponse
 		expectedHttpRequests              []string
 	}{
 
 		"scale down is allowed, if all pods were prepared outside of delay": {
+			expectedPatchedResources: statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1160,6 +1168,8 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale down is not allowed if delay time was not reached yet on all pods": {
+			// The 2 pods prepared for downscale are not reported as replicas.
+			expectedPatchedResources: statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1181,6 +1191,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale down is not allowed if delay time was not reached on one pod at the end of statefulset": {
+			expectedPatchedResources: statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1202,6 +1213,8 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"limited scale down by 2 replicas is allowed if delay time was reached on some pods at the end of statefulset": {
+			// The statefulset goes from 5 to 3 replicas, but the pods 1 and 2 are still prepared for downscale.
+			expectedPatchedResources: statusPatch(1),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1289,6 +1302,8 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale down is not allowed for zone-a, but IS allowed for zone-b": {
+			// Zone-a is not patched: its prepare requests fail, so it keeps reporting all its replicas.
+			expectedPatchedResources: statusPatch(3),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-a", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1324,6 +1339,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale up is allowed immediately, cancel any possible previous downscale": {
+			expectedPatchedResources: statusPatch(5),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(2, 2),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1354,6 +1370,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"scale up succeeds even if DELETE returns 409 Conflict (i.e partition state locked)": {
+			expectedPatchedResources: statusPatch(5),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(2, 2),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1373,6 +1390,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"force-replicas overrides mirror-replicas and respects delayed downscale": {
+			expectedPatchedResources: statusPatch(2),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(5, 5),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1400,6 +1418,8 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"force-replicas waits for delayed downscale when delay not elapsed": {
+			// All 3 pods are prepared for downscale, so none of them is reported as a replica.
+			expectedPatchedResources: statusPatch(0),
 			statefulSets: []runtime.Object{
 				mockStatefulSet("ingester-zone-b", withReplicas(3, 3),
 					withMirrorReplicasAnnotations("test", customResourceGVK),
@@ -1460,6 +1480,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 		},
 
 		"force-replicas=0 on one zone with 3 zones using mirror-replicas": {
+			expectedPatchedResources: statusPatch(0),
 			statefulSets: []runtime.Object{
 				// zone-a: has force-replicas=0, goes through mirror-replicas path with delayed downscale
 				mockStatefulSet("ingester-zone-a", withReplicas(5, 5),
@@ -1531,7 +1552,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 			patchedStsNames := addPatchStatefulsetReactor(kubeClient, testData.kubePatchErr)
 			scaleClient := createFakeScaleClient(testData.customResourceScaleSpecReplicas, testData.customResourceScaleStatusReplicas, testData.getScaleErr)
 
-			dynamicClient, _ := createFakeDynamicClient()
+			dynamicClient, patchedResources := createFakeDynamicClient()
 			podClientRoundTripper := &fakeRoundTripper{
 				responses:       testData.httpResponses,
 				defaultResponse: internalErrorResponse,
@@ -1548,6 +1569,7 @@ func TestRolloutController_ReconcileStatefulsetWithDownscaleDelay(t *testing.T) 
 
 			// Assert patched StatefulSets.
 			assert.Equal(t, testData.expectedPatchedSets, convertEmptyMapToNil(patchedStsNames))
+			assert.Equal(t, testData.expectedPatchedResources, convertEmptyMapToNil(patchedResources))
 			assert.ElementsMatch(t, testData.expectedHttpRequests, podClientRoundTripper.requests())
 		})
 	}

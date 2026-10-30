@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -62,7 +63,14 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 				"err", err,
 			)
 
-			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, currentReplicas)
+			// Replicas prepared for a delayed downscale don't take writes anymore, so we don't report them in status.replicas.
+			// Otherwise an HPA with AverageValue metrics divides the metric by them when it checks its tolerance.
+			// If the preparation failed, those replicas may still take writes, so we report all of them.
+			statusReplicas := currentReplicas
+			if errors.Is(err, errDownscaleDelayNotReached) {
+				statusReplicas = referenceResourceDesiredReplicas
+			}
+			updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, statusReplicas)
 			// If delay has not been reached, we can check next statefulset.
 			continue
 		}
@@ -87,7 +95,8 @@ func (c *RolloutController) adjustStatefulSetsGroupReplicasToMirrorResource(ctx 
 			return false, err
 		}
 
-		updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, desiredReplicas)
+		// After a partial downscale, replicas in [referenceResourceDesiredReplicas, desiredReplicas) are still prepared for downscale.
+		updateStatusReplicasOnReferenceResourceIfNeeded(ctx, c.logger, c.dynamicClient, sts, scaleObj, referenceGVR, referenceName, min(desiredReplicas, referenceResourceDesiredReplicas))
 		return true, nil
 	}
 

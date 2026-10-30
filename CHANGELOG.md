@@ -4,6 +4,8 @@
 
 * [BUGFIX] Count pods that a StatefulSet has not (re)created yet as not-Ready. Previously, if the replacement pods couldn't be created (for example, rejected at admission or blocked by a quota), the operator kept deleting pods beyond `rollout-max-unavailable` and could also move on to the next StatefulSet in the rollout group. #537
 
+* [BUGFIX] Do not count the replicas that are prepared for a delayed downscale in the `status.replicas` of the reference resource when mirroring replicas. Those replicas don't take writes anymore, but they made an HPA with `AverageValue` metrics divide its metric by too many replicas when checking its tolerance, so it could ignore a needed scale up.
+
 * [ENHANCEMENT] Add `rollout_operator_zpdb_config_observer_ready` metric and `ZpdbConfigObserverNotReady` alert, reporting whether the ZPDB config observer can access ZPDBs and has synced. The alert is disabled by default; enable it with the mixin option `rollout_operator_zpdb_config_observer_alert_enabled: true`. #530
 
 * [ENHANCEMENT] Add `rollout_operator_replica_template_observer_ready` metric and `ReplicaTemplateObserverNotReady` alert, reporting whether the ReplicaTemplate CRD and its scale subresource are discoverable and, with `-replica-templates.watch-enabled=true`, whether the ReplicaTemplate watch is healthy. The alert is disabled by default; enable it with the mixin option `rollout_operator_replica_template_observer_alert_enabled: true`. #531
