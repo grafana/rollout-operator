@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Add opt-in `-kubernetes.allow-missing-crds=true` startup before CRDs are installed, with automatic recovery after installation. ZPDB protection is inactive while its CRD is absent; startup still waits for existing ZPDB configurations when the CRD is installed. #544
+
 * [BUGFIX] Count pods that a StatefulSet has not (re)created yet as not-Ready. Previously, if the replacement pods couldn't be created (for example, rejected at admission or blocked by a quota), the operator kept deleting pods beyond `rollout-max-unavailable` and could also move on to the next StatefulSet in the rollout group. #537
 
 * [ENHANCEMENT] Add the `grafana.com/rollout-delayed-downscale-exclude-from-status-replicas` annotation. When it is `true`, the `status.replicas` of the reference resource does not include the replicas pending delayed downscale. Without it, an HPA with `AverageValue` metrics can ignore a necessary scale up during a delayed downscale. The annotation is off by default. #545
