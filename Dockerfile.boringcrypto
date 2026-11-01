@@ -1,4 +1,4 @@
-FROM golang:1.27-trixie AS build
+FROM golang:1.27-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385 AS build
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -7,7 +7,7 @@ COPY . /src/rollout-operator
 WORKDIR /src/rollout-operator
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make rollout-operator-boringcrypto
 
-FROM gcr.io/distroless/base-nossl-debian13:nonroot
+FROM gcr.io/distroless/base-nossl-debian13:nonroot@sha256:e6b0f82595aa1edde72c8054de7a9dca30f0f8f54820c37a167c0ddfc21c5c67
 
 COPY --from=build /src/rollout-operator/rollout-operator /usr/bin/rollout-operator
 ENTRYPOINT [ "/usr/bin/rollout-operator" ]
