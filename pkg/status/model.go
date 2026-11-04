@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // ErrUnavailable is returned when the status reader is not ready yet.
@@ -50,6 +52,13 @@ type Group struct {
 	Members []Member
 }
 
+type Blocker struct {
+	Pod        string
+	PodUID     types.UID
+	Reason     string
+	ObservedAt time.Time
+}
+
 // Member is the status of one StatefulSet within a rollout group.
 type Member struct {
 	Name            string
@@ -66,6 +75,7 @@ type Member struct {
 	UpdateStrategy string
 	Phase          Phase
 	Reason         string
+	Blockers       []Blocker
 }
 
 // Holder is a Reader that can be bound after informer initialization.
