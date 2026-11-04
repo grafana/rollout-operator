@@ -186,10 +186,12 @@ local utils = import 'mixin-utils/utils.libsonnet';
       $.rolloutOperator_resourceUtilizationQuery(metric),
       $._config.rollout_operator_resources_panel_queries['%s_limit' % metric] % {
         namespace: $.namespaceMatcher(),
+        instanceName: $._config.rollout_operator_instance_matcher,
         containerName: $._config.rollout_operator_container_name,
       },
       $._config.rollout_operator_resources_panel_queries['%s_request' % metric] % {
         namespace: $.namespaceMatcher(),
+        instanceName: $._config.rollout_operator_instance_matcher,
         containerName: $._config.rollout_operator_container_name,
       },
     ],
