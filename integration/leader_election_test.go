@@ -19,7 +19,7 @@ func TestLeaderElectionTwoDeployments(t *testing.T) {
 	cluster := createKindCluster(t, "rollout-operator:latest")
 	api := cluster.API()
 	path := initManifestFiles(t, "webhooks-enabled")
-	createRolloutOperatorDependencies(t, ctx, api, cluster.ExtAPI(), path, true)
+	createRolloutOperatorDependencies(t, ctx, api, cluster.ExtAPI(), path, true, true)
 	for _, zone := range []string{"a", "b"} {
 		deployment := loadFromDisk[appsv1.Deployment](t, path+yamlDeployment, &appsv1.Deployment{})
 		deployment.Name = "rollout-operator-" + zone

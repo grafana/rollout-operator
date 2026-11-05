@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +30,7 @@ const (
 type configObserver struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
+	startCaches      func() error
 	pdbInformer      k8cache.SharedIndexInformer
 	pdbHandler       k8cache.ResourceEventHandlerRegistration
 	watchHealthy     atomic.Bool
@@ -74,6 +76,7 @@ func newConfigObserver(dynamic dynamic.Interface, namespace string, logger log.L
 		},
 	}, dynamic), &unstructured.Unstructured{}, informerSyncInterval, k8cache.Indexers{k8cache.NamespaceIndex: k8cache.MetaNamespaceIndexFunc})
 
+	c.startCaches = c.startAndWaitForCacheSync
 	return c
 }
 
@@ -95,9 +98,28 @@ func (c *configObserver) start() error {
 	}
 
 	c.metrics.ConfigObserverReady.WithLabelValues().Set(0)
-	go c.pdbInformer.Run(c.stopCh)
+	return c.startCaches()
+}
 
-	// Wait until all informer caches have been synced.
+func (c *configObserver) startAndWaitForCacheSync() error {
+	go c.pdbInformer.Run(c.stopCh)
+	return c.waitForCacheSync()
+}
+
+func (c *configObserver) startAllowMissingCRDs() error {
+	ctx, cancel := context.WithTimeout(c.ctx, readinessCheckTimeout)
+	_, err := c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
+	cancel()
+	if !apierrors.IsNotFound(err) {
+		return c.startAndWaitForCacheSync()
+	}
+	level.Warn(c.logger).Log("msg", "zpdb custom resource is unavailable; informer will retry", "err", err)
+	go c.pdbInformer.Run(c.stopCh)
+	go func() { _ = c.waitForCacheSync() }()
+	return nil
+}
+
+func (c *configObserver) waitForCacheSync() error {
 	level.Info(c.logger).Log("msg", "zpdb config informer caches are syncing")
 	if ok := k8cache.WaitForCacheSync(c.stopCh, c.pdbHandler.HasSynced); !ok {
 		return errors.New("zpdb config informer caches failed to sync")

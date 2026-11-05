@@ -19,7 +19,7 @@ var replicaTemplateGVR = schema.GroupVersionResource{
 }
 
 // WatchReplicaTemplates enables prompt reconciliation of desired replica changes.
-// Call before Init, only when the CRD and list/watch permissions are available.
+// Call before Init with list/watch permissions; the informer retries until the CRD is available.
 func (c *RolloutController) WatchReplicaTemplates() {
 	resource := c.dynamicClient.Resource(replicaTemplateGVR).Namespace(c.namespace)
 	c.replicaTemplatesInformer = cache.NewSharedIndexInformer(cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
@@ -69,4 +69,12 @@ func (c *RolloutController) updateReplicaTemplateReadinessLocked() {
 	} else {
 		c.replicaTemplateReady.Set(0)
 	}
+}
+
+// AllowMissingCRDs selects asynchronous ReplicaTemplate startup and late discovery recovery.
+// Call before Init so normal reconciliation needs no bootstrap-specific behavior.
+func (c *RolloutController) AllowMissingCRDs() {
+	c.replicaTemplateStartupSynced = func() bool { return true }
+	// Without a watch, nothing else retries mirroring once the CRD appears.
+	c.onReplicaTemplateDiscovered = c.enqueueReconcile
 }
