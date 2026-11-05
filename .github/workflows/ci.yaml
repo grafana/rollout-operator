@@ -246,8 +246,9 @@ jobs:
           echo "${JSONNET_BUNDLER_SHA256}  /usr/local/bin/jb" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/jb
       - name: Install mixtool
+        # Pinned: later commits add a go.mod replace directive, which `go install pkg@version` rejects.
         run: |
-          go install github.com/monitoring-mixins/mixtool/cmd/mixtool@main
+          go install github.com/monitoring-mixins/mixtool/cmd/mixtool@4e5c5015347639a73771cac72e74429847d2710e
       - name: Check Jsonnet Manifests
         run: make check-jsonnet-manifests
       - name: Check Jsonnet Tests
