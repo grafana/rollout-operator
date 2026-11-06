@@ -268,3 +268,69 @@ func TestReplicaTemplateDiscoveryStopsWithController(t *testing.T) {
 	}
 	require.Equal(t, float64(0), testutil.ToFloat64(c.replicaTemplateReady))
 }
+
+func TestReplicaTemplateWatchStartsWithoutCRDAndRecovers(t *testing.T) {
+	kube := fake.NewSimpleClientset()
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{replicaTemplateGVR: "ReplicaTemplateList"})
+	var installed atomic.Bool
+	var listAttempts atomic.Int32
+	dyn.PrependReactor("list", replicaTemplateGVR.Resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+		listAttempts.Add(1)
+		if !installed.Load() {
+			return true, nil, apierrors.NewNotFound(replicaTemplateGVR.GroupResource(), "")
+		}
+		return false, nil, nil
+	})
+	c := NewRolloutController(kube, nil, nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+	c.AllowMissingCRDs()
+	c.WatchReplicaTemplates()
+	t.Cleanup(c.Stop)
+
+	initialized := make(chan error, 1)
+	go func() { initialized <- c.Init() }()
+	select {
+	case err := <-initialized:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("initialization blocked on the missing ReplicaTemplate CRD")
+	}
+	require.Eventually(t, func() bool { return listAttempts.Load() > 0 }, 5*time.Second, 10*time.Millisecond)
+	require.False(t, c.replicaTemplatesInformer.HasSynced())
+	c.shouldReconcile.Store(false)
+
+	_, err := dyn.Resource(replicaTemplateGVR).Namespace(testNamespace).Create(context.Background(), &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "rollout-operator.grafana.com/v1", "kind": "ReplicaTemplate",
+		"metadata": map[string]interface{}{"name": "ingester", "namespace": testNamespace, "generation": int64(1)},
+		"spec":     map[string]interface{}{"replicas": int64(1)},
+	}}, metav1.CreateOptions{})
+	require.NoError(t, err)
+	installed.Store(true)
+	require.Eventually(t, c.replicaTemplatesInformer.HasSynced, 10*time.Second, 10*time.Millisecond)
+	require.Eventually(t, c.shouldReconcile.Load, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestReplicaTemplateDiscoveryRecoveryIsOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		optional bool
+	}{
+		{name: "default", optional: false},
+		{name: "allow missing CRDs", optional: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kube := fake.NewSimpleClientset()
+			kube.Resources = []*metav1.APIResourceList{{GroupVersion: replicaTemplateGVR.GroupVersion().String(), APIResources: []metav1.APIResource{{Name: "replicatemplates"}, {Name: "replicatemplates/scale"}}}}
+			c := NewRolloutController(kube, newReplicaTemplateTestDiscovery(kube), nil, nil, nil, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), log.NewNopLogger(), nil)
+			if tc.optional {
+				c.AllowMissingCRDs()
+			}
+			for i := 0; i < 2; i++ {
+				c.shouldReconcile.Store(false)
+				c.updateReplicaTemplateDiscovery()
+				// Only the transition to available enqueues a reconcile.
+				require.Equal(t, tc.optional && i == 0, c.shouldReconcile.Load())
+				require.Equal(t, float64(1), testutil.ToFloat64(c.replicaTemplateReady))
+			}
+		})
+	}
+}

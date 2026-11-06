@@ -414,3 +414,65 @@ func TestObserver_ReadinessUpdatesWhenInitialWatchOpens(t *testing.T) {
 		return testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()) == 1
 	}, time.Second, time.Millisecond)
 }
+
+func TestObserver_StartWithoutCRD(t *testing.T) {
+	dynamicClient, observer := newConfigObserverTestCase()
+	observer.startCaches = observer.startAllowMissingCRDs
+	dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{
+			Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
+			Resource: ZoneAwarePodDisruptionBudgetsNamePlural,
+		}, "")
+	})
+
+	started := make(chan error, 1)
+	go func() {
+		started <- observer.start()
+	}()
+
+	select {
+	case err := <-started:
+		require.NoError(t, err)
+		require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
+	case <-time.After(time.Second):
+		t.Fatal("observer did not start while the CRD was missing")
+	}
+	observer.stop()
+}
+
+func TestObserver_StartRetriesTransientErrors(t *testing.T) {
+	for _, probeErr := range []error{
+		context.DeadlineExceeded,
+		apierrors.NewServiceUnavailable("API unavailable"),
+	} {
+		t.Run(probeErr.Error(), func(t *testing.T) {
+			dynamicClient, observer := newConfigObserverTestCase()
+			observer.startCaches = observer.startAllowMissingCRDs
+			defer observer.stop()
+			var recovered atomic.Bool
+			dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
+				if !recovered.Load() {
+					return true, nil, probeErr
+				}
+				return false, nil, nil
+			})
+
+			started := make(chan error, 1)
+			go func() { started <- observer.start() }()
+			select {
+			case err := <-started:
+				t.Fatalf("startup returned before API recovery: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			require.False(t, observer.pdbInformer.HasSynced())
+			recovered.Store(true)
+			select {
+			case err := <-started:
+				require.NoError(t, err)
+				require.True(t, observer.pdbInformer.HasSynced())
+			case <-time.After(10 * time.Second):
+				t.Fatal("startup did not recover after API recovery")
+			}
+		})
+	}
+}
