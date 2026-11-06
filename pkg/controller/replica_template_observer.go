@@ -71,8 +71,8 @@ func (c *RolloutController) updateReplicaTemplateReadinessLocked() {
 	}
 }
 
-// AllowMissingCRDs selects asynchronous ReplicaTemplate startup and late discovery recovery.
-// Call before Init so normal reconciliation needs no bootstrap-specific behavior.
+// AllowMissingCRDs lets Init return before the ReplicaTemplate informer syncs.
+// When discovery first finds the CRD, it enqueues a reconcile. Call before Init.
 func (c *RolloutController) AllowMissingCRDs() {
 	c.replicaTemplateStartupSynced = func() bool { return true }
 	// Without a watch, nothing else retries mirroring once the CRD appears.
