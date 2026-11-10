@@ -31,6 +31,7 @@ type configObserver struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
 	startCaches      func() error
+	allowMissingCRDs bool
 	pdbInformer      k8cache.SharedIndexInformer
 	pdbHandler       k8cache.ResourceEventHandlerRegistration
 	watchHealthy     atomic.Bool
@@ -92,7 +93,11 @@ func (c *configObserver) start() error {
 	c.pdbHandler = handler
 	if err := c.pdbInformer.SetWatchErrorHandler(func(_ *k8cache.Reflector, err error) {
 		c.setWatchHealthy(false)
-		level.Warn(c.logger).Log("msg", "zpdb config observer watch failed", "err", err)
+		logger := level.Warn(c.logger)
+		if c.allowMissingCRDs && (apierrors.IsNotFound(err) || apierrors.IsForbidden(err)) {
+			logger = level.Info(c.logger)
+		}
+		logger.Log("msg", "zpdb config observer watch failed", "err", err)
 	}); err != nil {
 		return err
 	}
@@ -107,13 +112,14 @@ func (c *configObserver) startAndWaitForCacheSync() error {
 }
 
 func (c *configObserver) startAllowMissingCRDs() error {
+	c.allowMissingCRDs = true
 	ctx, cancel := context.WithTimeout(c.ctx, readinessCheckTimeout)
 	_, err := c.pdbResource.List(ctx, metav1.ListOptions{Limit: 1})
 	cancel()
-	if !apierrors.IsNotFound(err) {
+	if !apierrors.IsNotFound(err) && !apierrors.IsForbidden(err) {
 		return c.startAndWaitForCacheSync()
 	}
-	level.Warn(c.logger).Log("msg", "zpdb custom resource is unavailable; informer will retry", "err", err)
+	level.Info(c.logger).Log("msg", "zpdb custom resource is unavailable; informer will retry", "err", err)
 	go c.pdbInformer.Run(c.stopCh)
 	go func() { _ = c.waitForCacheSync() }()
 	return nil

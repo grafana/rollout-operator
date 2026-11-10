@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/go-kit/log/level"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -39,7 +40,11 @@ func (c *RolloutController) WatchReplicaTemplates() {
 	// Watch errors after initial sync must also make the readiness alert fire.
 	_ = c.replicaTemplatesInformer.SetWatchErrorHandlerWithContext(func(ctx context.Context, _ *cache.Reflector, err error) {
 		c.setReplicaTemplateWatchHealthy(false)
-		level.Warn(c.logger).Log("msg", "ReplicaTemplate watch failed", "err", err)
+		logger := level.Warn(c.logger)
+		if c.allowMissingCRDs && (apierrors.IsNotFound(err) || apierrors.IsForbidden(err)) {
+			logger = level.Info(c.logger)
+		}
+		logger.Log("msg", "ReplicaTemplate watch failed", "err", err)
 	})
 }
 
@@ -74,6 +79,7 @@ func (c *RolloutController) updateReplicaTemplateReadinessLocked() {
 // AllowMissingCRDs lets Init return before the ReplicaTemplate informer syncs.
 // When discovery first finds the CRD, it enqueues a reconcile. Call before Init.
 func (c *RolloutController) AllowMissingCRDs() {
+	c.allowMissingCRDs = true
 	c.replicaTemplateStartupSynced = func() bool { return true }
 	// Without a watch, nothing else retries mirroring once the CRD appears.
 	c.onReplicaTemplateDiscovered = c.enqueueReconcile

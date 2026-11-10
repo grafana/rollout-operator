@@ -107,7 +107,7 @@ To support scaling based on reference resource, rollout-operator needs to be all
     - patch
 ```
 
-Startup waits for ZPDB cache synchronization and any enabled ReplicaTemplate watch by default. To bootstrap before these CRDs are installed, explicitly set `-kubernetes.allow-missing-crds=true`. ZPDB enforcement is inactive while its CRD is absent; verify observer readiness before relying on protection.
+Startup waits for ZPDB cache synchronization and any enabled ReplicaTemplate watch by default. To bootstrap before these CRDs or their RBAC permissions are installed, explicitly set `-kubernetes.allow-missing-crds=true`. Missing or forbidden custom resources are logged at info level while informers retry in the background. ZPDB enforcement is inactive until its observer is ready; verify observer readiness before relying on protection.
 
 For ReplicaTemplates, enable `-replica-templates.watch-enabled=true` to reconcile desired replica changes without waiting for the five-minute informer resync. This requires the ReplicaTemplate CRD and `get`, `list`, and `watch` permissions on `replicatemplates` in the operator's namespace. Status-only updates do not trigger reconciliation. The Jsonnet option `rollout_operator_replica_template_access_enabled` enables the watch and grants these permissions.
 

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -332,5 +333,48 @@ func TestReplicaTemplateDiscoveryRecoveryIsOptIn(t *testing.T) {
 				require.Equal(t, float64(1), testutil.ToFloat64(c.replicaTemplateReady))
 			}
 		})
+	}
+}
+
+func TestReplicaTemplateWatchErrorLogLevel(t *testing.T) {
+	for _, optional := range []bool{false, true} {
+		for _, watchErr := range []error{apierrors.NewNotFound(replicaTemplateGVR.GroupResource(), ""), apierrors.NewForbidden(replicaTemplateGVR.GroupResource(), "", nil), apierrors.NewServiceUnavailable("API unavailable")} {
+			t.Run(fmt.Sprintf("optional=%t/%v", optional, watchErr), func(t *testing.T) {
+				kube := fake.NewSimpleClientset()
+				dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{replicaTemplateGVR: "ReplicaTemplateList"})
+				dyn.PrependReactor("list", replicaTemplateGVR.Resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, watchErr
+				})
+				levels := make(chan string, 10)
+				logger := log.LoggerFunc(func(keyvals ...interface{}) error {
+					for i := 0; i < len(keyvals); i += 2 {
+						if keyvals[i] == "level" {
+							select {
+							case levels <- fmt.Sprint(keyvals[i+1]):
+							default:
+							}
+						}
+					}
+					return nil
+				})
+				c := NewRolloutController(kube, nil, nil, nil, dyn, testClusterDomain, testNamespace, NewPodInformerFactory(kube, testNamespace), nil, time.Second, prometheus.NewRegistry(), logger, nil)
+				if optional {
+					c.AllowMissingCRDs()
+				}
+				c.WatchReplicaTemplates()
+				t.Cleanup(c.Stop)
+				go c.replicaTemplatesInformer.Run(c.stopCh)
+				expected := "warn"
+				if optional && !apierrors.IsServiceUnavailable(watchErr) {
+					expected = "info"
+				}
+				select {
+				case loggedLevel := <-levels:
+					require.Equal(t, expected, loggedLevel)
+				case <-time.After(5 * time.Second):
+					t.Fatal("watch error was not logged")
+				}
+			})
+		}
 	}
 }
