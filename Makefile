@@ -56,8 +56,8 @@ status-ui-preview: ## Serve the status UI with demo data on 127.0.0.1:8080
 	go run ./cmd/status-ui-preview
 
 .PHONY: rollout-operator-fips
-rollout-operator-fips: $(GO_FILES) ## Build the rollout-operator binary with the validated Go FIPS module
-	GOFIPS140=v1.0.0 GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build ./cmd/rollout-operator
+rollout-operator-fips: $(GO_FILES) ## Build the rollout-operator binary with the frozen Go FIPS module
+	GOFIPS140=v1.26.0 GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build ./cmd/rollout-operator
 
 .PHONY: build-image
 build-image: clean ## Build the rollout-operator image
@@ -92,8 +92,8 @@ test: ## Run tests
 	go test ./...
 
 .PHONY: test-fips
-test-fips: ## Run tests with the validated Go FIPS module
-	GOFIPS140=v1.0.0 CGO_ENABLED=0 go test ./...
+test-fips: ## Run tests with the frozen Go FIPS module
+	GOFIPS140=v1.26.0 CGO_ENABLED=0 go test ./...
 
 .PHONY: check-kind
 check-kind: ## Check if kind is installed
