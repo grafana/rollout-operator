@@ -415,29 +415,68 @@ func TestObserver_ReadinessUpdatesWhenInitialWatchOpens(t *testing.T) {
 	}, time.Second, time.Millisecond)
 }
 
-func TestObserver_StartWithoutCRD(t *testing.T) {
-	dynamicClient, observer := newConfigObserverTestCase()
-	observer.startCaches = observer.startAllowMissingCRDs
-	dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewNotFound(schema.GroupResource{
-			Group:    ZoneAwarePodDisruptionBudgetsSpecGroup,
-			Resource: ZoneAwarePodDisruptionBudgetsNamePlural,
-		}, "")
-	})
+func TestObserver_StartWithoutCRDOrPermissions(t *testing.T) {
+	resource := schema.GroupResource{Group: ZoneAwarePodDisruptionBudgetsSpecGroup, Resource: ZoneAwarePodDisruptionBudgetsNamePlural}
+	for _, unavailableErr := range []error{apierrors.NewNotFound(resource, ""), apierrors.NewForbidden(resource, "", nil)} {
+		t.Run(unavailableErr.Error(), func(t *testing.T) {
+			dynamicClient, observer := newConfigObserverTestCase()
+			observer.startCaches = observer.startAllowMissingCRDs
+			t.Cleanup(observer.stop)
+			var recovered atomic.Bool
+			dynamicClient.PrependReactor("list", ZoneAwarePodDisruptionBudgetsNamePlural, func(k8stesting.Action) (bool, runtime.Object, error) {
+				if !recovered.Load() {
+					return true, nil, unavailableErr
+				}
+				return false, nil, nil
+			})
 
-	started := make(chan error, 1)
-	go func() {
-		started <- observer.start()
-	}()
-
-	select {
-	case err := <-started:
-		require.NoError(t, err)
-		require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
-	case <-time.After(time.Second):
-		t.Fatal("observer did not start while the CRD was missing")
+			started := make(chan error, 1)
+			go func() { started <- observer.start() }()
+			select {
+			case err := <-started:
+				require.NoError(t, err)
+				require.Equal(t, float64(0), testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()))
+			case <-time.After(time.Second):
+				t.Fatal("observer did not start while the CRD or permissions were missing")
+			}
+			recovered.Store(true)
+			require.Eventually(t, func() bool {
+				return testutil.ToFloat64(observer.metrics.ConfigObserverReady.WithLabelValues()) == 1
+			}, 10*time.Second, 10*time.Millisecond)
+		})
 	}
-	observer.stop()
+}
+
+func TestObserver_WatchErrorLogLevel(t *testing.T) {
+	resource := schema.GroupResource{Group: ZoneAwarePodDisruptionBudgetsSpecGroup, Resource: ZoneAwarePodDisruptionBudgetsNamePlural}
+	for _, optional := range []bool{false, true} {
+		for _, watchErr := range []error{apierrors.NewNotFound(resource, ""), apierrors.NewForbidden(resource, "", nil), apierrors.NewServiceUnavailable("API unavailable")} {
+			t.Run(fmt.Sprintf("optional=%t/%v", optional, watchErr), func(t *testing.T) {
+				_, observer := newConfigObserverTestCase()
+				observer.allowMissingCRDs = optional
+				observer.startCaches = func() error { return nil }
+				var loggedLevel string
+				observer.logger = log.LoggerFunc(func(keyvals ...interface{}) error {
+					for i := 0; i < len(keyvals); i += 2 {
+						if keyvals[i] == "level" {
+							loggedLevel = fmt.Sprint(keyvals[i+1])
+						}
+					}
+					return nil
+				})
+				informer := &watchErrorCapturingInformer{SharedIndexInformer: observer.pdbInformer}
+				observer.pdbInformer = informer
+				require.NoError(t, observer.start())
+				t.Cleanup(observer.stop)
+				informer.handler(nil, fmt.Errorf("failed to list: %w", watchErr))
+				expected := "warn"
+				if optional && !apierrors.IsServiceUnavailable(watchErr) {
+					expected = "info"
+				}
+				require.Equal(t, expected, loggedLevel)
+			})
+		}
+	}
 }
 
 func TestObserver_StartRetriesTransientErrors(t *testing.T) {

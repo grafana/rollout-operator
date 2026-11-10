@@ -72,6 +72,7 @@ type RolloutController struct {
 
 	replicaTemplatesInformer     cache.SharedIndexInformer
 	replicaTemplateStartupSynced cache.InformerSynced
+	allowMissingCRDs             bool
 	onReplicaTemplateDiscovered  func()
 
 	zpdbController ZPDBEvictionController
