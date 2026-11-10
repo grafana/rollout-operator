@@ -2,6 +2,14 @@
 
 This operator coordinates the rollout of pods between different StatefulSets within a specific namespace and can be used to manage multi-AZ deployments where pods running in each AZ are managed by a dedicated StatefulSet.
 
+## FIPS image
+
+The `grafana/rollout-operator-boringcrypto` image uses Go's native FIPS 140-3 support, built with `GOFIPS140=v1.0.0` and `CGO_ENABLED=0`. The image name is retained for deployment compatibility. It uses the static distroless base and does not include glibc.
+
+FIPS mode is enabled by default, including FIPS-approved TLS settings. The Go Cryptographic Module v1.0.0 is covered by [CMVP certificate #5247](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5247). See [Go's FIPS documentation](https://go.dev/doc/security/fips140) for operating environment and compliance requirements.
+
+Use `make build-image-fips` to build the image locally and `make test-fips` to run the unit tests with the same module.
+
 ## How updates work
 
 The operator coordinates the rollout of pods belonging to `StatefulSets` with the `rollout-group` label and updates strategy set to `OnDelete`. The label value should identify the group of StatefulSets to which the StatefulSet belongs to. Make sure the StatefulSet has a label `name` in its `spec.template`, as the operator uses it to find pods belonging to it.

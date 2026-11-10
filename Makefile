@@ -11,7 +11,8 @@ IMAGE_TAG ?= $(subst /,-,$(GIT_BRANCH))-$(GIT_REVISION)
 # Optional second tag applied on publish (e.g. main-<datetime>-<sha> from CI).
 ADDITIONAL_IMAGE_TAG ?=
 ADDITIONAL_IMAGE_TAG_FLAG = $(if $(ADDITIONAL_IMAGE_TAG),-t $(IMAGE_PREFIX)/rollout-operator:$(ADDITIONAL_IMAGE_TAG),)
-ADDITIONAL_BORINGCRYPTO_IMAGE_TAG_FLAG = $(if $(ADDITIONAL_IMAGE_TAG),-t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(ADDITIONAL_IMAGE_TAG),)
+# Keep the published image name compatible with existing deployments.
+ADDITIONAL_FIPS_IMAGE_TAG_FLAG = $(if $(ADDITIONAL_IMAGE_TAG),-t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(ADDITIONAL_IMAGE_TAG),)
 
 # Support gsed on OSX (installed via brew), falling back to sed. On Linux
 # systems gsed won't be installed, so will use sed as expected.
@@ -55,32 +56,32 @@ rollout-operator: $(GO_FILES) ## Build the rollout-operator binary
 status-ui-preview: ## Serve the status UI with demo data on 127.0.0.1:8080
 	go run ./cmd/status-ui-preview
 
-.PHONY: rollout-operator-boringcrypto
-rollout-operator-boringcrypto: $(GO_FILES) ## Build the rollout-operator binary with boringcrypto
-	GOEXPERIMENT=boringcrypto GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -tags netgo ./cmd/rollout-operator
+.PHONY: rollout-operator-fips
+rollout-operator-fips: $(GO_FILES) ## Build the rollout-operator binary with the validated Go FIPS module
+	GOFIPS140=v1.0.0 GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build ./cmd/rollout-operator
 
 .PHONY: build-image
 build-image: clean ## Build the rollout-operator image
 	docker buildx build --load --platform linux/$(GOARCH) --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) .
 
-.PHONY: build-image-boringcrypto
-build-image-boringcrypto: clean ## Build the rollout-operator image with boringcrypto
+.PHONY: build-image-fips
+build-image-fips: clean ## Build the rollout-operator image with native Go FIPS support
 	# Tags with the regular image repo for integration testing
-	docker buildx build --load --platform linux/$(GOARCH) --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) -f Dockerfile.boringcrypto .
+	docker buildx build --load --platform linux/$(GOARCH) --build-arg revision=$(GIT_REVISION) -t rollout-operator:latest -t rollout-operator:$(IMAGE_TAG) -f Dockerfile.fips .
 
 .PHONY: build-test-images
 build-test-images: build-image integration/mock-service/.uptodate ## Build both rollout-operator and mock-service images for testing
 
 .PHONY: publish-images
-publish-images: publish-standard-image publish-boringcrypto-image ## Build and publish both the standard and boringcrypto images
+publish-images: publish-standard-image publish-fips-image ## Build and publish both the standard and FIPS images
 
 .PHONY: publish-standard-image
 publish-standard-image: clean ## Build and publish only the standard rollout-operator image
 	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator:$(IMAGE_TAG) $(ADDITIONAL_IMAGE_TAG_FLAG) .
 
-.PHONY: publish-boringcrypto-image
-publish-boringcrypto-image: clean ## Build and publish only the boring-crypto rollout-operator image
-	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) $(ADDITIONAL_BORINGCRYPTO_IMAGE_TAG_FLAG) -f Dockerfile.boringcrypto .
+.PHONY: publish-fips-image
+publish-fips-image: clean ## Build and publish only the FIPS rollout-operator image
+	docker buildx build --push --platform linux/amd64,linux/arm64 --build-arg revision=$(GIT_REVISION) -t $(IMAGE_PREFIX)/rollout-operator-boringcrypto:$(IMAGE_TAG) $(ADDITIONAL_FIPS_IMAGE_TAG_FLAG) -f Dockerfile.fips .
 
 .PHONY: release-notes 
 release-notes: ## Generate the release notes for a GitHub release
@@ -91,9 +92,9 @@ release-notes: ## Generate the release notes for a GitHub release
 test: ## Run tests
 	go test ./...
 
-.PHONY: test-boringcrypto
-test-boringcrypto: ## Run tests with GOEXPERIMENT=boringcrypto
-	GOEXPERIMENT=boringcrypto go test ./...
+.PHONY: test-fips
+test-fips: ## Run tests with the validated Go FIPS module
+	GOFIPS140=v1.0.0 CGO_ENABLED=0 go test ./...
 
 .PHONY: check-kind
 check-kind: ## Check if kind is installed

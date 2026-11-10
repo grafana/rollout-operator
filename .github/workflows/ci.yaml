@@ -36,7 +36,7 @@ jobs:
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - run: make check-vendor
       - run: make test
-      - run: make test-boringcrypto
+      - run: make test-fips
 
   # Number of matrix.shard entries controls runner count (values must be 0..N-1).
   integration:
@@ -97,7 +97,7 @@ jobs:
       - run: make integration
 
   # Number of matrix.shard entries controls runner count (values must be 0..N-1).
-  integration-boringcrypto:
+  integration-fips:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -151,7 +151,7 @@ jobs:
           sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
           echo "${JSONNET_BUNDLER_SHA256}  /usr/local/bin/jb" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/jb
-      - run: make build-image-boringcrypto
+      - run: make build-image-fips
       - run: make integration
 
   lint:
@@ -295,7 +295,7 @@ jobs:
       - build
       - test
       - integration
-      - integration-boringcrypto
+      - integration-fips
       - lint
       - lint-jsonnet
     if: github.event_name == 'push' # We want this job to run for both pushes to main, as well as new tags
