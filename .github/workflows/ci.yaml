@@ -46,12 +46,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2, 3]
         fips: ["off", "on"]
     env:
       SHARD_INDEX: ${{ matrix.shard }}
-      # Each runtime mode runs the full suite across two shards.
-      SHARD_COUNT: 2
+      # Each runtime mode runs the full suite across four shards.
+      SHARD_COUNT: 4
       GODEBUG: fips140=${{ matrix.fips }}
       ROLLOUT_OPERATOR_GODEBUG: fips140=${{ matrix.fips }}
     steps:
