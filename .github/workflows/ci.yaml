@@ -361,7 +361,7 @@ jobs:
         if: github.ref_type == 'tag'
         timeout-minutes: 15
         run: |
-          for img in rollout-operator rollout-operator-boringcrypto; do
+          for img in rollout-operator rollout-operator-fips; do
             until docker buildx imagetools inspect "docker.io/grafana/$img:$IMAGE_TAG" >/dev/null 2>&1; do
               echo "waiting for docker.io/grafana/$img:$IMAGE_TAG to be mirrored"
               sleep 15

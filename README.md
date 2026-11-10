@@ -4,7 +4,7 @@ This operator coordinates the rollout of pods between different StatefulSets wit
 
 ## FIPS image
 
-The `grafana/rollout-operator-boringcrypto` image uses Go's native FIPS 140-3 support, built with `GOFIPS140=v1.0.0` and `CGO_ENABLED=0`. The image name is retained for deployment compatibility. It uses the static distroless base and does not include glibc.
+The `grafana/rollout-operator-fips` image uses Go's native FIPS 140-3 support, built with `GOFIPS140=v1.0.0` and `CGO_ENABLED=0`. It uses the static distroless base and does not include glibc.
 
 FIPS mode is enabled by default, including FIPS-approved TLS settings. The Go Cryptographic Module v1.0.0 is covered by [CMVP certificate #5247](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5247). See [Go's FIPS documentation](https://go.dev/doc/security/fips140) for operating environment and compliance requirements.
 

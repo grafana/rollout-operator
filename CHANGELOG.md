@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Replace BoringCrypto with the native Go FIPS 140-3 module in the FIPS image, removing its glibc dependency. Keep the `rollout-operator-boringcrypto` image name for deployment compatibility.
+* [ENHANCEMENT] Replace BoringCrypto with the native Go FIPS 140-3 module in the FIPS image, removing its glibc dependency. Publish the image as `rollout-operator-fips`.
 
 * [ENHANCEMENT] Add opt-in `-kubernetes.allow-missing-crds=true` startup before CRDs are installed, with automatic recovery after installation. ZPDB protection is inactive while its CRD is absent; startup still waits for existing ZPDB configurations when the CRD is installed. #544
 
