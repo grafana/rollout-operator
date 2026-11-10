@@ -2,13 +2,13 @@
 
 This operator coordinates the rollout of pods between different StatefulSets within a specific namespace and can be used to manage multi-AZ deployments where pods running in each AZ are managed by a dedicated StatefulSet.
 
-## FIPS image
+## FIPS support
 
-The `grafana/rollout-operator-fips` image uses Go's native FIPS 140-3 support, built with `GOFIPS140=v1.26.0` and `CGO_ENABLED=0`. It uses the static distroless base and does not include glibc.
+The `grafana/rollout-operator` image is built with `GOFIPS140=v1.26.0` and `CGO_ENABLED=0`, using the frozen Go Cryptographic Module v1.26.0 and the static distroless base without glibc.
 
-FIPS mode is enabled by default, including FIPS-approved TLS settings. The image uses the frozen Go Cryptographic Module v1.26.0. See [Go's FIPS documentation](https://go.dev/doc/security/fips140) for module validation status, operating environment and compliance requirements.
+FIPS mode is disabled by default. Set `GODEBUG=fips140=on` in the rollout-operator container environment to enable FIPS mode, including FIPS-approved TLS settings. The same image supports both modes.
 
-Use `make build-image-fips` to build the image locally and `make test-fips` to run the unit tests with the same module.
+See [Go's FIPS documentation](https://go.dev/doc/security/fips140) for module validation status, operating environment and compliance requirements.
 
 ## How updates work
 

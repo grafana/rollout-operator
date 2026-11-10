@@ -36,18 +36,24 @@ jobs:
           cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
       - run: make check-vendor
       - run: make test
-      - run: make test-fips
+      - run: make test
+        env:
+          GODEBUG: fips140=on
 
-  # Number of matrix.shard entries controls runner count (values must be 0..N-1).
+  # Shard the full suite independently for each FIPS runtime mode.
   integration:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         shard: [0, 1]
+        fips: ["off", "on"]
     env:
       SHARD_INDEX: ${{ matrix.shard }}
-      SHARD_COUNT: ${{ strategy.job-total }}
+      # Each runtime mode runs the full suite across two shards.
+      SHARD_COUNT: 2
+      GODEBUG: fips140=${{ matrix.fips }}
+      ROLLOUT_OPERATOR_GODEBUG: fips140=${{ matrix.fips }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -94,64 +100,6 @@ jobs:
           echo "${JSONNET_BUNDLER_SHA256}  /usr/local/bin/jb" | sha256sum -c -
           sudo chmod a+x /usr/local/bin/jb
       - run: make build-image
-      - run: make integration
-
-  # Number of matrix.shard entries controls runner count (values must be 0..N-1).
-  integration-fips:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1]
-    env:
-      SHARD_INDEX: ${{ matrix.shard }}
-      SHARD_COUNT: ${{ strategy.job-total }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: '1.27'
-          check-latest: true
-          cache: ${{ github.event_name != 'push' }} # zizmor: ignore[cache-poisoning] Zizmor doesn't understand that this disables caching for release builds
-      - name: Install kind
-        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
-        with:
-          install_only: true
-      - name: Install jsonnet
-        run: |
-          set -euo pipefail
-          JSONNET_VERSION="0.21.0"
-          asset="go-jsonnet_Linux_x86_64.tar.gz"
-          tmp="$(mktemp -d)"
-          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/checksums.txt" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/checksums.txt"
-          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${tmp}/${asset}" "https://github.com/google/go-jsonnet/releases/download/v${JSONNET_VERSION}/${asset}"
-          expected="$(grep " ${asset}\$" "${tmp}/checksums.txt" || true)"
-          [ -n "${expected}" ] || { echo "checksum entry for ${asset} not found in manifest" >&2; exit 1; }
-          (cd "${tmp}" && echo "${expected}" | sha256sum -c -)
-          sudo tar -xzf "${tmp}/${asset}" -C /usr/local/bin
-      - name: Install tk
-        run: |
-          set -euo pipefail
-          TANKA_VERSION="0.34.1"
-          # Upstream does not publish a checksum manifest; verify against pinned hash.
-          # On version bumps, recompute via: curl -sL <url> | sha256sum
-          TANKA_SHA256="dd4bdf619b4e1fc61172c390b12f6a7503d9e936b957d69c8bcebbf7285e299c"
-          sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/local/bin/tk "https://github.com/grafana/tanka/releases/download/v${TANKA_VERSION}/tk-linux-amd64"
-          echo "${TANKA_SHA256}  /usr/local/bin/tk" | sha256sum -c -
-          sudo chmod a+x /usr/local/bin/tk
-      - name: Install jb
-        run: |
-          set -euo pipefail
-          JSONNET_BUNDLER_VERSION="0.6.0"
-          # Upstream does not publish a checksum manifest; verify against pinned hash.
-          # On version bumps, recompute via: curl -sL <url> | sha256sum
-          JSONNET_BUNDLER_SHA256="78e54afbbc3ff3e0942b1576b4992277df4f6beb64cddd58528a76f0cd70db54"
-          sudo curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o /usr/local/bin/jb "https://github.com/jsonnet-bundler/jsonnet-bundler/releases/download/v${JSONNET_BUNDLER_VERSION}/jb-linux-amd64"
-          echo "${JSONNET_BUNDLER_SHA256}  /usr/local/bin/jb" | sha256sum -c -
-          sudo chmod a+x /usr/local/bin/jb
-      - run: make build-image-fips
       - run: make integration
 
   lint:
@@ -295,7 +243,6 @@ jobs:
       - build
       - test
       - integration
-      - integration-fips
       - lint
       - lint-jsonnet
     if: github.event_name == 'push' # We want this job to run for both pushes to main, as well as new tags
@@ -341,14 +288,8 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
       - name: Build and push image
-        run: |
-          if [[ "$REF_TYPE" == "tag" ]]; then
-            make publish-images
-          else
-            make publish-standard-image
-          fi
+        run: make publish-images
         env:
-          REF_TYPE: ${{ github.ref_type }}
           IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
           ADDITIONAL_IMAGE_TAG: ${{ steps.image_tag.outputs.additional_tag }}
           # Push to the GAR mirror repo; gar-image-mirror copies these to
@@ -361,13 +302,11 @@ jobs:
         if: github.ref_type == 'tag'
         timeout-minutes: 15
         run: |
-          for img in rollout-operator rollout-operator-fips; do
-            until docker buildx imagetools inspect "docker.io/grafana/$img:$IMAGE_TAG" >/dev/null 2>&1; do
-              echo "waiting for docker.io/grafana/$img:$IMAGE_TAG to be mirrored"
-              sleep 15
-            done
-            echo "docker.io/grafana/$img:$IMAGE_TAG is available"
+          until docker buildx imagetools inspect "docker.io/grafana/rollout-operator:$IMAGE_TAG" >/dev/null 2>&1; do
+            echo "waiting for docker.io/grafana/rollout-operator:$IMAGE_TAG to be mirrored"
+            sleep 15
           done
+          echo "docker.io/grafana/rollout-operator:$IMAGE_TAG is available"
         env:
           IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
       - name: Publish release

@@ -59,6 +59,15 @@ func initManifestFiles(t *testing.T, test string) string {
 	return fmt.Sprintf(yamlPathTemplate, test)
 }
 
+func loadRolloutOperatorDeployment(t *testing.T, path string) *appsv1.Deployment {
+	t.Helper()
+	deployment := loadFromDisk[appsv1.Deployment](t, path, &appsv1.Deployment{})
+	if godebug := os.Getenv("ROLLOUT_OPERATOR_GODEBUG"); godebug != "" {
+		deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "GODEBUG", Value: godebug})
+	}
+	return deployment
+}
+
 func createRolloutOperator(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook bool, extraEnv ...corev1.EnvVar) {
 	createRolloutOperatorWithCRDs(t, ctx, api, extApi, directory, webhook, true, extraEnv...)
 }
@@ -70,7 +79,7 @@ func createRolloutOperatorWithoutCRDs(t *testing.T, ctx context.Context, api *ku
 func createRolloutOperatorWithCRDs(t *testing.T, ctx context.Context, api *kubernetes.Clientset, extApi *apiextensionsclient.Clientset, directory string, webhook, installCRDs bool, extraEnv ...corev1.EnvVar) {
 	createRolloutOperatorDependencies(t, ctx, api, extApi, directory, webhook, installCRDs)
 
-	deployment := loadFromDisk[appsv1.Deployment](t, directory+yamlDeployment, &appsv1.Deployment{})
+	deployment := loadRolloutOperatorDeployment(t, directory+yamlDeployment)
 	deployment.Spec.Template.Spec.Containers[0].Image = "rollout-operator:latest"
 	deployment.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullNever
 	deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, extraEnv...)

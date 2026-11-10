@@ -197,7 +197,7 @@ func TestSelfSignedCertificate_RenewsAfterExpiration(t *testing.T) {
 func createRolloutOperatorDeployment(t *testing.T, ctx context.Context, api *kubernetes.Clientset, directory string, mutate func(*appsv1.Deployment)) {
 	t.Helper()
 
-	deployment := loadFromDisk[appsv1.Deployment](t, directory+yamlDeployment, &appsv1.Deployment{})
+	deployment := loadRolloutOperatorDeployment(t, directory+yamlDeployment)
 	deployment.Spec.Template.Spec.Containers[0].Image = "rollout-operator:latest"
 	deployment.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullNever
 	if mutate != nil {
