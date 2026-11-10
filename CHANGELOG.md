@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [BUGFIX] Allow startup when ZPDB access is forbidden with `-kubernetes.allow-missing-crds=true`. With this flag, expected `NotFound` and `Forbidden` errors from ZPDB and ReplicaTemplate informer retries are logged at info level instead of warn. #552
+
 ## v0.42.0
 
 * [ENHANCEMENT] Replace the separate BoringCrypto image with native Go FIPS 140-3 support in `rollout-operator`, built with Go Cryptographic Module v1.26.0. FIPS mode is off by default; enable it with `GODEBUG=fips140=on`.
