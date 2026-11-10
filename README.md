@@ -2,6 +2,14 @@
 
 This operator coordinates the rollout of pods between different StatefulSets within a specific namespace and can be used to manage multi-AZ deployments where pods running in each AZ are managed by a dedicated StatefulSet.
 
+## FIPS support
+
+The `grafana/rollout-operator` image is built with `GOFIPS140=v1.26.0` and `CGO_ENABLED=0`, using the frozen Go Cryptographic Module v1.26.0 and the static distroless base without glibc.
+
+FIPS mode is disabled by default. Set `GODEBUG=fips140=on` in the rollout-operator container environment to enable FIPS mode, including FIPS-approved TLS settings. The same image supports both modes.
+
+See [Go's FIPS documentation](https://go.dev/doc/security/fips140) for module validation status, operating environment and compliance requirements.
+
 ## How updates work
 
 The operator coordinates the rollout of pods belonging to `StatefulSets` with the `rollout-group` label and updates strategy set to `OnDelete`. The label value should identify the group of StatefulSets to which the StatefulSet belongs to. Make sure the StatefulSet has a label `name` in its `spec.template`, as the operator uses it to find pods belonging to it.

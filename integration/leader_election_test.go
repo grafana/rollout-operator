@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -21,7 +20,7 @@ func TestLeaderElectionTwoDeployments(t *testing.T) {
 	path := initManifestFiles(t, "webhooks-enabled")
 	createRolloutOperatorDependencies(t, ctx, api, cluster.ExtAPI(), path, true, true)
 	for _, zone := range []string{"a", "b"} {
-		deployment := loadFromDisk[appsv1.Deployment](t, path+yamlDeployment, &appsv1.Deployment{})
+		deployment := loadRolloutOperatorDeployment(t, path+yamlDeployment)
 		deployment.Name = "rollout-operator-" + zone
 		deployment.Spec.Selector.MatchLabels["operator-zone"] = zone
 		deployment.Spec.Template.Labels["operator-zone"] = zone

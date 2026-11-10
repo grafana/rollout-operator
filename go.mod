@@ -2,6 +2,9 @@ module github.com/grafana/rollout-operator
 
 go 1.27.0
 
+// FIPS is opt-in at runtime for the shared commercial and federal image.
+godebug fips140=off
+
 require (
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/go-kit/log v0.2.1

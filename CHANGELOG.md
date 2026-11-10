@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Replace the separate BoringCrypto image with native Go FIPS 140-3 support in `rollout-operator`, built with Go Cryptographic Module v1.26.0. FIPS mode is off by default; enable it with `GODEBUG=fips140=on`.
+
 * [ENHANCEMENT] Add opt-in `-kubernetes.allow-missing-crds=true` startup before CRDs are installed, with automatic recovery after installation. ZPDB protection is inactive while its CRD is absent; startup still waits for existing ZPDB configurations when the CRD is installed. #544
 
 * [BUGFIX] Count pods that a StatefulSet has not (re)created yet as not-Ready. Previously, if the replacement pods couldn't be created (for example, rejected at admission or blocked by a quota), the operator kept deleting pods beyond `rollout-max-unavailable` and could also move on to the next StatefulSet in the rollout group. #537
