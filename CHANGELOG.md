@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [BUGFIX] Jsonnet omits the leader-election CLI flag and `POD_NAME` when election is disabled. Enable `_config.rollout_operator_leader_election_enabled` to configure election and its required permissions together. #554
+
 ## v0.42.1
 
 * [BUGFIX] Allow startup when ZPDB access is forbidden with `-kubernetes.allow-missing-crds=true`. With this flag, expected `NotFound` and `Forbidden` errors from ZPDB and ReplicaTemplate informer retries are logged at info level instead of warn. #552
