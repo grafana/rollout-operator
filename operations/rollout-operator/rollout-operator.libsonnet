@@ -75,7 +75,7 @@
   rollout_operator_args:: {
     'kubernetes.namespace': $._config.namespace,
     [if $._config.rollout_operator_replica_template_access_enabled then 'replica-templates.watch-enabled']: true,
-    'leader-election.enabled': $._config.rollout_operator_leader_election_enabled,
+    [if $._config.rollout_operator_leader_election_enabled then 'leader-election.enabled']: true,
     'use-zone-tracker': true,
     'zone-tracker.config-map-name': 'rollout-operator-zone-tracker',
   } + if enableWebhooks then {
@@ -87,7 +87,9 @@
   rollout_operator_container::
     container.new('rollout-operator', $._images.rollout_operator) +
     container.withArgsMixin($.util.mapToFlags($.rollout_operator_args)) +
-    container.withEnvMixin([{ name: 'POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } }]) +
+    (if $._config.rollout_operator_leader_election_enabled then
+       container.withEnvMixin([{ name: 'POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } }])
+     else {}) +
     container.withPorts(
       [$.core.v1.containerPort.new('http-metrics', 8001)] +
       if enableWebhooks then
