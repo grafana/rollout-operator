@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+## v0.42.1
+
 * [BUGFIX] Allow startup when ZPDB access is forbidden with `-kubernetes.allow-missing-crds=true`. With this flag, expected `NotFound` and `Forbidden` errors from ZPDB and ReplicaTemplate informer retries are logged at info level instead of warn. #552
 
 ## v0.42.0
