@@ -129,7 +129,6 @@ func TestBadRegex(t *testing.T) {
 	raw[FieldPodNameRegexGroup] = int64(10)
 	raw[FieldPodNamePartitionRegex] = "ingester-zone-([a-z])-([0-9]+),$10"
 	_, _, err = valueAsRegex(raw, FieldPodNamePartitionRegex, FieldPodNameRegexGroup)
-	fmt.Printf("%s\n", err.Error())
 	require.ErrorContains(t, err, "regular expression subexpression index out of range")
 }
 

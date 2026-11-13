@@ -44,7 +44,8 @@ func TestObserver_SharesThePodInformerFromTheFactory(t *testing.T) {
 	require.NoError(t, observer.start())
 	defer observer.stop()
 
-	require.Same(t, podsFactory.Core().V1().Pods().Informer(), observer.podsInformer)
+	// Informer() returns a new wrapper on each call, so compare the shared cache underneath it.
+	require.Same(t, podsFactory.Core().V1().Pods().Informer().GetIndexer(), observer.podsInformer.GetIndexer())
 
 	// A second consumer taking pods off the same factory joins the running informer instead of starting a
 	// watch of its own.
