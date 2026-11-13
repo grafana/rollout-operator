@@ -14,7 +14,7 @@ kubectl -n <namespace> get endpointslices -l kubernetes.io/service-name=rollout-
 
 The Lease's `spec.holderIdentity` identifies the elected instance. Replace `rollout-operator` if `-leader-election.lease-name` is customized.
 
-Depending on the failure scenario, there is a delay before the new leader starts serving webhooks. The replacement waits for Lease expiration (default `-leader-election.lease-duration=15s`), initializes its controllers and webhook server, and sets its leader pod label; Service endpoint propagation adds further delay. During webhook unavailability, `failurePolicy: Fail` ensures that eviction and scale requests matching the configured webhooks are denied. Keep this policy enabled to preserve rollout and disruption safeguards during failover.
+Depending on the failure scenario, there is a delay before the new leader starts serving webhooks. The replacement waits for Lease expiration (default `-leader-election.lease-duration=15s`), starts its webhook server and sets its leader pod label while controllers initialize; Service endpoint propagation adds further delay. Until the ZPDB configuration and pod caches synchronize, the new leader rejects evictions while accepting valid ZPDB specifications. During webhook unavailability, `failurePolicy: Fail` ensures that eviction and scale requests matching the configured webhooks are denied. Keep this policy enabled to preserve rollout and disruption safeguards during failover.
 
 ### Monitor the Lease with kube-state-metrics
 
