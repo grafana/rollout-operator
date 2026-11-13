@@ -2,6 +2,23 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Updated dependencies, including: #555
+  * `github.com/grafana/dskit` from `v0.0.0-20260814134254-4a836a70f745` to `v0.0.0-20261113142543-e640b7cda9b5`
+  * `github.com/prometheus/client_golang` from `v1.24.1` to `v1.25.0`
+  * `github.com/prometheus/client_model` from `v0.6.2` to `v0.6.3`
+  * `github.com/prometheus/common` from `v0.70.1` to `v0.74.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace` from `v0.70.0` to `v0.72.0`
+  * `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` from `v0.70.0` to `v0.72.0`
+  * `go.opentelemetry.io/otel/trace` from `v1.45.0` to `v1.47.0`
+  * `go.opentelemetry.io/otel` from `v1.45.0` to `v1.47.0`
+  * `go.uber.org/atomic` from `v1.11.0` to `v1.12.0`
+  * `golang.org/x/mod` from `v0.41.0` to `v0.43.0`
+  * `golang.org/x/sync` from `v0.24.0` to `v0.25.0`
+  * `k8s.io/api` from `v0.36.4` to `v0.37.2`
+  * `k8s.io/apiextensions-apiserver` from `v0.36.4` to `v0.37.2`
+  * `k8s.io/apimachinery` from `v0.36.4` to `v0.37.2`
+  * `k8s.io/client-go` from `v0.36.4` to `v0.37.2`
+  * `sigs.k8s.io/controller-runtime` from `v0.24.1` to `v0.25.2`
 * [BUGFIX] Jsonnet omits the leader-election CLI flag and `POD_NAME` when election is disabled. Enable `_config.rollout_operator_leader_election_enabled` to configure election and its required permissions together. #554
 
 ## v0.42.1

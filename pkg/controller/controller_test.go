@@ -2073,5 +2073,6 @@ func TestRolloutController_UsesTheSuppliedPodInformerFactory(t *testing.T) {
 	require.NoError(t, c.Init())
 	defer c.Stop()
 
-	require.Same(t, podsFactory.Core().V1().Pods().Informer(), c.podsInformer)
+	// Informer() returns a new wrapper on each call, so compare the shared cache underneath it.
+	require.Same(t, podsFactory.Core().V1().Pods().Informer().GetIndexer(), c.podsInformer.GetIndexer())
 }
