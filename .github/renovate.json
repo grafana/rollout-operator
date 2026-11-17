@@ -73,7 +73,9 @@
     ],
     "branchPrefix": "grafanarenovatebot/",
     "platformCommit": "enabled",
-    "dependencyDashboard": false,
+    "dependencyDashboard": {
+        "enabled": false
+    },
     "rebaseWhen": "behind-base-branch",
     "packageRules": [
         {
