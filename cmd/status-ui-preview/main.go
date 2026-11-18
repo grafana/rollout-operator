@@ -24,6 +24,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer c.Stop()
+	go c.Run()
 
 	ui, err := frontend.New(c)
 	if err != nil {

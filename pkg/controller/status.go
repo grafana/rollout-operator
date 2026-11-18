@@ -64,6 +64,11 @@ func (c *RolloutController) Snapshot(ctx context.Context) (*status.Snapshot, err
 			members = append(members, member)
 		}
 		applyZoneGating(members)
+		for i := range members {
+			if members[i].Phase == status.PhaseProgressing {
+				members[i].Blockers = c.currentRolloutBlockers(groupSets[i])
+			}
+		}
 
 		group := status.Group{
 			Name:    groupName,
