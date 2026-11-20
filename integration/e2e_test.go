@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
@@ -456,8 +457,7 @@ func TestZoneAwarePodDisruptionBudgetMaxUnavailableEq1(t *testing.T) {
 
 	{
 		t.Log("Evict a pod in a different zone.")
-		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
-		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+		requireEvictionAfterRecovery(t, ctx, api, "mock-zone-b-0")
 	}
 }
 
@@ -600,8 +600,7 @@ func TestZoneAwarePodDisruptionBudgetPartitionMode(t *testing.T) {
 
 	{
 		t.Log("Allow a different pod in same partition to now be deleted.")
-		ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: "mock-zone-b-0", Namespace: corev1.NamespaceDefault}}
-		require.NoError(t, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+		requireEvictionAfterRecovery(t, ctx, api, "mock-zone-b-0")
 	}
 
 }
@@ -997,6 +996,16 @@ func awaitPodRunning(t *testing.T, ctx context.Context, api *kubernetes.Clientse
 		return util.IsPodRunningAndReady(pod)
 	}
 	require.Eventually(t, awaitReadyRunning, 30*time.Second, time.Millisecond*50)
+}
+
+// requireEvictionAfterRecovery retries an eviction that a recovery has just unblocked. The operator can deny
+// it from its cache until its watch delivers the recovery, which can briefly trail the API. The retries stop
+// long before a cached denial must be checked live again, so a denial that outlasts the recovery still fails.
+func requireEvictionAfterRecovery(t *testing.T, ctx context.Context, api *kubernetes.Clientset, podname string) {
+	ev := &policyv1beta1.Eviction{ObjectMeta: metav1.ObjectMeta{Name: podname, Namespace: corev1.NamespaceDefault}}
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		assert.NoError(c, api.PolicyV1beta1().Evictions(corev1.NamespaceDefault).Evict(ctx, ev))
+	}, 5*time.Second, 100*time.Millisecond)
 }
 
 func awaitZoneAwarePodDisruptionBudgetCreation(t *testing.T, ctx context.Context, cluster *kindCluster, configFile string) {

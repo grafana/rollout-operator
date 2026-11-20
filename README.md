@@ -592,6 +592,8 @@ The `ZoneAwarePodDisruptionBudget` is provided as a custom resource.
 
 A pod eviction webhook is registered for approving voluntary pod eviction requests, and a validating webhook is registered for validating `ZPDB` objects.
 
+After a budget denies a voluntary eviction, retries for the same Pod can be denied from the operator's Pod and StatefulSet cache, without Kubernetes API requests. A retry is allowed only after live reads confirm the budget, which happens as soon as the cache no longer shows the budget exceeded, and at least once every 30 seconds per Pod in case the cache lags behind the API. Dry runs and operator-initiated rollouts always use live reads. Pods outside any `ZPDB` are allowed based on the cache, since the budget doesn't apply to them. Set `-zpdb.cached-denial-live-check-interval` to change the 30 seconds, or to `0` to use live reads for every request.
+
 The following is required to enable the `ZoneAwarePodDisruptionBudget`;
 
 - a custom resource definition for the `ZoneAwarePodDisruptionBudget` kind - a sample is provided in [development](./development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml)

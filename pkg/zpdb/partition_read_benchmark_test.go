@@ -103,7 +103,7 @@ func partitionReadClient(t testing.TB, transport *podListTransport, cached []cor
 func partitionReadValidator(ctx context.Context, owner *appsv1.StatefulSet, delay time.Duration) *validatorPartitionAware {
 	logger, _ := spanlogger.New(ctx, log.NewNopLogger(), "partition", util.NoTenantResolver{})
 	cfg := &config{podNamePartition: regexp.MustCompile(`^worker-.*-([0-9]+)$`), podNamePartitionRegexGroup: 1, crossZoneEvictionDelay: delay}
-	return newValidatorPartitionAware(owner, "0", 2, cfg, newPodEvictionCache(), logger)
+	return newValidatorPartitionAware(owner, "0", 2, cfg, newPodEvictionCache(), logger, time.Now)
 }
 
 func BenchmarkK8sClient_PodsNotRunningAndReady_Partition(b *testing.B) {
