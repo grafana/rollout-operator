@@ -19,6 +19,7 @@
   * `k8s.io/apimachinery` from `v0.36.4` to `v0.37.2`
   * `k8s.io/client-go` from `v0.36.4` to `v0.37.2`
   * `sigs.k8s.io/controller-runtime` from `v0.24.1` to `v0.25.2`
+* [ENHANCEMENT] ZPDB: After a live check denies a voluntary eviction, retries for the same Pod are denied from the operator's cache, without Kubernetes API requests, while the budget is still exceeded. Each Pod's retries use live reads again within `-zpdb.cached-denial-live-check-interval` (default 30s; 0 disables cached denials). Adds `rollout_operator_zpdb_cached_denials_total`. #562
 * [BUGFIX] Jsonnet omits the leader-election CLI flag and `POD_NAME` when election is disabled. Enable `_config.rollout_operator_leader_election_enabled` to configure election and its required permissions together. #554
 * [BUGFIX] ZPDB: Allowed dry-run evictions no longer reserve disruption capacity, including `kubectl drain --dry-run=server`, which sets `dryRun` in the eviction body. #561
 
