@@ -2,6 +2,8 @@
 
 ## main / unreleased
 
+* [ENHANCEMENT] Serve ZPDB validation before controller initialization so bootstrap can use `failurePolicy: Fail`. Deny pod evictions until configuration and pod caches synchronize, including with `-kubernetes.allow-missing-crds=true`. Retry transient certificate and CA publication failures.
+
 * [ENHANCEMENT] Updated dependencies, including: #555
   * `github.com/grafana/dskit` from `v0.0.0-20260814134254-4a836a70f745` to `v0.0.0-20261113142543-e640b7cda9b5`
   * `github.com/prometheus/client_golang` from `v1.24.1` to `v1.25.0`
