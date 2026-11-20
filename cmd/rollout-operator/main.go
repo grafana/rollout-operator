@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // Required to get the GCP auth provider working.
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/scale"
@@ -390,11 +391,22 @@ func runOperator(
 	// The eviction controller gets a dedicated Kubernetes client so that a flood of pod eviction requests
 	// (its hot path: pod and StatefulSet get/list) is rate limited independently and cannot starve the core
 	// controller or the other webhooks. The dynamic client (used only to watch ZPDB config, a cold path) stays shared.
-	evictionKubeClient, err := newDedicatedKubeClient(wireComponentConfig("pod-eviction"))
+	evictionConfig := wireComponentConfig("pod-eviction")
+	evictionHTTPClient, err := rest.HTTPClientFor(evictionConfig)
+	if err != nil {
+		fatal(fmt.Errorf("failed to create pod eviction HTTP client: %w", err))
+	}
+	evictionKubeClient, err := kubernetes.NewForConfigAndClient(evictionConfig, evictionHTTPClient)
 	if err != nil {
 		fatal(fmt.Errorf("failed to create pod eviction Kubernetes client: %w", err))
 	}
+	// Both representations use the eviction webhook's rate-limit buckets.
+	evictionMetadata, err := metadata.NewForConfigAndClient(evictionConfig, evictionHTTPClient)
+	if err != nil {
+		fatal(fmt.Errorf("failed to create pod eviction metadata client: %w", err))
+	}
 	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, podsFactory, logger, zpdbMetrics)
+	evictionController.UsePodMetadata(evictionMetadata)
 	if cfg.allowMissingCRDs {
 		evictionController.AllowMissingCRDs()
 	}

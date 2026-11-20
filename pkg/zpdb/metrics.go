@@ -10,6 +10,8 @@ type Metrics struct {
 	EvictionRequests       *prometheus.CounterVec
 	InFlightRequests       *prometheus.GaugeVec
 	ConfigObserverReady    *prometheus.GaugeVec
+
+	PartitionFullListFallbacks prometheus.Counter
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -32,5 +34,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "rollout_operator_zpdb_config_observer_ready",
 			Help: "Whether the ZPDB configuration observer has synchronized and can list and watch the Kubernetes API.",
 		}, []string{}),
+		PartitionFullListFallbacks: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Name: "rollout_operator_zpdb_partition_full_list_fallbacks_total",
+			Help: "Number of partition-aware zone checks that required a full Pod list after a metadata request.",
+		}),
 	}
 }

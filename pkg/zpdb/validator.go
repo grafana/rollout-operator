@@ -5,6 +5,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // A validator allows for different pdb implementations
@@ -33,7 +34,7 @@ type validator interface {
 
 // A partitionMatcher is a utility to assist in matching pods to a partition.
 // Returns true if this pod is in the same zone/partition as the eviction pod
-type partitionMatcher func(pod *corev1.Pod) bool
+type partitionMatcher func(pod metav1.Object) bool
 
 // A zoneStatusResult holds the status of a pod availability within a zone / StatefulSet
 type zoneStatusResult struct {

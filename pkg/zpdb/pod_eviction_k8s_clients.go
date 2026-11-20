@@ -17,7 +17,8 @@ import (
 
 // A k8sClient holds the Kubernetes API client used to query Kubernetes
 type k8sClient struct {
-	ctx context.Context
+	partitionPods *partitionPodReader
+	ctx           context.Context
 	// The client we use to query for StatefulSets and Pods
 	kubeClient kubernetes.Interface
 }
@@ -77,16 +78,47 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 		util.MustNewLabelsRequirement("name", selection.Equals, []string{sts.Spec.Template.Labels["name"]}),
 	)
 
-	list, err := a.kubeClient.CoreV1().Pods(sts.Namespace).List(a.ctx, metav1.ListOptions{
-		LabelSelector: podsSelector.String(),
-	})
+	opts := metav1.ListOptions{LabelSelector: podsSelector.String()}
+	matcher := zpdb.considerPod()
+	result := &zoneStatusResult{}
+	count := func(peer *corev1.Pod) {
+		result.tested++
+		if pod.UID != peer.UID && !zpdb.isReady(peer) {
+			result.notReady++
+		}
+	}
 
+	if a.partitionPods != nil {
+		peers, total, ok, err := a.partitionPods.matchingPods(a.ctx, sts.Namespace, opts, matcher)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			for _, peer := range peers {
+				count(peer)
+			}
+			result.unknown = missingReplicas(sts, total)
+			return result, nil
+		}
+		a.partitionPods.fallbacks.Inc()
+	}
+
+	list, err := a.kubeClient.CoreV1().Pods(sts.Namespace).List(a.ctx, opts)
 	if err != nil {
 		return nil, err
 	}
+	for i := range list.Items {
+		peer := &list.Items[i]
+		if matcher(peer) {
+			count(peer)
+		}
+	}
+	result.unknown = missingReplicas(sts, len(list.Items))
+	return result, nil
+}
 
-	result := &zoneStatusResult{tested: 0, notReady: 0, unknown: 0}
-
+// Missing replicas have unknown partitions and count against the requested budget.
+func missingReplicas(sts *appsv1.StatefulSet, observed int) int {
 	// replicas is the number of Pods created by the StatefulSet controller.
 	// Spec.Replicas - the desired number of pods as set from config or by a controller
 	// Status.Replicas - the number of pods created by the Stateful set
@@ -100,29 +132,5 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 		replicas = max(int(sts.Status.Replicas), int(*sts.Spec.Replicas))
 	}
 
-	matcher := zpdb.considerPod()
-
-	for _, pd := range list.Items {
-
-		// we do not consider pods which are in a different partition
-		if !matcher(&pd) {
-			continue
-		}
-
-		if pod.UID != pd.UID && !zpdb.isReady(&pd) {
-			// if a pod has recently been evicted then we assume it is not ready
-			// this is avoiding a possible race condition of concurrent eviction requests are occurring and an eviction has not yet caused a pod state change
-			result.notReady++
-		}
-
-		result.tested++
-	}
-
-	// we consider the pod as not ready if there should be a given replica count but it is not yet being found in the pods query
-	// note that the effect here is that we do not know which partition these other pods will be in, so we have to attribute them to this partition to be safe
-	if len(list.Items) < replicas {
-		result.unknown = replicas - len(list.Items)
-	}
-
-	return result, nil
+	return max(0, replicas-observed)
 }
