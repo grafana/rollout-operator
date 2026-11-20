@@ -1123,7 +1123,9 @@ k8s.io/kube-openapi/pkg/validation/spec
 k8s.io/utils/buffer
 k8s.io/utils/clock
 k8s.io/utils/dump
+k8s.io/utils/internal/third_party/forked/golang/golang-lru
 k8s.io/utils/internal/third_party/forked/golang/net
+k8s.io/utils/lru
 k8s.io/utils/net
 k8s.io/utils/ptr
 k8s.io/utils/trace

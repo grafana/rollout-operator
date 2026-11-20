@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -20,6 +21,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/lru"
 
 	"github.com/grafana/rollout-operator/pkg/util"
 )
@@ -43,7 +45,24 @@ func NewMaxUnavailableZeroOverride(maxUnavailable int) MaxUnavailableZeroOverrid
 	return MaxUnavailableZeroOverride{set: true, maxUnavailable: maxUnavailable}
 }
 
+const denialReuseWindow = 15 * time.Second
+
+type denialKey struct {
+	pod, owner types.UID
+	// The observer replaces this immutable config on an accepted update or recreation.
+	budget         *config
+	maxUnavailable int
+}
+
+type budgetDenial struct {
+	reason  string
+	expires time.Time
+}
+
 type EvictionController struct {
+	denials *lru.Cache
+	now     func() time.Time
+
 	// a lock used to control finding a specific named lock
 	lock sync.RWMutex
 
@@ -69,6 +88,8 @@ func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynami
 	podObserver := newPodObserver(podsFactory, cfgObserver, logger)
 
 	return &EvictionController{
+		denials:     lru.New(4096),
+		now:         time.Now,
 		locks:       make(map[string]*sync.Mutex, 5),
 		lock:        sync.RWMutex{},
 		cfgObserver: cfgObserver,
@@ -158,7 +179,7 @@ func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace str
 		},
 	}
 
-	response := c.HandlePodEvictionRequest(ctx, request, override)
+	response := c.handlePodEvictionRequest(ctx, request, override, false)
 	if !response.Allowed {
 		return errors.New(response.Result.Message)
 	}
@@ -175,6 +196,12 @@ func (c *EvictionController) HasPartitionAwarePdb(pod *corev1.Pod) (bool, error)
 }
 
 func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1.AdmissionReview, maxUnavailableOverride MaxUnavailableZeroOverride) *v1.AdmissionResponse {
+	return c.handlePodEvictionRequest(ctx, ar, maxUnavailableOverride, true)
+}
+
+func (c *EvictionController) handlePodEvictionRequest(ctx context.Context, ar v1.AdmissionReview, maxUnavailableOverride MaxUnavailableZeroOverride, webhook bool) *v1.AdmissionResponse {
+	// Include time spent waiting for the budget lock in the age of a decision.
+	expires := c.now().Add(denialReuseWindow)
 	logger, _ := spanlogger.New(ctx, c.logger, "admission.PodEviction()", c.resolver)
 	defer logger.Finish()
 
@@ -335,6 +362,36 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	// include the number of zones we will be considering
 	request.log.SetSpanAndLogTag("zones", len(allStatefulSets.Items))
 
+	var dryRun bool
+	if webhook {
+		dryRun, err = request.isDryRun()
+		if err != nil {
+			c.metrics.EvictionRequests.WithLabelValues("invalid-request", "400").Inc()
+			return request.denyWithReason(err.Error(), http.StatusBadRequest)
+		}
+	}
+	reuseDenial := webhook && !dryRun
+	key := denialKey{pod: pod.UID, owner: sts.UID, budget: pdbConfig, maxUnavailable: maxUnavailable}
+	if reuseDenial {
+		if item, ok := c.denials.Get(key); ok {
+			denial := item.(budgetDenial)
+			if c.now().Before(denial.expires) {
+				level.Info(request.log).Log("msg", logDenyMesg, "reason", "reused budget denial", "err", denial.reason)
+				c.metrics.ReusedDenials.Inc()
+				c.metrics.EvictionRequests.WithLabelValues("denied", "429").Inc()
+				return request.denyWithReason(denial.reason, http.StatusTooManyRequests)
+			}
+			c.denials.Remove(key)
+		}
+	}
+	denyBudget := func(err error) *v1.AdmissionResponse {
+		if reuseDenial && c.now().Before(expires) {
+			c.denials.Add(key, budgetDenial{reason: err.Error(), expires: expires})
+		}
+		c.metrics.EvictionRequests.WithLabelValues("denied", "429").Inc()
+		return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
+	}
+
 	var pdb validator
 
 	if len(partition) > 0 {
@@ -361,20 +418,20 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		if err = pdb.accumulateResult(&otherSts, result); err != nil {
 			// opportunity to fail fast
 			level.Info(request.log).Log("msg", logDenyMesg, "err", err, "sts", otherSts.Name)
-			c.metrics.EvictionRequests.WithLabelValues("denied", fmt.Sprintf("%d", http.StatusTooManyRequests)).Inc()
-			return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
+			return denyBudget(err)
 		}
 
 	}
 
 	if err = pdb.validate(maxUnavailable); err != nil {
 		level.Info(request.log).Log("msg", logDenyMesg, "reason", "zpdb exceeded", "err", err)
-		c.metrics.EvictionRequests.WithLabelValues("denied", fmt.Sprintf("%d", http.StatusTooManyRequests)).Inc()
-		return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
+		return denyBudget(err)
 	}
 
-	// mark the pod as recently evicted
-	c.podObserver.recordEviction(pod)
+	// A dry run leaves the pod in place, so it must not reserve disruption capacity.
+	if !dryRun {
+		c.podObserver.recordEviction(pod)
+	}
 
 	level.Info(request.log).Log("msg", logAllowMesg, "reason", pdb.successMessage())
 	c.metrics.EvictionRequests.WithLabelValues("allowed", fmt.Sprintf("%d", http.StatusOK)).Inc()

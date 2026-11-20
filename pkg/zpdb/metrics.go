@@ -6,6 +6,7 @@ import (
 )
 
 type Metrics struct {
+	ReusedDenials          prometheus.Counter
 	ConfigurationsObserved *prometheus.CounterVec
 	EvictionRequests       *prometheus.CounterVec
 	InFlightRequests       *prometheus.GaugeVec
@@ -14,6 +15,10 @@ type Metrics struct {
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
+		ReusedDenials: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Name: "rollout_operator_zpdb_reused_denials_total",
+			Help: "Number of eviction requests denied using a recent budget decision.",
+		}),
 		ConfigurationsObserved: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_zpdb_configurations_observed_total",
 			Help: "Number of zpdb configurations observed by the configuration controller.",

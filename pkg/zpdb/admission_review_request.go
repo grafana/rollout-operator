@@ -1,6 +1,7 @@
 package zpdb
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -16,6 +17,21 @@ type admissionReviewRequest struct {
 	log    *spanlogger.SpanLogger
 	req    v1.AdmissionReview
 	client k8sClient
+}
+
+// isDryRun also checks the eviction body, where clients such as kubectl drain
+// can specify dryRun without setting the admission request flag.
+func (r *admissionReviewRequest) isDryRun() (bool, error) {
+	if r.req.Request.DryRun != nil && *r.req.Request.DryRun {
+		return true, nil
+	}
+	var eviction struct {
+		DeleteOptions *metav1.DeleteOptions `json:"deleteOptions"`
+	}
+	if err := json.Unmarshal(r.req.Request.Object.Raw, &eviction); err != nil {
+		return false, fmt.Errorf("invalid eviction object: %w", err)
+	}
+	return eviction.DeleteOptions != nil && len(eviction.DeleteOptions.DryRun) > 0, nil
 }
 
 // canIgnorePDBForPod returns true for pod conditions that allow the pod to be deleted without checking PDBs.

@@ -592,6 +592,8 @@ The `ZoneAwarePodDisruptionBudget` is provided as a custom resource.
 
 A pod eviction webhook is registered for approving voluntary pod eviction requests, and a validating webhook is registered for validating `ZPDB` objects.
 
+When a budget denies a voluntary eviction, retries for the same Pod and budget can receive the same denial for up to 15 seconds from the original request. This can delay a retry after a peer recovers. Dry runs and operator-initiated rollouts always evaluate the budget afresh.
+
 The following is required to enable the `ZoneAwarePodDisruptionBudget`;
 
 - a custom resource definition for the `ZoneAwarePodDisruptionBudget` kind - a sample is provided in [development](./development/zone-aware-pod-disruption-budget-custom-resource-definition.yaml)
