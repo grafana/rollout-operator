@@ -195,6 +195,14 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		return request.denyWithReason(err.Error(), http.StatusBadRequest)
 	}
 
+	// A dry run leaves the pod in place. Clients set dryRun in the admission request or the eviction body.
+	dryRun, dryRunErr := request.isDryRun()
+	if dryRunErr != nil {
+		level.Warn(request.log).Log("msg", logDenyMesg, "reason", "not a valid create pod eviction request", "err", dryRunErr)
+		c.metrics.EvictionRequests.WithLabelValues("invalid-request", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
+		return request.denyWithReason(dryRunErr.Error(), http.StatusBadRequest)
+	}
+
 	// Before making any Kubernetes API calls, check whether this pod is in zpdb scope at all according to the
 	// pod informer cache. Scope is decided from labels (see config.matchesPod), which - unlike pod readiness -
 	// essentially never change on a running pod, so a stale cached copy is safe to use for this decision. We
@@ -373,8 +381,11 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
 	}
 
-	// mark the pod as recently evicted
-	c.podObserver.recordEviction(pod)
+	// mark the pod as recently evicted, unless this is a dry run, which leaves the pod in place and so must not
+	// reserve disruption capacity
+	if !dryRun {
+		c.podObserver.recordEviction(pod)
+	}
 
 	level.Info(request.log).Log("msg", logAllowMesg, "reason", pdb.successMessage())
 	c.metrics.EvictionRequests.WithLabelValues("allowed", fmt.Sprintf("%d", http.StatusOK)).Inc()
