@@ -100,6 +100,8 @@ type config struct {
 	useZoneTracker           bool
 	zoneTrackerConfigMapName string
 
+	zpdbCachedDenialLiveCheckInterval time.Duration
+
 	deprecatedZPDBPodReadyAnnotationPatchTimeout time.Duration
 }
 
@@ -144,6 +146,7 @@ func (cfg *config) register(fs *flag.FlagSet) {
 
 	fs.BoolVar(&cfg.useZoneTracker, "use-zone-tracker", false, "Use the zone tracker to prevent simultaneous downscales in different zones")
 	fs.StringVar(&cfg.zoneTrackerConfigMapName, "zone-tracker.config-map-name", "rollout-operator-zone-tracker", "The name of the ConfigMap to use for the zone tracker")
+	fs.DurationVar(&cfg.zpdbCachedDenialLiveCheckInterval, "zpdb.cached-denial-live-check-interval", 30*time.Second, "After a ZPDB denies an eviction using live reads, retries for the same Pod can be denied from the operator's cache for up to this long. A recovery the cache sees is acted on at the next retry, so this only bounds the delay when the cache lags the API. 0 disables cached denials, so every eviction request uses live reads.")
 	fs.DurationVar(&cfg.deprecatedZPDBPodReadyAnnotationPatchTimeout, deprecatedZPDBPodReadyAnnotationPatchTimeoutFlag, 5*time.Second, "Deprecated: accepted for compatibility and has no effect.")
 }
 
@@ -195,6 +198,9 @@ func (cfg config) validate() error {
 	}
 	if cfg.serverTLSRequestTimeout <= 0 {
 		return errors.New("-server-tls.request-timeout must be positive")
+	}
+	if cfg.zpdbCachedDenialLiveCheckInterval < 0 {
+		return errors.New("-zpdb.cached-denial-live-check-interval cannot be negative")
 	}
 	if err := cfg.clusterValidationCfg.Validate("http", cfg.kubeNamespace); err != nil {
 		return err
@@ -407,6 +413,7 @@ func runOperator(
 	}
 	evictionController := zpdb.NewEvictionController(evictionKubeClient, dynamicClient, cfg.kubeNamespace, podsFactory, logger, zpdbMetrics)
 	evictionController.UsePodMetadata(evictionMetadata)
+	evictionController.SetCachedDenialLiveCheckInterval(cfg.zpdbCachedDenialLiveCheckInterval)
 	if cfg.allowMissingCRDs {
 		evictionController.AllowMissingCRDs()
 	}

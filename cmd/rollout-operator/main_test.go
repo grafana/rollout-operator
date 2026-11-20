@@ -145,6 +145,13 @@ func TestConfigValidate(t *testing.T) {
 		"qps<=0 disables limiting so burst is not validated": {
 			modify: func(c *config) { c.kubeClientQPS = 0; c.kubeClientBurst = 0 },
 		},
+		"zpdb.cached-denial-live-check-interval negative is rejected": {
+			modify:  func(c *config) { c.zpdbCachedDenialLiveCheckInterval = -time.Second },
+			wantErr: "-zpdb.cached-denial-live-check-interval cannot be negative",
+		},
+		"zpdb.cached-denial-live-check-interval zero disables cached denials": {
+			modify: func(c *config) { c.zpdbCachedDenialLiveCheckInterval = 0 },
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := newValidConfig(t)
@@ -169,6 +176,8 @@ func TestConfigDefaults(t *testing.T) {
 	// these back to 0 would silently turn off client-side throttling, so assert them explicitly.
 	require.Equal(t, float64(5), cfg.kubeClientQPS)
 	require.Equal(t, 10, cfg.kubeClientBurst)
+	// Cached denials are on by default, bounding a lagging cache's extra delay to 30s per Pod.
+	require.Equal(t, 30*time.Second, cfg.zpdbCachedDenialLiveCheckInterval)
 }
 
 func TestDeprecatedZPDBReadyAnnotationPatchTimeoutFlag(t *testing.T) {

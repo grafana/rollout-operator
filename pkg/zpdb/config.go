@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sync"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -55,6 +56,36 @@ type config struct {
 
 	// an optional delay before a pod in another zone for the same partition can be evicted
 	crossZoneEvictionDelay time.Duration
+
+	// partitions memoizes podPartition, whose regex dominates cached budget checks. Nil disables it.
+	partitions *partitionMemo
+}
+
+// partitionMemo maps Pod names to partitions. A partition depends only on the name and its config's regex,
+// and a changed config gets a new memo. It holds the names of the zones' Pods, which StatefulSets keep
+// stable, so it stays bounded.
+type partitionMemo struct {
+	mu     sync.RWMutex
+	byName map[string]string
+}
+
+func (m *partitionMemo) get(name string) (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	partition, ok := m.byName[name]
+	return partition, ok
+}
+
+func (m *partitionMemo) set(name, partition string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.byName[name] = partition
 }
 
 // matchesPod returns true if this Config label Selector matches this Pod.
@@ -94,9 +125,14 @@ func (c *config) podPartition(pod metav1.Object) (string, error) {
 	if c.podNamePartition == nil {
 		return "", nil
 	}
+	if partition, ok := c.partitions.get(pod.GetName()); ok {
+		return partition, nil
+	}
 
 	zone := c.podNamePartition.FindStringSubmatch(pod.GetName())
 	if len(zone) > c.podNamePartitionRegexGroup && len(zone[c.podNamePartitionRegexGroup]) > 0 {
+		// Only matches are memoized, so a name that doesn't match is still reported on every check.
+		c.partitions.set(pod.GetName(), zone[c.podNamePartitionRegexGroup])
 		return zone[c.podNamePartitionRegexGroup], nil
 	}
 	return "", errors.New("failed to extract partition from pod Name regular expression")
@@ -172,6 +208,7 @@ func ParseAndValidate(obj *unstructured.Unstructured) (*config, error) {
 		maxUnavailable: 1,
 		name:           obj.GetName(),
 		generation:     obj.GetGeneration(),
+		partitions:     &partitionMemo{byName: map[string]string{}},
 	}
 
 	maxUnavailable, maxUnavailableFound := mapSpec[FieldMaxUnavailable]

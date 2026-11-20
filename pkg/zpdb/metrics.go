@@ -10,12 +10,17 @@ type Metrics struct {
 	EvictionRequests       *prometheus.CounterVec
 	InFlightRequests       *prometheus.GaugeVec
 	ConfigObserverReady    *prometheus.GaugeVec
+	CachedDenials          prometheus.Counter
 
 	PartitionFullListFallbacks prometheus.Counter
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
+		CachedDenials: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Name: "rollout_operator_zpdb_cached_denials_total",
+			Help: "Number of eviction requests denied from the operator's cache without live Kubernetes API reads.",
+		}),
 		ConfigurationsObserved: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "rollout_operator_zpdb_configurations_observed_total",
 			Help: "Number of zpdb configurations observed by the configuration controller.",

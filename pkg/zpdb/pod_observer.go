@@ -6,17 +6,29 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/informers"
+	appslisters "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	k8cache "k8s.io/client-go/tools/cache"
+
+	"github.com/grafana/rollout-operator/pkg/util"
 )
+
+// podsByNameLabel indexes Pods by namespace and "name" label, which is how the live path selects a zone's Pods.
+const podsByNameLabel = "zpdb-name-label"
 
 // An podObserver listens for pod changes, invalidating the pod eviction cache on a pod state change.
 type podObserver struct {
 	podsFactory    informers.SharedInformerFactory
 	podLister      corelisters.PodLister
 	podsInformer   k8cache.SharedIndexInformer
+	stsLister      appslisters.StatefulSetLister
+	stsInformer    k8cache.SharedIndexInformer
+	podsIndexed    bool
 	podEvictCache  *podEvictionCache
 	configObserver *configObserver
 	logger         log.Logger
@@ -28,18 +40,67 @@ type podObserver struct {
 // each would mean two watches and two in-memory copies of every pod.
 func newPodObserver(podsFactory informers.SharedInformerFactory, configObserver *configObserver, logger log.Logger) *podObserver {
 	podsInformer := podsFactory.Core().V1().Pods()
+	// Registering the StatefulSet informer before the factory starts lets the shared Start call run it.
+	stsInformer := podsFactory.Apps().V1().StatefulSets()
 
 	c := &podObserver{
 		podsFactory:    podsFactory,
 		podLister:      podsInformer.Lister(),
 		podsInformer:   podsInformer.Informer(),
+		stsLister:      stsInformer.Lister(),
+		stsInformer:    stsInformer.Informer(),
 		podEvictCache:  newPodEvictionCache(),
 		configObserver: configObserver,
 		logger:         logger,
 		stopCh:         make(chan struct{}),
 	}
 
+	// Without the index, cached zone reads filter every Pod in the namespace.
+	err := c.podsInformer.AddIndexers(k8cache.Indexers{podsByNameLabel: func(obj any) ([]string, error) {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			return nil, nil
+		}
+		name, ok := pod.Labels["name"]
+		if !ok {
+			return nil, nil
+		}
+		return []string{pod.Namespace + "/" + name}, nil
+	}})
+	if err != nil {
+		level.Warn(logger).Log("msg", "unable to index pods by name label, cached zone reads will scan the namespace", "err", err)
+	} else {
+		c.podsIndexed = true
+	}
+
 	return c
+}
+
+// cacheSynced reports whether the caches behind cached denials have synced. Startup doesn't wait for the
+// StatefulSet cache, so the live path serves until it has.
+func (c *podObserver) cacheSynced() bool {
+	return c.podsInformer.HasSynced() && c.stsInformer.HasSynced()
+}
+
+// cachedZonePods returns the cached Pods that the live path would list for the StatefulSet's zone.
+// The Pods are shared with the informer and must not be modified.
+func (c *podObserver) cachedZonePods(sts *appsv1.StatefulSet) ([]*corev1.Pod, error) {
+	name := sts.Spec.Template.Labels["name"]
+	if !c.podsIndexed {
+		selector := labels.NewSelector().Add(util.MustNewLabelsRequirement("name", selection.Equals, []string{name}))
+		return c.podLister.Pods(sts.Namespace).List(selector)
+	}
+	objs, err := c.podsInformer.GetIndexer().ByIndex(podsByNameLabel, sts.Namespace+"/"+name)
+	if err != nil {
+		return nil, err
+	}
+	pods := make([]*corev1.Pod, 0, len(objs))
+	for _, obj := range objs {
+		if pod, ok := obj.(*corev1.Pod); ok {
+			pods = append(pods, pod)
+		}
+	}
+	return pods, nil
 }
 
 func (c *podObserver) start() error {

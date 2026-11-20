@@ -28,7 +28,7 @@ func newTestValidatorPartitionAware(delay time.Duration) (*validatorPartitionAwa
 		},
 	}
 	logger, _ := spanlogger.New(context.Background(), log.NewNopLogger(), "test", util.NoTenantResolver{})
-	v := newValidatorPartitionAware(sts, "0", 3, cfg, evictionCache, logger)
+	v := newValidatorPartitionAware(sts, "0", 3, cfg, evictionCache, logger, time.Now)
 	return v, evictionCache
 }
 

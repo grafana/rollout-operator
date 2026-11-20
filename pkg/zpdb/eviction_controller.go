@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -60,6 +61,11 @@ type EvictionController struct {
 	partitionPods *partitionPodReader
 
 	resolver spanlogger.TenantResolver
+
+	now func() time.Time
+	// liveDeadlines bounds how long each Pod can be denied from the cache before a retry goes live.
+	liveDeadlines     *liveDeadlines
+	liveCheckInterval time.Duration
 }
 
 func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, podsFactory informers.SharedInformerFactory, logger log.Logger, metrics *Metrics) *EvictionController {
@@ -79,7 +85,17 @@ func NewEvictionController(kubeClient kubernetes.Interface, dynamicClient dynami
 		metrics:     metrics,
 		logger:      logger,
 		resolver:    util.NoTenantResolver{},
+
+		now:               time.Now,
+		liveDeadlines:     newLiveDeadlines(defaultLiveDeadlineCapacity),
+		liveCheckInterval: defaultLiveCheckInterval,
 	}
+}
+
+// SetCachedDenialLiveCheckInterval sets how long a Pod's retries can be denied from the cache after a
+// live budget denial. Zero disables cached denials. Call before the controller serves requests.
+func (c *EvictionController) SetCachedDenialLiveCheckInterval(interval time.Duration) {
+	c.liveCheckInterval = interval
 }
 
 // AllowMissingCRDs permits bootstrap before ZPDB protection is installed. Call before Start.
@@ -160,7 +176,7 @@ func (c *EvictionController) MarkPodAsDeleted(ctx context.Context, namespace str
 		},
 	}
 
-	response := c.HandlePodEvictionRequest(ctx, request, override)
+	response := c.handlePodEvictionRequest(ctx, request, override, false)
 	if !response.Allowed {
 		return errors.New(response.Result.Message)
 	}
@@ -177,6 +193,14 @@ func (c *EvictionController) HasPartitionAwarePdb(pod *corev1.Pod) (bool, error)
 }
 
 func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1.AdmissionReview, maxUnavailableOverride MaxUnavailableZeroOverride) *v1.AdmissionResponse {
+	return c.handlePodEvictionRequest(ctx, ar, maxUnavailableOverride, true)
+}
+
+// handlePodEvictionRequest serves both webhook requests, which can be denied from the cache, and the
+// rollout controller's requests, which always use live reads.
+func (c *EvictionController) handlePodEvictionRequest(ctx context.Context, ar v1.AdmissionReview, maxUnavailableOverride MaxUnavailableZeroOverride, webhook bool) *v1.AdmissionResponse {
+	// A live budget denial's cache window starts here, so time spent waiting for the budget lock counts.
+	start := c.now()
 	logger, _ := spanlogger.New(ctx, c.logger, "admission.PodEviction()", c.resolver)
 	defer logger.Finish()
 
@@ -204,22 +228,31 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		c.metrics.EvictionRequests.WithLabelValues("invalid-request", fmt.Sprintf("%d", http.StatusBadRequest)).Inc()
 		return request.denyWithReason(dryRunErr.Error(), http.StatusBadRequest)
 	}
+	// A dry run asks whether an eviction can proceed now, so it always uses live reads.
+	cacheable := webhook && !dryRun
 
 	// Before making any Kubernetes API calls, check whether this pod is in zpdb scope at all according to the
 	// pod informer cache. Scope is decided from labels (see config.matchesPod), which - unlike pod readiness -
-	// essentially never change on a running pod, so a stale cached copy is safe to use for this decision. We
-	// deliberately read nothing else from the cached copy: its Status may be stale, so it must never be used
-	// for anything beyond this label match. If the cache says the pod is out of scope, we can allow the
-	// eviction immediately: Kubernetes will still apply any other PDB that covers the pod, and an out-of-scope
-	// pod is allowed here regardless of its readiness anyway, so skipping the readiness check below for it
-	// changes nothing about the outcome. Otherwise - the pod is in scope, the cache found no match for it
-	// (ambiguous, more than one zpdb matched), or the pod isn't in the cache at all - fall through to the live
-	// path below exactly as before.
+	// essentially never change on a running pod, so a stale cached copy is safe to use for this decision. This
+	// label match is the only decision that allows an eviction from the cached copy: its Status may be stale.
+	// If the cache says the pod is out of scope, we can allow the eviction immediately: Kubernetes will still
+	// apply any other PDB that covers the pod, and an out-of-scope pod is allowed here regardless of its
+	// readiness anyway, so skipping the readiness check below for it changes nothing about the outcome. An
+	// in-scope pod may instead be denied from the cache (see denyFromCache), since stale state can only delay
+	// an eviction. Otherwise - the cache found no match for the pod (ambiguous, more than one zpdb matched),
+	// the pod isn't in the cache at all, or the cache doesn't show the budget exceeded - fall through to the
+	// live path below.
 	if cachedPod, cacheErr := c.podObserver.podLister.Pods(request.req.Request.Namespace).Get(request.req.Request.Name); cacheErr == nil {
-		if pdbConfig, findErr := c.cfgObserver.pdbCache.find(cachedPod); findErr == nil && pdbConfig == nil {
+		pdbConfig, findErr := c.cfgObserver.pdbCache.find(cachedPod)
+		if findErr == nil && pdbConfig == nil {
 			level.Debug(request.log).Log("msg", logAllowMesg, "reason", "pod is not within a zpdb scope")
 			c.metrics.EvictionRequests.WithLabelValues("pod-not-in-scope", fmt.Sprintf("%d", http.StatusOK)).Inc()
 			return request.allow()
+		}
+		if findErr == nil && cacheable {
+			if response, denied := c.denyFromCache(&request, cachedPod, pdbConfig, start); denied {
+				return response
+			}
 		}
 	}
 
@@ -345,16 +378,10 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	// include the number of zones we will be considering
 	request.log.SetSpanAndLogTag("zones", len(allStatefulSets.Items))
 
-	var pdb validator
-
 	if len(partition) > 0 {
-		// partition mode - the pod tallies are applied to all pods in other zones which relate to this partition
 		request.client.partitionPods = c.partitionPods
-		pdb = newValidatorPartitionAware(sts, partition, len(allStatefulSets.Items), pdbConfig, c.podObserver.podEvictCache, request.log)
-	} else {
-		// zone mode - we allow the eviction if no other zone is disrupted and the max unavailable within the eviction zone is not exceeded
-		pdb = newValidatorZoneAware(sts, len(allStatefulSets.Items), c.podObserver.podEvictCache)
 	}
+	pdb := c.newValidator(sts, partition, len(allStatefulSets.Items), pdbConfig, request.log)
 
 	for _, otherSts := range allStatefulSets.Items {
 		// test on whether we exclude the eviction pod's StatefulSet from the assessment
@@ -372,6 +399,9 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 		if err = pdb.accumulateResult(&otherSts, result); err != nil {
 			// opportunity to fail fast
 			level.Info(request.log).Log("msg", logDenyMesg, "err", err, "sts", otherSts.Name)
+			if cacheable {
+				c.startCachedDenials(pod, start)
+			}
 			c.metrics.EvictionRequests.WithLabelValues("denied", fmt.Sprintf("%d", http.StatusTooManyRequests)).Inc()
 			return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
 		}
@@ -380,6 +410,9 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 
 	if err = pdb.validate(maxUnavailable); err != nil {
 		level.Info(request.log).Log("msg", logDenyMesg, "reason", "zpdb exceeded", "err", err)
+		if cacheable {
+			c.startCachedDenials(pod, start)
+		}
 		c.metrics.EvictionRequests.WithLabelValues("denied", fmt.Sprintf("%d", http.StatusTooManyRequests)).Inc()
 		return request.denyWithReason(err.Error(), http.StatusTooManyRequests)
 	}
@@ -389,6 +422,7 @@ func (c *EvictionController) HandlePodEvictionRequest(ctx context.Context, ar v1
 	if !dryRun {
 		c.podObserver.recordEviction(pod)
 	}
+	c.liveDeadlines.delete(pod.UID)
 
 	level.Info(request.log).Log("msg", logAllowMesg, "reason", pdb.successMessage())
 	c.metrics.EvictionRequests.WithLabelValues("allowed", fmt.Sprintf("%d", http.StatusOK)).Inc()

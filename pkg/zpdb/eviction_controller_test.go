@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-logfmt/logfmt"
 	"github.com/google/uuid"
@@ -121,6 +122,7 @@ func newTestContext(t *testing.T, request admissionv1.AdmissionReview, pdbRawCon
 	testCtx.kubeClient = fake.NewClientset(objects...)
 	testCtx.controller = NewEvictionController(testCtx.kubeClient, newFakeDynamicClient(), testNamespace, newTestPodsFactory(testCtx.kubeClient), testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
+	waitForCacheSync(t, testCtx.controller)
 
 	if pdbRawConfig != nil {
 		_, _, _ = testCtx.controller.cfgObserver.pdbCache.addOrUpdateRaw(pdbRawConfig)
@@ -139,11 +141,19 @@ func newTestContextWithoutAdmissionReview(t *testing.T, pdbRawConfig *unstructur
 	kubeClient := fake.NewClientset(objects...)
 	testCtx.controller = NewEvictionController(kubeClient, newFakeDynamicClient(), testNamespace, newTestPodsFactory(kubeClient), testCtx.logs, zpdbMetrics)
 	require.NoError(t, testCtx.controller.Start())
+	waitForCacheSync(t, testCtx.controller)
 
 	if pdbRawConfig != nil {
 		_, _, _ = testCtx.controller.cfgObserver.pdbCache.addOrUpdateRaw(pdbRawConfig)
 	}
 	return testCtx
+}
+
+// waitForCacheSync waits for the StatefulSet cache, which Start doesn't wait for. Otherwise its initial
+// list can land among the actions a test records, or hit a reactor the test installs after Start.
+func waitForCacheSync(t testing.TB, c *EvictionController) {
+	t.Helper()
+	require.Eventually(t, c.podObserver.cacheSynced, 10*time.Second, time.Millisecond)
 }
 
 func (c *testContext) assertDenyResponse(t *testing.T, reason string, statusCode int) {
@@ -486,6 +496,8 @@ func TestPodEviction_ReusesStatefulSetListForOwner(t *testing.T) {
 
 	testCtx := newTestContext(t, createBasicEvictionAdmissionReview(testPodZoneA0, testNamespace), newPDBMaxUnavailable(1, rolloutGroupValue), objects...)
 	defer testCtx.controller.Stop()
+	// Drop the StatefulSet informer's startup list and watch, which share this client.
+	testCtx.kubeClient.ClearActions()
 	testCtx.assertAllowResponse(t)
 
 	var statefulSetActions []string

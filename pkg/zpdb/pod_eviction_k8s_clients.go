@@ -81,12 +81,7 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 	opts := metav1.ListOptions{LabelSelector: podsSelector.String()}
 	matcher := zpdb.considerPod()
 	result := &zoneStatusResult{}
-	count := func(peer *corev1.Pod) {
-		result.tested++
-		if pod.UID != peer.UID && !zpdb.isReady(peer) {
-			result.notReady++
-		}
-	}
+	count := func(peer *corev1.Pod) { countPeer(result, pod, zpdb, peer) }
 
 	if a.partitionPods != nil {
 		peers, total, ok, err := a.partitionPods.matchingPods(a.ctx, sts.Namespace, opts, matcher)
@@ -115,6 +110,29 @@ func (a *k8sClient) podsNotRunningAndReady(sts *appsv1.StatefulSet, pod *corev1.
 	}
 	result.unknown = missingReplicas(sts, len(list.Items))
 	return result, nil
+}
+
+// countPeer adds a peer that the validator considers to the zone's tally. The eviction Pod itself counts as
+// tested but never as not ready. The peer may be shared with the informer cache, so it must not be modified.
+func countPeer(result *zoneStatusResult, pod *corev1.Pod, zpdb validator, peer *corev1.Pod) {
+	result.tested++
+	if pod.UID != peer.UID && !zpdb.isReady(peer) {
+		result.notReady++
+	}
+}
+
+// zoneStatus tallies a zone's Pods from the informer cache, as podsNotRunningAndReady does from live reads.
+// The Pods are shared with the informer, so they must not be modified.
+func zoneStatus(sts *appsv1.StatefulSet, pod *corev1.Pod, zpdb validator, pods []*corev1.Pod) *zoneStatusResult {
+	result := &zoneStatusResult{}
+	matcher := zpdb.considerPod()
+	for _, peer := range pods {
+		if matcher(peer) {
+			countPeer(result, pod, zpdb, peer)
+		}
+	}
+	result.unknown = missingReplicas(sts, len(pods))
+	return result
 }
 
 // Missing replicas have unknown partitions and count against the requested budget.

@@ -23,9 +23,10 @@ type validatorPartitionAware struct {
 	pdbConfig     *config
 	evictionCache *podEvictionCache
 	log           *spanlogger.SpanLogger
+	now           func() time.Time
 }
 
-func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config, evictionCache *podEvictionCache, log *spanlogger.SpanLogger) *validatorPartitionAware {
+func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config, evictionCache *podEvictionCache, log *spanlogger.SpanLogger, now func() time.Time) *validatorPartitionAware {
 	partitionMatcher := func(pd metav1.Object) bool {
 		thisPartition, err := pdbConfig.podPartition(pd)
 		if err != nil {
@@ -46,6 +47,7 @@ func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones
 		log:           log,
 		result:        &zoneStatusResult{},
 		matcher:       partitionMatcher,
+		now:           now,
 	}
 }
 
@@ -96,7 +98,7 @@ func (v *validatorPartitionAware) isReady(pod *corev1.Pod) bool {
 		return true
 	}
 
-	now := time.Now()
+	now := v.now()
 	since, status, found := podReadyTransitionTime(pod)
 	if found && now.After(since.Add(v.pdbConfig.crossZoneEvictionDelay)) {
 		return true
