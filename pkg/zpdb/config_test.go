@@ -73,6 +73,20 @@ func TestPodPartitionZoneMatch(t *testing.T) {
 	}
 }
 
+// Parsed configs memoize partitions by Pod name. The second pass reads the memo, which must give the regex's
+// answer, while a name the regex doesn't match must keep failing rather than be memoized.
+func TestConfig_PodPartition_Memoized(t *testing.T) {
+	cfg, err := ParseAndValidate(rawConfig("test", rolloutGroupValue, 1, 1, `^ingester-zone-[a-z]-([0-9]+)$`))
+	require.NoError(t, err)
+	for range 2 {
+		p, err := cfg.podPartition(newPodCfgTest("ingester-zone-a-7"))
+		require.NoError(t, err)
+		require.Equal(t, "7", p)
+		_, err = cfg.podPartition(newPodCfgTest("ingester-zone-a"))
+		require.Error(t, err)
+	}
+}
+
 func TestOptionalRegexGrouping(t *testing.T) {
 	pdbCfg := config{
 		podNamePartition:           regexp.MustCompile(`^[a-z\-]+-zone-[a-z]-(partition\-)?([0-9]+)$`),
