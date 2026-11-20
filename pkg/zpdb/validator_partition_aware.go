@@ -9,6 +9,7 @@ import (
 	"github.com/grafana/dskit/spanlogger"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/grafana/rollout-operator/pkg/util"
 )
@@ -25,13 +26,13 @@ type validatorPartitionAware struct {
 }
 
 func newValidatorPartitionAware(sts *appsv1.StatefulSet, partition string, zones int, pdbConfig *config, evictionCache *podEvictionCache, log *spanlogger.SpanLogger) *validatorPartitionAware {
-	partitionMatcher := func(pd *corev1.Pod) bool {
+	partitionMatcher := func(pd metav1.Object) bool {
 		thisPartition, err := pdbConfig.podPartition(pd)
 		if err != nil {
 			// the partition name was successfully extracted from the pod being evicted
 			// so if this regex has failed then the assumption is that it is not the same partition, as would have a different naming convention
 			// or the regex is too tightly defined
-			level.Error(log).Log("msg", "Unable to extract partition from pod name - check the pod partition name regex", "name", pd.Name)
+			level.Error(log).Log("msg", "Unable to extract partition from pod name - check the pod partition name regex", "name", pd.GetName())
 		}
 		return thisPartition == partition
 	}

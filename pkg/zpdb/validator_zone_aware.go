@@ -6,6 +6,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/grafana/rollout-operator/pkg/util"
 )
@@ -22,7 +23,7 @@ func newValidatorZoneAware(sts *appsv1.StatefulSet, zones int, evictionCache *po
 	return &validatorZoneAware{
 		sts:   sts,
 		zones: zones,
-		matcher: func(pod *corev1.Pod) bool {
+		matcher: func(pod metav1.Object) bool {
 			return true
 		},
 		evictionCache: evictionCache,

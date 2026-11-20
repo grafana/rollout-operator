@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-logfmt/logfmt"
@@ -61,6 +62,7 @@ type testContext struct {
 
 // A dummyLogger accumulates log lines into a slice so we can assert that certain logs were recorded
 type dummyLogger struct {
+	mu   sync.Mutex
 	logs []string
 }
 
@@ -79,6 +81,8 @@ func (d *dummyLogger) Log(keyVals ...interface{}) error {
 	}
 	_ = enc.EndRecord()
 
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.logs = append(d.logs, buf.String())
 	return nil
 }
@@ -87,6 +91,8 @@ func (d *dummyLogger) Log(keyVals ...interface{}) error {
 // Note that we do not care about the ordering of the elements
 func (d *dummyLogger) assertHasLog(t *testing.T, elements []string) {
 
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for _, line := range d.logs {
 		found := true
 		for _, element := range elements {

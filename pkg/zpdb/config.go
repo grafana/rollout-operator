@@ -9,6 +9,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 )
@@ -89,12 +90,12 @@ func (c *config) maxUnavailablePods(sts *appsv1.StatefulSet) int {
 
 // podPartition returns the partition name that a Pod covers.
 // Note that if no podNamePartitionRegex has been set then an empty string will be returned.
-func (c *config) podPartition(pod *corev1.Pod) (string, error) {
+func (c *config) podPartition(pod metav1.Object) (string, error) {
 	if c.podNamePartition == nil {
 		return "", nil
 	}
 
-	zone := c.podNamePartition.FindStringSubmatch(pod.Name)
+	zone := c.podNamePartition.FindStringSubmatch(pod.GetName())
 	if len(zone) > c.podNamePartitionRegexGroup && len(zone[c.podNamePartitionRegexGroup]) > 0 {
 		return zone[c.podNamePartitionRegexGroup], nil
 	}
