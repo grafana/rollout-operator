@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -37,4 +38,26 @@ func TestNewDemoController(t *testing.T) {
 	require.Equal(t, status.PhaseProgressing, byName["store-gateway"].Members[1].Phase)
 
 	require.Equal(t, status.PhaseComplete, byName["compactor"].Phase)
+}
+
+func TestDemoBlockers(t *testing.T) {
+	c, err := newDemoController()
+	require.NoError(t, err)
+	defer c.Stop()
+	go c.Run()
+	require.Eventually(t, func() bool {
+		snap, err := c.Snapshot(context.Background())
+		if err != nil {
+			return false
+		}
+		reasons := map[string]bool{}
+		for _, group := range snap.Groups {
+			for _, member := range group.Members {
+				for _, blocker := range member.Blockers {
+					reasons[blocker.Reason] = true
+				}
+			}
+		}
+		return reasons["maxUnavailable budget exhausted: 1 unavailable, limit 1"] && reasons["waiting for pod to terminate"] && reasons["ZPDB denied deletion: demo: another zone has a pending eviction"]
+	}, time.Second, 10*time.Millisecond)
 }

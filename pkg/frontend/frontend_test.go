@@ -259,3 +259,28 @@ func TestNewRequiresReader(t *testing.T) {
 	_, err := New(nil)
 	require.Error(t, err)
 }
+
+func TestFrontendBlockers(t *testing.T) {
+	observed := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	f := newTestFrontend(t, fakeReader{snap: &status.Snapshot{
+		Namespace: "mimir",
+		Groups: []status.Group{{Name: "ingester", Members: []status.Member{{
+			Name: "zone-a", Reason: "0 of 3 pods updated",
+			Blockers: []status.Blocker{
+				{Reason: "maxUnavailable budget exhausted: 1 unavailable, limit 1", ObservedAt: observed},
+				{Pod: "zone-a-0", Reason: "ZPDB denied deletion: <script>alert(1)</script>", ObservedAt: observed},
+			},
+		}}}},
+	}})
+	router := mux.NewRouter()
+	f.Register(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/status/", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	require.Contains(t, body, "maxUnavailable budget exhausted: 1 unavailable, limit 1")
+	require.Contains(t, body, "<code>zone-a-0</code>")
+	require.Contains(t, body, "Last attempt · 2026-10-06 12:00:00 UTC")
+	require.NotContains(t, body, "<script>")
+	require.Contains(t, body, "&lt;script&gt;")
+}
