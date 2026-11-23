@@ -227,10 +227,11 @@ func TestZpdbAdmissionDuringBootstrap(t *testing.T) {
 	createRolloutOperatorDeployment(t, ctx, api, path, nil)
 
 	zpdbs := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(namespace)
-	invalid := zoneAwarePodDisruptionBudget(namespace, "invalid", "mock", -1)
+	invalid := zoneAwarePodDisruptionBudget(namespace, "invalid", "mock", 1)
+	require.NoError(t, unstructured.SetNestedField(invalid.Object, int64(50), "spec", "maxUnavailablePercentage"))
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		_, err := zpdbs.Create(ctx, invalid, metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}})
-		assert.ErrorContains(c, err, "max unavailable must be 0 <= val")
+		assert.ErrorContains(c, err, "only one of maxUnavailable or maxUnavailablePercentage may be set")
 	}, time.Minute, time.Second)
 	_, err = zpdbs.Create(ctx, zoneAwarePodDisruptionBudget(namespace, "valid", "mock", 1), metav1.CreateOptions{})
 	require.NoError(t, err)
