@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -43,15 +44,18 @@ func newTLSServer(cfg config, logger log.Logger, cert tlscert.Certificate, metri
 	}, nil
 }
 
-func (s *tlsServer) Start() error {
+func (s *tlsServer) Start(ctx context.Context) error {
 	// Setup listeners first, so we can fail early if the port is in use.
 	httpListener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
 		return err
 	}
 
+	// Stop admission when leadership ends, even if controller initialization is still unwinding.
+	context.AfterFunc(ctx, func() { _ = s.srv.Close() })
+
 	go func() {
-		if err := s.srv.ServeTLS(httpListener, "", ""); err != nil {
+		if err := s.srv.ServeTLS(httpListener, "", ""); err != nil && err != http.ErrServerClosed {
 			level.Error(s.logger).Log("msg", "tls server terminated", "err", err)
 		}
 	}()

@@ -643,10 +643,10 @@ func maybeStartTLSServer(ctx context.Context, cfg config, wireComponentConfig fu
 
 		webHookListener := &tlscert.WebhookConfigurationListener{
 			OnValidatingWebhookConfiguration: func(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) error {
-				return tlscert.PatchCABundleOnValidatingWebhook(logger, coreKubeClient, cfg.kubeNamespace, cert.CA, webhook)
+				return tlscert.PatchCABundleOnValidatingWebhook(logger, coreKubeClient, cfg.kubeNamespace, cert.CA, webhook.DeepCopy())
 			},
 			OnMutatingWebhookConfiguration: func(webhook *admissionregistrationv1.MutatingWebhookConfiguration) error {
-				return tlscert.PatchCABundleOnMutatingWebhook(logger, coreKubeClient, cfg.kubeNamespace, cert.CA, webhook)
+				return tlscert.PatchCABundleOnMutatingWebhook(logger, coreKubeClient, cfg.kubeNamespace, cert.CA, webhook.DeepCopy())
 			},
 		}
 
@@ -701,7 +701,7 @@ func maybeStartTLSServer(ctx context.Context, cfg config, wireComponentConfig fu
 	tlsSrv.Handle(admission.PrepareDownscaleWebhookPath, admission.Serve(prepDownscaleAdmitFunc, logger, prepareDownscaleKubeClient, webhookHandlerTimeout))
 	tlsSrv.Handle(zpdb.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, nil, webhookHandlerTimeout))
 	tlsSrv.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(zpdbValidationFunc, logger, nil, webhookHandlerTimeout))
-	if err := tlsSrv.Start(); err != nil {
+	if err := tlsSrv.Start(ctx); err != nil {
 		fatal(fmt.Errorf("failed to start tls server: %w", err))
 	}
 	return nil
