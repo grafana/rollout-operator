@@ -6,13 +6,16 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -198,6 +201,48 @@ func TestRolloutOperatorStartsWithoutCRDs(t *testing.T) {
 	require.Eventually(t, metricsMatch(observedZPDB), time.Minute, time.Second, "operator did not observe ZPDB created after startup")
 	zpdbReady := regexp.MustCompile(`(?m)^rollout_operator_zpdb_config_observer_ready 1$`)
 	require.Eventually(t, metricsMatch(zpdbReady), time.Minute, time.Second, "ZPDB observer did not become ready")
+}
+
+func TestZpdbAdmissionDuringBootstrap(t *testing.T) {
+	ctx := t.Context()
+	cluster := createKindCluster(t, "rollout-operator:latest")
+	api := cluster.API()
+	namespace := corev1.NamespaceDefault
+	path := initManifestFiles(t, "webhooks-enabled")
+	createRolloutOperatorDependencies(t, ctx, api, cluster.ExtAPI(), path, true, true)
+
+	// Keep the operator's ZPDB cache unsynced while the API server can accept ZPDBs.
+	roles := api.RbacV1().Roles(namespace)
+	role, err := roles.Get(ctx, "rollout-operator-role", metav1.GetOptions{})
+	require.NoError(t, err)
+	role.Rules = slices.DeleteFunc(role.Rules, func(rule rbacv1.PolicyRule) bool {
+		return slices.Contains(rule.Resources, zoneAwarePodDisruptionBudgetSchema().Resource)
+	})
+	_, err = roles.Update(ctx, role, metav1.UpdateOptions{})
+	require.NoError(t, err)
+
+	validator := createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookZpdbValidation)
+	require.Equal(t, ptr(admissionregistrationv1.Fail), validator.Webhooks[0].FailurePolicy)
+	createValidatingWebhookConfiguration(t, api, ctx, path+yamlWebhookPodEviction)
+	createRolloutOperatorDeployment(t, ctx, api, path, nil)
+
+	zpdbs := cluster.DynK().Resource(zoneAwarePodDisruptionBudgetSchema()).Namespace(namespace)
+	invalid := zoneAwarePodDisruptionBudget(namespace, "invalid", "mock", -1)
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		_, err := zpdbs.Create(ctx, invalid, metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}})
+		assert.ErrorContains(c, err, "max unavailable must be 0 <= val")
+	}, time.Minute, time.Second)
+	_, err = zpdbs.Create(ctx, zoneAwarePodDisruptionBudget(namespace, "valid", "mock", 1), metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	pod := eventuallyGetFirstPod(ctx, t, api, "name=rollout-operator")
+	eviction := &policyv1beta1.Eviction{
+		ObjectMeta:    metav1.ObjectMeta{Name: pod, Namespace: namespace},
+		DeleteOptions: &metav1.DeleteOptions{DryRun: []string{metav1.DryRunAll}},
+	}
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		assert.ErrorContains(c, api.PolicyV1beta1().Evictions(namespace).Evict(ctx, eviction), "pod eviction controller caches are not initialized")
+	}, time.Minute, time.Second)
 }
 
 // TestRolloutHappyCaseWithZpdb performs pod updates via the rolling update controller and uses the zpdb to determine if the pod delete is safe or not

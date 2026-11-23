@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"net/http"
 	_ "net/http/pprof" // anonymous import to get the pprof handler registered
 	"os"
@@ -27,10 +26,8 @@ import (
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/metadata"
@@ -421,6 +418,23 @@ func runOperator(
 		evictionController.AllowMissingCRDs()
 	}
 	defer stopOnCancel(ctx, evictionController.Stop)()
+	defer stopOnCancel(ctx, func() { ready.Store(false) })()
+
+	publishReady := func() bool {
+		if err := setLeaderLabel(ctx, coreKubeClient, cfg, true); err != nil {
+			if ctx.Err() != nil {
+				return false
+			}
+			fatal(fmt.Errorf("failed to publish leader pod: %w", err))
+		}
+		ready.Store(true)
+		if ctx.Err() != nil {
+			ready.Store(false)
+			return false
+		}
+		return true
+	}
+
 	// Admission must be reachable before informer sync so a Fail-policy ZPDB can bootstrap.
 	if err := maybeStartTLSServer(ctx, cfg, wireComponentConfig, podHTTPClient, logger, coreKubeClient, restart, metrics, evictionController, webhookObserver); err != nil {
 		if ctx.Err() != nil {
@@ -428,21 +442,8 @@ func runOperator(
 		}
 		fatal(err)
 	}
-	defer stopOnCancel(ctx, func() { ready.Store(false) })()
-	if cfg.serverTLSEnabled {
-		if err := retryInitialization(ctx, logger, "publish leader pod", func() error {
-			return setLeaderLabel(ctx, coreKubeClient, cfg, true)
-		}); err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			fatal(err)
-		}
-		// Service routing uses pod readiness; eviction requests remain gated on their caches.
-		ready.Store(true)
-		if ctx.Err() != nil {
-			return
-		}
+	if cfg.serverTLSEnabled && !publishReady() {
+		return
 	}
 
 	if err := evictionController.Start(); err != nil {
@@ -483,21 +484,11 @@ func runOperator(
 		}
 		fatal(fmt.Errorf("failed to init controller: %w", err))
 	}
-	if !cfg.serverTLSEnabled {
-		if err := setLeaderLabel(ctx, coreKubeClient, cfg, true); err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			fatal(fmt.Errorf("failed to publish leader pod: %w", err))
-		}
-		ready.Store(true)
+	if !cfg.serverTLSEnabled && !publishReady() {
+		return
 	}
 	statusReader.Set(c)
-
-	defer stopOnCancel(ctx, func() {
-		ready.Store(false)
-		statusReader.Set(nil)
-	})()
+	defer stopOnCancel(ctx, func() { statusReader.Set(nil) })()
 
 	// Run and block until stopped.
 	c.Run()
@@ -638,33 +629,30 @@ func maybeStartTLSServer(ctx context.Context, cfg config, wireComponentConfig fu
 		fatal(errors.New("either self-signed certificate should be enabled or path to the certificate and key should be provided"))
 	}
 
-	var cert tlscert.Certificate
-	if err := retryInitialization(ctx, logger, "get TLS certificate", func() error {
-		cert, err = certProvider.Certificate(ctx)
-		return err
-	}); err != nil {
+	cert, err := certProvider.Certificate(ctx)
+	if err != nil {
 		return fmt.Errorf("failed to get certificate: %w", err)
 	}
 
 	checkAndWatchCertificate(cert, logger, restart)
 
-	var webHookListener *tlscert.WebhookConfigurationListener
 	if cfg.updateWebhooksWithSelfSignedCABundle {
 		if !cfg.serverSelfSignedCert {
 			fatal(errors.New("self-signed certificate should be enabled to update the CA bundle in the webhook configurations"))
 		}
 
-		webHookListener = &tlscert.WebhookConfigurationListener{
+		webHookListener := &tlscert.WebhookConfigurationListener{
 			OnValidatingWebhookConfiguration: func(webhook *admissionregistrationv1.ValidatingWebhookConfiguration) error {
-				return retryWebhookCAPatch(ctx, logger, "patch validating webhook CA bundle", func() error {
-					return tlscert.PatchCABundleOnValidatingWebhook(logger, coreKubeClient, cfg.kubeNamespace, cert.CA, webhook.DeepCopy())
-				})
+				return tlscert.PatchCABundleOnValidatingWebhook(logger, coreKubeClient, cfg.kubeNamespace, cert.CA, webhook)
 			},
 			OnMutatingWebhookConfiguration: func(webhook *admissionregistrationv1.MutatingWebhookConfiguration) error {
-				return retryWebhookCAPatch(ctx, logger, "patch mutating webhook CA bundle", func() error {
-					return tlscert.PatchCABundleOnMutatingWebhook(logger, coreKubeClient, cfg.kubeNamespace, cert.CA, webhook.DeepCopy())
-				})
+				return tlscert.PatchCABundleOnMutatingWebhook(logger, coreKubeClient, cfg.kubeNamespace, cert.CA, webhook)
 			},
+		}
+
+		// Start monitoring for validating webhook configurations and patch if required
+		if err := webhookObserver.Init(webHookListener); err != nil {
+			return err
 		}
 	}
 
@@ -714,49 +702,9 @@ func maybeStartTLSServer(ctx context.Context, cfg config, wireComponentConfig fu
 	tlsSrv.Handle(zpdb.PodEvictionWebhookPath, admission.Serve(podEvictionFunc, logger, nil, webhookHandlerTimeout))
 	tlsSrv.Handle(admission.ZpdbValidatorWebhookPath, admission.Serve(zpdbValidationFunc, logger, nil, webhookHandlerTimeout))
 	if err := tlsSrv.Start(); err != nil {
-		return fmt.Errorf("failed to start tls server: %w", err)
-	}
-	context.AfterFunc(ctx, func() { _ = tlsSrv.srv.Close() })
-	if webHookListener != nil {
-		// CA publication retries independently of workload and webhook informer synchronization.
-		go func() {
-			if err := webhookObserver.Init(webHookListener); err != nil && ctx.Err() == nil {
-				fatal(fmt.Errorf("failed to initialize webhook observer: %w", err))
-			}
-		}()
+		fatal(fmt.Errorf("failed to start tls server: %w", err))
 	}
 	return nil
-}
-
-func retryWebhookCAPatch(ctx context.Context, logger log.Logger, operation string, patch func() error) error {
-	return retryInitialization(ctx, logger, operation, func() error {
-		err := patch()
-		// Let the informer deliver the newer configuration instead of retrying a stale resource version.
-		if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
-			return nil
-		}
-		return err
-	})
-}
-
-func retryInitialization(ctx context.Context, logger log.Logger, operation string, initialize func() error) error {
-	return wait.PollUntilContextCancel(ctx, time.Second, true, func(ctx context.Context) (bool, error) {
-		if err := ctx.Err(); err != nil {
-			return false, err
-		}
-		err := initialize()
-		if err == nil {
-			return true, nil
-		}
-		var netErr net.Error
-		if !apierrors.IsTimeout(err) && !apierrors.IsServerTimeout(err) && !apierrors.IsServiceUnavailable(err) &&
-			!apierrors.IsTooManyRequests(err) && !apierrors.IsInternalError(err) && !apierrors.IsConflict(err) &&
-			!apierrors.IsNotFound(err) && !apierrors.IsForbidden(err) && !errors.As(err, &netErr) {
-			return false, err
-		}
-		level.Warn(logger).Log("msg", "initialization dependency unavailable; retrying", "operation", operation, "err", err)
-		return false, nil
-	})
 }
 
 func checkAndWatchCertificate(cert tlscert.Certificate, logger log.Logger, restart chan string) {

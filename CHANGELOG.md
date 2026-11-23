@@ -2,7 +2,7 @@
 
 ## main / unreleased
 
-* [ENHANCEMENT] Serve ZPDB validation before controller initialization so bootstrap can use `failurePolicy: Fail`. Deny pod evictions until configuration and pod caches synchronize, including with `-kubernetes.allow-missing-crds=true`. Retry transient certificate and CA publication failures.
+* [ENHANCEMENT] Serve ZPDB validation before controller initialization so bootstrap can use `failurePolicy: Fail`. Deny pod evictions until the ZPDB configuration and pod caches synchronize.
 
 * [ENHANCEMENT] Updated dependencies, including: #555
   * `github.com/grafana/dskit` from `v0.0.0-20260814134254-4a836a70f745` to `v0.0.0-20261113142543-e640b7cda9b5`
