@@ -107,7 +107,7 @@ To support scaling based on reference resource, rollout-operator needs to be all
     - patch
 ```
 
-When TLS is enabled, the operator serves admission and becomes ready before controller caches synchronize. This lets new cells use `failurePolicy: Fail` for ZPDB validation from the start. Flux may retry until the webhook Service and CA bundle are available. Pod evictions are denied until the ZPDB configuration and pod caches synchronize.
+When TLS is enabled, the operator serves admission and becomes ready before controller caches synchronize. This lets new cells use `failurePolicy: Fail` for ZPDB validation from the start. ZPDB requests may need to be retried until the webhook Service has a ready endpoint and its CA bundle is in place. Pod evictions are denied until the ZPDB configuration and pod caches synchronize.
 
 Controller initialization waits for ZPDB cache synchronization and any enabled ReplicaTemplate watch by default. To bootstrap before these CRDs or their RBAC permissions are installed, explicitly set `-kubernetes.allow-missing-crds=true`. Missing or forbidden custom resources are logged at info level while informers retry in the background. Pod evictions remain denied until the ZPDB configuration cache has synchronized, including when missing CRDs are allowed.
 
