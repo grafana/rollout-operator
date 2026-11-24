@@ -2,6 +2,11 @@
 
 ## main / unreleased
 
+## v0.41.2
+
+* [ENHANCEMENT] Rebuild the BoringCrypto image with updated Trixie glibc packages.
+* [ENHANCEMENT] Update `golang.org/x/net` to `v0.62.0`. #543
+
 ## v0.41.1
 
 * [ENHANCEMENT] Rebuild v0.41.0 with updated Go and distroless images.
