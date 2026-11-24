@@ -249,6 +249,8 @@ jobs:
     permissions:
       contents: write # Needed to be able to create releases.
       id-token: write
+    outputs:
+      images: ${{ steps.digests.outputs.images }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -296,6 +298,26 @@ jobs:
           # docker.io/grafana. The Publish release step below intentionally does
           # not set IMAGE_PREFIX, so the release notes keep the public grafana/ name.
           IMAGE_PREFIX: us-docker.pkg.dev/grafanalabs-global/dockerhub-rollout-operator-prod-mirror
+      # sign-image signs by digest, so resolve the pushed multi-arch index digests.
+      - name: Resolve image digests
+        id: digests
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          images='{}'
+          for img in rollout-operator rollout-operator-boringcrypto; do
+            ref="${IMAGE_PREFIX}/${img}"
+            digest="$(docker buildx imagetools inspect "${ref}:${IMAGE_TAG}" --format '{{.Manifest.Digest}}')"
+            if [[ "${digest}" != sha256:* ]]; then
+              echo "::error::failed to resolve digest for ${ref}:${IMAGE_TAG}, got: ${digest}"
+              exit 1
+            fi
+            images="$(jq -c --arg k "${img}" --arg v "${ref}@${digest}" '.[$k] = $v' <<< "${images}")"
+          done
+          echo "images=${images}" >> "$GITHUB_OUTPUT"
+        env:
+          IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
+          IMAGE_PREFIX: us-docker.pkg.dev/grafanalabs-global/dockerhub-rollout-operator-prod-mirror
       # Publishing to Docker Hub via the mirror is asynchronous, so wait for the
       # images to appear before creating the release (whose notes reference them).
       - name: Wait for images on Docker Hub
@@ -315,3 +337,20 @@ jobs:
         env:
           IMAGE_TAG: ${{ steps.image_tag.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
+
+  # Separate job so a signing failure doesn't block the release.
+  sign-image:
+    needs: push-image
+    if: github.ref_type == 'tag'
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ rollout-operator, rollout-operator-boringcrypto ]
+    permissions:
+      artifact-metadata: write # Write the storage record for the GitHub attestation.
+      attestations: write # Write the SLSA provenance attestation to the GitHub attestations store.
+      contents: read
+      id-token: write # Keyless cosign OIDC, provenance signing, and WIF auth to GAR.
+    uses: grafana/shared-workflows/.github/workflows/sign-and-attest.yml@030bdd10e567ae3cc62533c5b356dd151e96e323 # main
+    with:
+      image: ${{ fromJSON(needs.push-image.outputs.images)[matrix.image] }}
